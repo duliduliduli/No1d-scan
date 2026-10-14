@@ -5,29 +5,36 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NOID Scan</title>
 <style>
-  /* Dark-only console look with a glowing green accent. */
-  :root { color-scheme:dark; --bg:#0a0a0a; --fg:#ededed; --muted:#8a8a8a; --card:#141414; --line:#232323; --accent:#3dff8f; --glow:0 0 8px rgba(61,255,143,.55) }
+  /* Retro control-panel look: teal terminal panels on a circuit-board background. */
+  :root { color-scheme:dark; --bg:#071113; --fg:#e4eeee; --muted:#7f9a9b; --card:#0c1a1d; --head:#10262a; --line:#1b3438; --accent:#5ee8d2; --gold:#f7b733; --glow:0 0 10px rgba(94,232,210,.35); --mono:ui-monospace, 'IBM Plex Mono', Menlo, monospace }
   * { box-sizing:border-box }
-  body { margin:0; background:radial-gradient(1200px 500px at 50% -200px, rgba(61,255,143,.07), transparent) var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; min-height:100vh }
-  a { color:var(--accent); text-decoration:none } a:hover { text-decoration:underline }
+  body { margin:0; color:var(--fg); font:14px/1.5 system-ui, sans-serif; min-height:100vh;
+    background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%235ee8d2' stroke-opacity='.09'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%235ee8d2' fill-opacity='.18' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
+  a { color:var(--accent); text-decoration:none } a:hover { text-shadow:var(--glow) }
   header, main, footer { max-width:1100px; margin:0 auto; padding:16px }
-  header { display:flex; gap:16px; align-items:center; flex-wrap:wrap }
-  header h1 { margin:0; font-size:20px } header h1 a { color:var(--fg) }
-  header h1 a::before { content:''; display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:var(--glow); margin-right:10px; vertical-align:middle }
+  header { display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--line) }
+  header h1 { margin:0; font:700 15px var(--mono); letter-spacing:.14em; text-transform:uppercase } header h1 a { color:var(--accent) }
+  header h1 a::before { content:''; display:inline-block; width:8px; height:8px; background:var(--accent); box-shadow:var(--glow); margin-right:10px; vertical-align:1px }
   form { flex:1; display:flex; min-width:240px }
-  input { flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--fg); font:inherit; outline:none }
+  input { flex:1; padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono); outline:none }
   input:focus { border-color:var(--accent); box-shadow:var(--glow) }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:16px; overflow-x:auto }
-  .stat small { color:var(--muted); display:block } .stat b { font-size:22px; font-weight:600; overflow-wrap:anywhere }
-  table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top }
-  th { color:var(--muted); font-weight:500; white-space:nowrap } td { word-break:break-all }
-  .mono { font-family:ui-monospace, monospace; font-size:13px } .muted { color:var(--muted) }
-  h2 { font-size:16px; margin:0 0 10px }
-  svg { width:100%; height:90px; display:block } polyline { fill:none; stroke:var(--accent); stroke-width:1.5; filter:drop-shadow(0 0 4px var(--accent)) }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:14px 16px; margin-bottom:14px; overflow-x:auto }
+  .stat small { color:var(--muted); display:block; font:10px var(--mono); letter-spacing:.14em; text-transform:uppercase }
+  .stat b { font:700 20px var(--mono); overflow-wrap:anywhere }
+  .grid:first-child .card:nth-child(2) b { color:var(--gold) }
+  .stat b .mono { font-size:inherit }
+  table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { color:var(--muted); font:500 11px var(--mono); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap } td { word-break:break-all }
+  tr:hover td { background:rgba(94,232,210,.04) }
+  .mono { font-family:var(--mono); font-size:13px } .muted { color:var(--muted) }
+  /* Card titles become panel header strips. */
+  h2 { margin:-14px -16px 12px; padding:10px 16px; background:var(--head); border-bottom:1px solid var(--line); color:var(--accent); font:700 12px var(--mono); letter-spacing:.14em; text-transform:uppercase }
+  h2::before { content:''; display:inline-block; width:7px; height:7px; background:var(--accent); box-shadow:var(--glow); margin-right:9px; vertical-align:1px }
+  h2 small { color:var(--muted); font-weight:400; letter-spacing:.05em; text-transform:none }
+  svg { width:100%; height:90px; display:block } polyline { fill:none; stroke:var(--accent); stroke-width:1.5; filter:drop-shadow(0 0 3px var(--accent)) }
   polygon { fill:url(#glow-fill) }
-  a:hover { text-shadow:var(--glow) }
-  footer { color:var(--muted); font-size:13px }
+  footer { color:var(--muted); font:12px var(--mono) }
 </style>
 </head>
 <body>
@@ -76,7 +83,7 @@ function spark(title, pts) {
   const lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
   const line = ys.map((y, i) => `${(i / (ys.length - 1)) * 300},${88 - ((y - lo) / span) * 84}`).join(' ');
   return `<div class="card"><h2>${esc(title)} <small class="muted">${esc(lo.toLocaleString())} – ${esc(hi.toLocaleString())}</small></h2>
-    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3dff8f" stop-opacity=".25"/><stop offset="1" stop-color="#3dff8f" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
+    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ee8d2" stop-opacity=".25"/><stop offset="1" stop-color="#5ee8d2" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
 }
 
 const pages = {
