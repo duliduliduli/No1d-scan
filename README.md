@@ -43,4 +43,15 @@ Run the indexer continuously. Any block body it misses is gone once the node pru
 
 ## Monetization
 
-Set `DONATE_ADDRESS` to show a donation address. Ads, sponsorships and a paid API tier can come later, once there is traffic. Don't take custody of user funds.
+Set `DONATE_ADDRESS` to show a donation address in the footer.
+
+**Paid API keys, bought in NOID.** Set `PAY_ADDRESS` to an `o1…` address you control and the `/api-access` page goes live. Each buyer gets a quote with a unique fractional amount (e.g. `25.004217 NOID`); when a slot with exactly that value lands on `PAY_ADDRESS`, the indexer issues a 32-hex key automatically. Keys go in an `x-api-key` header or `?key=` and raise the rate limit to `PAID_RATE_LIMIT`.
+
+| Env | Default | |
+|---|---|---|
+| `PAY_ADDRESS` | – | Your receiving address (watch-only: the server never holds a secret) |
+| `KEY_PRICE_NOID` | `25` | Price per key |
+| `KEY_DAYS` | `30` | Key lifetime |
+| `PAID_RATE_LIMIT` | `3000` | Requests/min for paid keys |
+
+Unpaid quotes expire after 24 h. A payment that arrives late or with the wrong amount is not matched; handle those by hand (`sqlite3 noid.db "select * from orders where created > ..."`) and spend the funds normally from your wallet. Payments are visible on-chain like any NOID transfer.

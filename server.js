@@ -5,12 +5,20 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+const { randomBytes, randomInt } = require('node:crypto');
 
 const RPC_URL = process.env.RPC_URL || 'http://127.0.0.1:9601';
 const RPC_TOKEN = process.env.RPC_TOKEN || '';
 const RETAINED = 42;
 const RATE_LIMIT = Number(process.env.RATE_LIMIT || 120); // requests per IP per minute
 const CACHE_MS = Number(process.env.CACHE_MS ?? 5000); // API responses are reused this long; blocks change ~once a minute
+// Paid API keys, bought in NOID. Set PAY_ADDRESS (watch-only: the server never holds keys) to enable.
+const PAY = process.env.PAY_ADDRESS && {
+  address: process.env.PAY_ADDRESS,
+  price_micronoid: Math.round(Number(process.env.KEY_PRICE_NOID || 25) * 1e6),
+  days: Number(process.env.KEY_DAYS || 30),
+  rate_limit: Number(process.env.PAID_RATE_LIMIT || 3000),
+};
 
 const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'noid.db'));
 db.exec(`
@@ -18,6 +26,7 @@ db.exec(`
   create table if not exists blocks (height integer primary key, hash text not null, details text not null);
   create index if not exists blocks_hash on blocks(hash);
   create table if not exists stats (height integer primary key, ts integer, data text not null);
+  create table if not exists orders (id text primary key, amount integer unique not null, created integer not null, paid_slot text unique, key text unique, expires integer);
 `);
 const q = {
   hashAt: db.prepare('select hash from blocks where height = ?'),
@@ -27,6 +36,13 @@ const q = {
   hasStat: db.prepare('select 1 from stats where height = ?'),
   addStat: db.prepare('insert or replace into stats (height, ts, data) values (?, ?, ?)'),
   charts: db.prepare('select height, ts, data from stats order by height desc limit 500'),
+  newOrder: db.prepare('insert into orders (id, amount, created) values (?, ?, ?)'),
+  order: db.prepare('select id, amount, created, key, expires from orders where id = ?'),
+  pending: db.prepare('select count(*) n from orders where paid_slot is null'),
+  expireOrders: db.prepare('delete from orders where paid_slot is null and created < ?'),
+  unpaidByAmount: db.prepare('select id from orders where amount = ? and paid_slot is null'),
+  markPaid: db.prepare('update orders set paid_slot = ?, key = ?, expires = ? where id = ?'),
+  keyExpiry: db.prepare('select expires from orders where key = ?'),
 };
 
 async function rpc(method, params = []) {
@@ -64,7 +80,21 @@ async function tick() {
     };
     q.addStat.run(tip, header?.timestamp ?? null, JSON.stringify(data));
   }
+  if (PAY) await settleOrders();
   Object.assign(indexer, { tip, at: Date.now() });
+}
+
+// Match incoming slots on the pay address to pending orders by exact amount. creation_id is unique per
+// slot, so a slot can only ever pay one order.
+async function settleOrders() {
+  q.expireOrders.run(Date.now() - 24 * 3600_000);
+  for (const slot of await rpc('getSlotsByOwner', [PAY.address])) {
+    const order = q.unpaidByAmount.get(Number(slot.value));
+    if (!order) continue;
+    try {
+      q.markPaid.run(String(slot.creation_id), randomBytes(16).toString('hex'), Date.now() + PAY.days * 86400_000, order.id);
+    } catch {} // slot already used for another order
+  }
 }
 
 // Input validation at the public boundary.
@@ -99,7 +129,7 @@ const routes = {
     const [chain, state, node, peers, mining] = await Promise.all([
       rpc('getChainInfo'), rpc('getStateInfo'), rpc('getNodeStatus'), rpc('getPeerCount'), rpc('getMiningInfo'),
     ]);
-    return { chain, state, node, peers, mining, indexer, donate: process.env.DONATE_ADDRESS || null };
+    return { chain, state, node, peers, mining, indexer, donate: process.env.DONATE_ADDRESS || null, pay: PAY && { price_noid: PAY.price_micronoid / 1e6, days: PAY.days, rate_limit: PAY.rate_limit, free_rate_limit: RATE_LIMIT } };
   },
 
   async blocks(_, params) {
@@ -143,6 +173,21 @@ const routes = {
     return rpc('getRecentTransactions', [Math.max(Number(params.get('page')) || 1, 1), 25, null]);
   },
 
+  async pay(id) {
+    if (!PAY) return null;
+    if (id === 'new') {
+      if (q.pending.get().n >= 1000) throw Object.assign(new Error('too many pending orders, try later'), { status: 503 });
+      for (let i = 0; i < 5; i++) {
+        const order = randomBytes(6).toString('hex');
+        try { q.newOrder.run(order, PAY.price_micronoid + randomInt(1, 10_000), Date.now()); } catch { continue; } // amount taken
+        return routes.pay(order);
+      }
+      throw new Error('could not allocate an order amount');
+    }
+    const o = q.order.get(id);
+    return o && { ...o, address: PAY.address, amount_noid: (o.amount / 1e6).toFixed(6), paid: !!o.key };
+  },
+
   async charts() {
     return q.charts.all().reverse().map((r) => ({ height: r.height, ts: r.ts, ...JSON.parse(r.data) }));
   },
@@ -182,11 +227,15 @@ async function handle(req, res) {
 
     // Behind Cloudflare the real client IP is in cf-connecting-ip; lock the droplet firewall to Cloudflare IPs so it cannot be spoofed.
     const ip = process.env.TRUST_PROXY ? req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
-    const n = (hits.get(ip) || 0) + 1;
-    hits.set(ip, n);
-    if (n > RATE_LIMIT) return send(429, { error: 'rate limited' });
+    const key = req.headers['x-api-key'] || url.searchParams.get('key');
+    const paid = key && q.keyExpiry.get(key)?.expires > Date.now();
+    const n = (hits.get(paid ? key : ip) || 0) + 1;
+    hits.set(paid ? key : ip, n);
+    if (n > (paid ? PAY.rate_limit : RATE_LIMIT)) return send(429, { error: 'rate limited' });
+    res.setHeader('x-tier', paid ? 'paid' : 'free');
 
-    const hit = cache.get(req.url);
+    if (url.pathname.startsWith('/api/pay/')) res.setHeader('cache-control', 'no-store');
+    const hit = !url.pathname.startsWith('/api/pay/') && cache.get(req.url);
     if (hit && hit.until > Date.now()) return send(200, hit.body, { 'cache-control': `public, max-age=${CACHE_MS / 1000 | 0}`, 'x-cache': 'HIT' });
 
     const [, , name, id = ''] = url.pathname.split('/');
@@ -194,6 +243,7 @@ async function handle(req, res) {
     if (!route) return send(404, { error: 'unknown endpoint' });
     const out = await route(decodeURIComponent(id), url.searchParams);
     if (out == null) return send(404, { error: 'not found' });
+    if (name === 'pay') return send(200, out);
     if (CACHE_MS > 0) cache.set(req.url, { until: Date.now() + CACHE_MS, body: out });
     send(200, out, { 'cache-control': `public, max-age=${CACHE_MS / 1000 | 0}`, 'x-cache': 'MISS' });
   } catch (e) {

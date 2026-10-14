@@ -11,6 +11,7 @@ Environment=DB_PATH=/var/lib/noid-scan/noid.db
 Environment=PORT=8080
 Environment=TRUST_PROXY=1
 # Environment=DONATE_ADDRESS=o1...
+# Environment=PAY_ADDRESS=o1...   # enables paid API keys (see README)
 ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.js
 Restart=always
 StateDirectory=noid-scan

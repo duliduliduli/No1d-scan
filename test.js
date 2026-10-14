@@ -5,6 +5,8 @@ const http = require('node:http');
 
 const H = (n, salt = '') => require('node:crypto').createHash('sha256').update(`${n}${salt}`).digest('hex');
 const ADDR = 'o1qqqqqqqqqqqq';
+const PAY_ADDR = 'o1payqqqqqqqq';
+let paySlots = [];
 let tip = 99, fork = ''; // `fork` changes hashes from height 98 up to simulate a reorg
 const hash = (h) => H(h, h >= 98 ? fork : '');
 const header = (h) => (h <= tip ? { height: h, hash: hash(h), prev_hash: hash(h - 1), timestamp: 1700000000 + h * 60 } : null);
@@ -19,7 +21,7 @@ const node = {
   getChainInfo: () => ({ height: tip, active_slot_count: 10, circulating_supply_micronoid: '123000000' }),
   getPeerCount: () => 8,
   getMiningInfo: () => ({ difficulty_bits: 30 }),
-  getSlotsByOwner: () => [{ slot_index: 1, value: '9007199254740993' }, { slot_index: 2, value: 7 }],
+  getSlotsByOwner: ([a]) => (a === PAY_ADDR ? paySlots : [{ slot_index: 1, value: '9007199254740993' }, { slot_index: 2, value: 7 }]),
   getRecentTransactions: () => ({ total: 0, transactions: [] }),
   getStateInfo: () => ({}), getNodeStatus: () => ({}),
 };
@@ -36,6 +38,8 @@ test('indexer + api', async (t) => {
   await new Promise((r) => rpcServer.listen(0, r));
   process.env.RPC_URL = `http://127.0.0.1:${rpcServer.address().port}`;
   process.env.DB_PATH = ':memory:';
+  process.env.PAY_ADDRESS = PAY_ADDR;
+  process.env.KEY_PRICE_NOID = '25';
   const { server, tick, db } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
   const get = async (p) => { const r = await fetch(`http://127.0.0.1:${server.address().port}/api/${p}`); return [r.status, await r.json(), r.headers]; };
@@ -86,6 +90,19 @@ test('indexer + api', async (t) => {
   // Second identical request within CACHE_MS is served from memory.
   assert.strictEqual((await get('stats'))[2].get('x-cache'), 'MISS');
   assert.strictEqual((await get('stats'))[2].get('x-cache'), 'HIT');
+
+  // Buy an API key with NOID: unique amount -> matching slot appears -> key issued.
+  const [, order] = await get('pay/new');
+  assert.ok(order.amount > 25e6 && order.amount < 25.01e6 && order.paid === false && order.address === PAY_ADDR);
+  paySlots = [{ slot_index: 9, value: String(order.amount), creation_id: 'c1' }, { slot_index: 10, value: String(order.amount), creation_id: 'c2' }];
+  await tick();
+  const [, paid] = await get(`pay/${order.id}`);
+  assert.ok(paid.paid && /^[0-9a-f]{32}$/.test(paid.key) && paid.expires > Date.now());
+  await tick();
+  assert.strictEqual((await get(`pay/${order.id}`))[1].key, paid.key, 'a second pass does not re-issue');
+  assert.strictEqual((await get(`stats?key=${paid.key}`))[2].get('x-tier'), 'paid');
+  assert.strictEqual((await get('stats?key=bogus'))[2].get('x-tier'), 'free');
+  assert.strictEqual((await get('pay/nope'))[0], 404);
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
