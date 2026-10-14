@@ -180,7 +180,8 @@ async function handle(req, res) {
     if (req.method !== 'GET') return send(405, { error: 'GET only' });
     if (!url.pathname.startsWith('/api/')) return send(200, fs.readFileSync(INDEX));
 
-    const ip = process.env.TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
+    // Behind Cloudflare the real client IP is in cf-connecting-ip; lock the droplet firewall to Cloudflare IPs so it cannot be spoofed.
+    const ip = process.env.TRUST_PROXY ? req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
     const n = (hits.get(ip) || 0) + 1;
     hits.set(ip, n);
     if (n > RATE_LIMIT) return send(429, { error: 'rate limited' });
