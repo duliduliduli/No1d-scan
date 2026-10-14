@@ -6,9 +6,9 @@
 <title>NOID Scan</title>
 <style>
   /* Retro control-panel look: teal terminal panels on a circuit-board background. */
-  :root { color-scheme:dark; --bg:#020607; --fg:#e4eeee; --muted:#7f9a9b; --card:#071113; --head:#0b1b1e; --line:#152a2d; --accent:#a8f5e9; --gold:#f7b733; --glow:0 0 10px rgba(168,245,233,.35); --mono:ui-monospace, 'IBM Plex Mono', Menlo, monospace }
+  :root { color-scheme:dark; --bg:#020607; --fg:#f3f8f8; --muted:#a9c0c1; --card:#071113; --head:#0b1b1e; --line:#152a2d; --accent:#a8f5e9; --gold:#f7b733; --glow:0 0 10px rgba(168,245,233,.35); --mono:ui-monospace, 'IBM Plex Mono', Menlo, monospace }
   * { box-sizing:border-box }
-  body { margin:0; color:var(--fg); font:14px/1.5 system-ui, sans-serif; min-height:100vh;
+  body { margin:0; color:var(--fg); font:15px/1.55 system-ui, sans-serif; min-height:100vh;
     background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%23a8f5e9' stroke-opacity='.09'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%23a8f5e9' fill-opacity='.18' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
   a { color:var(--accent); text-decoration:none } a:hover { text-shadow:var(--glow) }
   header, main, footer { max-width:1100px; margin:0 auto; padding:16px }
@@ -17,24 +17,26 @@
   header h1 a::before { content:''; display:inline-block; width:8px; height:8px; background:var(--accent); box-shadow:var(--glow); margin-right:10px; vertical-align:1px }
   form { flex:1; display:flex; min-width:240px }
   input { flex:1; padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono); outline:none }
+  input::placeholder { color:var(--muted) }
   input:focus { border-color:var(--accent); box-shadow:var(--glow) }
   .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px }
   .card { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:14px 16px; margin-bottom:14px; overflow-x:auto }
-  .stat small { color:var(--muted); display:block; font:10px var(--mono); letter-spacing:.14em; text-transform:uppercase }
+  .stat small { color:var(--muted); display:block; font:12px var(--mono); letter-spacing:.08em; text-transform:uppercase }
   .stat b { font:700 20px var(--mono); overflow-wrap:anywhere }
   .grid:first-child .card:nth-child(2) b { color:var(--gold) }
   .stat b .mono { font-size:inherit }
   table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top }
-  th { color:var(--muted); font:500 11px var(--mono); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap } td { word-break:break-all }
+  th { color:var(--muted); font:600 12px var(--mono); letter-spacing:.06em; text-transform:uppercase; white-space:nowrap } td { word-break:break-all }
+  .list td { white-space:nowrap } .list td .mono { display:inline-block; max-width:26ch; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom }
   tr:hover td { background:rgba(168,245,233,.04) }
-  .mono { font-family:var(--mono); font-size:13px } .muted { color:var(--muted) }
+  .mono { font-family:var(--mono); font-size:14px } .muted { color:var(--muted) }
   /* Card titles become panel header strips. */
-  h2 { margin:-14px -16px 12px; padding:10px 16px; background:var(--head); border-bottom:1px solid var(--line); color:var(--accent); font:700 12px var(--mono); letter-spacing:.14em; text-transform:uppercase }
+  h2 { margin:-14px -16px 12px; padding:10px 16px; background:var(--head); border-bottom:1px solid var(--line); color:var(--accent); font:700 13px var(--mono); letter-spacing:.1em; text-transform:uppercase }
   h2::before { content:''; display:inline-block; width:7px; height:7px; background:var(--accent); box-shadow:var(--glow); margin-right:9px; vertical-align:1px }
   h2 small { color:var(--muted); font-weight:400; letter-spacing:.05em; text-transform:none }
   svg { width:100%; height:90px; display:block } polyline { fill:none; stroke:var(--accent); stroke-width:1.5; filter:drop-shadow(0 0 3px var(--accent)) }
   polygon { fill:url(#glow-fill) }
-  footer { color:var(--muted); font:12px var(--mono) }
+  footer { color:var(--muted); font:13px/1.6 var(--mono) }
 </style>
 </head>
 <body>
@@ -74,7 +76,7 @@ function val(k, v) {
 }
 const kv = (o) => `<table>${Object.entries(o || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${val(k, v)}</td></tr>`).join('')}</table>`;
 const rows = (list, cols) => list?.length
-  ? `<table><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c) => `<td>${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
+  ? `<table class="list"><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c) => `<td>${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
   : '<p class="muted">Nothing here.</p>';
 
 function spark(title, pts) {
