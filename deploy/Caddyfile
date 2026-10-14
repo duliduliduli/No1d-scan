@@ -1,5 +1,9 @@
-# Caddy fetches and renews the TLS certificate automatically.
-explorer.example.com {
+# Caddy fetches and renews the TLS certificate automatically once DNS points here.
+parano1d-scan.com {
 	encode gzip
 	reverse_proxy 127.0.0.1:8080
+}
+
+www.parano1d-scan.com {
+	redir https://parano1d-scan.com{uri} permanent
 }
