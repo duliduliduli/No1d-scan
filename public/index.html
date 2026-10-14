@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOID Scan</title>
+<style>
+  :root { --bg:#fafafa; --fg:#151515; --muted:#6b6b6b; --card:#fff; --line:#e4e4e4; --accent:#3b5bdb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#ececec; --muted:#9a9a9a; --card:#1a1a1a; --line:#2c2c2c; --accent:#8ea4ff; } }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif }
+  a { color:var(--accent); text-decoration:none } a:hover { text-decoration:underline }
+  header, main, footer { max-width:1100px; margin:0 auto; padding:16px }
+  header { display:flex; gap:16px; align-items:center; flex-wrap:wrap }
+  header h1 { margin:0; font-size:20px } header h1 a { color:var(--fg) }
+  form { flex:1; display:flex; min-width:240px }
+  input { flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:inherit }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px; overflow-x:auto }
+  .stat small { color:var(--muted); display:block } .stat b { font-size:18px; word-break:break-all }
+  table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { color:var(--muted); font-weight:500; white-space:nowrap } td { word-break:break-all }
+  .mono { font-family:ui-monospace, monospace; font-size:13px } .muted { color:var(--muted) }
+  h2 { font-size:16px; margin:0 0 10px }
+  svg { width:100%; height:90px; display:block } polyline { fill:none; stroke:var(--accent); stroke-width:1.5 }
+  footer { color:var(--muted); font-size:13px }
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="/" data-link>NOID Scan</a></h1>
+  <form id="search"><input name="q" placeholder="Height, block hash, txid or o1… address" aria-label="Search" autocomplete="off"></form>
+</header>
+<main id="app" aria-live="polite"></main>
+<footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them.</footer>
+<script>
+const app = document.getElementById('app');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const api = async (p) => { const r = await fetch('/api/' + p); const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; };
+
+// μNOID integer (number or decimal string) -> "1.234567 NOID", without float rounding.
+function noid(v) {
+  if (v == null || v === '') return '–';
+  const n = BigInt(v), neg = n < 0n, a = neg ? -n : n;
+  const frac = String(a % 1000000n).padStart(6, '0').replace(/0+$/, '');
+  return `${neg ? '-' : ''}${(a / 1000000n).toLocaleString('en-US')}${frac ? '.' + frac : ''} NOID`;
+}
+const when = (t) => t ? new Date((t < 1e12 ? t * 1000 : t)).toLocaleString() : '–';
+const short = (h) => h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '–';
+const link = (type, id, text) => `<a href="/${type}/${encodeURIComponent(id)}" data-link class="mono">${esc(text ?? id)}</a>`;
+
+// Generic renderer so unknown/new node fields still show up.
+function val(k, v) {
+  if (v == null) return '<span class="muted">–</span>';
+  if (k.endsWith('_micronoid') || k === 'value') return esc(noid(v));
+  if (k === 'timestamp') return esc(when(v));
+  if (typeof v === 'string' && /^o1[0-9a-z]{6,}$/.test(v)) return link('address', v);
+  if (k === 'prev_hash' || (k === 'hash' && /^[0-9a-f]{64}$/.test(v))) return link('block', v);
+  if (/^(tx_hash|txid)$/.test(k)) return link('tx', v);
+  if (k === 'height' || k === 'block_height') return link('block', v);
+  if (typeof v === 'object') return `<pre class="mono">${esc(JSON.stringify(v, null, 2))}</pre>`;
+  return `<span class="mono">${esc(v)}</span>`;
+}
+const kv = (o) => `<table>${Object.entries(o || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${val(k, v)}</td></tr>`).join('')}</table>`;
+const rows = (list, cols) => list?.length
+  ? `<table><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c) => `<td>${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
+  : '<p class="muted">Nothing here.</p>';
+
+function spark(title, pts) {
+  const ys = pts.map((p) => Number(p)).filter(Number.isFinite);
+  if (ys.length < 2) return `<div class="card"><h2>${esc(title)}</h2><p class="muted">Collecting data…</p></div>`;
+  const lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
+  const line = ys.map((y, i) => `${(i / (ys.length - 1)) * 300},${88 - ((y - lo) / span) * 84}`).join(' ');
+  return `<div class="card"><h2>${esc(title)} <small class="muted">${esc(lo.toLocaleString())} – ${esc(hi.toLocaleString())}</small></h2>
+    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><polyline points="${line}"/></svg></div>`;
+}
+
+const pages = {
+  async home() {
+    const [s, b, t, c] = await Promise.all([api('stats'), api('blocks?limit=15'), api('txs').catch(() => null), api('charts')]);
+    const stat = (k, v) => `<div class="card stat"><small>${k}</small><b>${v}</b></div>`;
+    const gaps = c.slice(1).map((p, i) => p.ts && c[i].ts ? p.ts - c[i].ts : NaN);
+    app.innerHTML = `
+      <div class="grid">
+        ${stat('Height', link('block', s.chain.height, Number(s.chain.height).toLocaleString()))}
+        ${stat('Circulating supply', esc(noid(s.chain.circulating_supply_micronoid)))}
+        ${stat('Block reward', esc(noid(s.mining.block_reward_micronoid)))}
+        ${stat('Active slots', esc(Number(s.state.active_slots).toLocaleString()) + ` <small class="muted">${esc(s.state.fill_pct)}% full</small>`)}
+        ${stat('Difficulty bits', esc(s.mining.difficulty_bits))}
+        ${stat('Peers', esc(s.peers))}
+        ${stat('Node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage))}
+        ${stat('State size', esc(s.state.state_size_human))}
+      </div>
+      <div class="grid">
+        ${spark('Block time (s)', gaps)}
+        ${spark('Difficulty bits', c.map((p) => p.difficulty_bits))}
+        ${spark('Active slots', c.map((p) => p.active_slot_count))}
+        ${spark('Peers', c.map((p) => p.peers))}
+      </div>
+      <div class="card"><h2>Latest blocks</h2>${rows(b.blocks, ['height', 'hash', 'timestamp', 'miner', 'active_slot_count'])}
+        <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p></div>
+      ${t ? `<div class="card"><h2>Recent transactions <small class="muted">retained from height ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, Object.keys(t.transactions?.[0] || {}))}</div>` : ''}`;
+    if (s.donate) document.getElementById('foot').innerHTML += `<p>Support this explorer: ${link('address', s.donate)}</p>`;
+  },
+  async blocks(before) {
+    const b = await api(`blocks?limit=50&before=${encodeURIComponent(before)}`);
+    app.innerHTML = `<div class="card"><h2>Blocks</h2>${rows(b.blocks, ['height', 'hash', 'timestamp', 'miner', 'indexed'])}
+      <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p></div>`;
+  },
+  async block(id) {
+    const b = await api('block/' + encodeURIComponent(id));
+    const txs = Object.values(b.retained || {}).find(Array.isArray);
+    app.innerHTML = `<div class="card"><h2>Block ${esc(b.header.height)}</h2>${kv(b.header)}</div>
+      <div class="card"><h2>Body ${b.archived ? '<small class="muted">(archived by this explorer)</small>' : ''}</h2>
+        ${b.retained ? kv(Object.fromEntries(Object.entries(b.retained).filter(([, v]) => !Array.isArray(v)))) : '<p class="muted">Body pruned by the network and not captured here. The header above is permanent.</p>'}</div>
+      ${txs ? `<div class="card"><h2>Transactions (${txs.length})</h2>${rows(txs, Object.keys(txs[0] || {}))}</div>` : ''}`;
+  },
+  async tx(id) {
+    const t = await api('tx/' + encodeURIComponent(id));
+    const { details, ...ptr } = t;
+    app.innerHTML = `<div class="card"><h2>Transaction</h2>${kv(ptr)}</div>
+      <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
+  },
+  async address(id, page = 1) {
+    const a = await api(`address/${encodeURIComponent(id)}?page=${page}`);
+    const { transactions, ...summary } = a.activity || {};
+    app.innerHTML = `<div class="card"><h2>Address</h2><p class="mono">${esc(a.address)}</p>
+        <div class="grid"><div class="stat"><small>Balance (Live State)</small><b>${esc(noid(a.balance_micronoid))}</b></div>
+        <div class="stat"><small>Live slots</small><b>${a.slots.length}</b></div></div></div>
+      <div class="card"><h2>Live slots</h2>${rows(a.slots, ['slot_index', 'value', 'creation_id'])}</div>
+      <div class="card"><h2>Recent activity</h2>${kv(summary)}${rows(transactions, Object.keys(transactions?.[0] || {}))}</div>`;
+  },
+};
+
+async function render() {
+  const [, type, id] = location.pathname.split('/');
+  app.innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    await (pages[type] && id ? pages[type](decodeURIComponent(id)) : pages.home());
+  } catch (e) {
+    app.innerHTML = `<div class="card"><h2>Not found</h2><p class="muted">${esc(e.message)}</p></div>`;
+  }
+}
+const go = (href) => { history.pushState(null, '', href); render(); };
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-link]');
+  if (a && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(a.getAttribute('href')); }
+});
+document.getElementById('search').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = e.target.q.value.trim();
+  if (!q) return;
+  try { const r = await api('search?q=' + encodeURIComponent(q)); go(`/${r.type}/${r.id}`); e.target.q.value = ''; }
+  catch { app.innerHTML = `<div class="card"><h2>No match</h2><p class="muted">Nothing found for ${esc(q)}.</p></div>`; }
+});
+addEventListener('popstate', render);
+render();
+</script>
+</body>
+</html>

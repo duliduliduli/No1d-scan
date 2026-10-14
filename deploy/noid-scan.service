@@ -1,0 +1,22 @@
+[Unit]
+Description=NOID Scan explorer (indexer + API + UI)
+After=network-online.target parano1d.service
+Wants=parano1d.service
+
+[Service]
+User=noidscan
+WorkingDirectory=/opt/noid-scan
+Environment=RPC_URL=http://127.0.0.1:9601
+Environment=DB_PATH=/var/lib/noid-scan/noid.db
+Environment=PORT=8080
+Environment=TRUST_PROXY=1
+# Environment=DONATE_ADDRESS=o1...
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.js
+Restart=always
+StateDirectory=noid-scan
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
