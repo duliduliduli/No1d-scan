@@ -107,7 +107,7 @@ const pages = {
         ${stat('Difficulty bits', esc(s.mining.difficulty_bits))}
         ${stat('Peers', esc(s.peers))}
         ${stat('Node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage))}
-        ${stat('State size', esc(s.state.state_size_human))}
+        ${stat('State size', esc(String(s.state.state_size_human).split(' / ')[0]))}
       </div>
       <div class="grid">
         ${spark('Block time (s)', gaps)}

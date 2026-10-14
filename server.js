@@ -104,7 +104,7 @@ const RE = {
   address: /^o1[02-9ac-hj-np-z]{6,120}$/, // bech32m charset
 };
 
-// shortcut: field name for the per-tx list in `retained` is not documented, so match by content; pin it once seen on a live node.
+// shortcut: per-tx list name inside `retained` still unverified (only genesis seen, whose body is null); match by content until a synced node shows it.
 function findTx(retained, txid) {
   for (const v of Object.values(retained || {})) {
     if (Array.isArray(v)) {
