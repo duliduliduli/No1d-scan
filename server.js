@@ -10,9 +10,11 @@ const RPC_URL = process.env.RPC_URL || 'http://127.0.0.1:9601';
 const RPC_TOKEN = process.env.RPC_TOKEN || '';
 const RETAINED = 42;
 const RATE_LIMIT = Number(process.env.RATE_LIMIT || 120); // requests per IP per minute
+const CACHE_MS = Number(process.env.CACHE_MS ?? 5000); // API responses are reused this long; blocks change ~once a minute
 
 const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'noid.db'));
 db.exec(`
+  pragma journal_mode = wal;
   create table if not exists blocks (height integer primary key, hash text not null, details text not null);
   create index if not exists blocks_hash on blocks(hash);
   create table if not exists stats (height integer primary key, ts integer, data text not null);
@@ -32,6 +34,7 @@ async function rpc(method, params = []) {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(RPC_TOKEN && { authorization: `Bearer ${RPC_TOKEN}` }) },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: `paranoid_${method}`, params }),
+    signal: AbortSignal.timeout(10_000),
   });
   const body = await res.json();
   if (body.error) throw new Error(`${method}: ${body.error.message}`);
@@ -40,6 +43,7 @@ async function rpc(method, params = []) {
 
 // One indexer pass. Re-checking the whole retained window by hash also handles reorgs:
 // a replaced block has a new hash at the same height and gets overwritten.
+const indexer = { tip: null, at: null }; // last successful pass, exposed in /api/stats for uptime monitors
 async function tick() {
   const tip = await rpc('blockCount');
   for (let h = Math.max(0, tip - RETAINED + 1); h <= tip; h++) {
@@ -60,6 +64,7 @@ async function tick() {
     };
     q.addStat.run(tip, header?.timestamp ?? null, JSON.stringify(data));
   }
+  Object.assign(indexer, { tip, at: Date.now() });
 }
 
 // Input validation at the public boundary.
@@ -94,7 +99,7 @@ const routes = {
     const [chain, state, node, peers, mining] = await Promise.all([
       rpc('getChainInfo'), rpc('getStateInfo'), rpc('getNodeStatus'), rpc('getPeerCount'), rpc('getMiningInfo'),
     ]);
-    return { chain, state, node, peers, mining, donate: process.env.DONATE_ADDRESS || null };
+    return { chain, state, node, peers, mining, indexer, donate: process.env.DONATE_ADDRESS || null };
   },
 
   async blocks(_, params) {
@@ -158,30 +163,40 @@ const routes = {
 const hits = new Map();
 setInterval(() => hits.clear(), 60_000).unref();
 
+// Short-lived response cache keyed by URL. Bounded by request rate x CACHE_MS; expired entries are swept.
+const cache = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
+
 const INDEX = path.join(__dirname, 'public', 'index.html');
 
 async function handle(req, res) {
-  const url = new URL(req.url, 'http://x');
-  const send = (status, body, type = 'application/json') => {
-    res.writeHead(status, { 'content-type': type, 'access-control-allow-origin': '*' });
-    res.end(type === 'application/json' ? JSON.stringify(body) : body);
+  const send = (status, body, extra = {}) => {
+    const json = typeof body !== 'string' && !Buffer.isBuffer(body);
+    res.writeHead(status, { 'content-type': json ? 'application/json' : 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'access-control-allow-origin': '*', ...extra });
+    res.end(json ? JSON.stringify(body) : body);
   };
-  if (req.method !== 'GET') return send(405, { error: 'GET only' });
-  if (!url.pathname.startsWith('/api/')) return send(200, fs.readFileSync(INDEX), 'text/html; charset=utf-8');
-
-  const ip = process.env.TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
-  const n = (hits.get(ip) || 0) + 1;
-  hits.set(ip, n);
-  if (n > RATE_LIMIT) return send(429, { error: 'rate limited' });
-
-  const [, , name, id = ''] = url.pathname.split('/');
-  const route = Object.hasOwn(routes, name) && routes[name];
-  if (!route) return send(404, { error: 'unknown endpoint' });
   try {
+    const url = new URL(req.url, 'http://x');
+    if (req.method !== 'GET') return send(405, { error: 'GET only' });
+    if (!url.pathname.startsWith('/api/')) return send(200, fs.readFileSync(INDEX));
+
+    const ip = process.env.TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
+    const n = (hits.get(ip) || 0) + 1;
+    hits.set(ip, n);
+    if (n > RATE_LIMIT) return send(429, { error: 'rate limited' });
+
+    const hit = cache.get(req.url);
+    if (hit && hit.until > Date.now()) return send(200, hit.body, { 'cache-control': `public, max-age=${CACHE_MS / 1000 | 0}`, 'x-cache': 'HIT' });
+
+    const [, , name, id = ''] = url.pathname.split('/');
+    const route = Object.hasOwn(routes, name) && routes[name];
+    if (!route) return send(404, { error: 'unknown endpoint' });
     const out = await route(decodeURIComponent(id), url.searchParams);
-    out == null ? send(404, { error: 'not found' }) : send(200, out);
+    if (out == null) return send(404, { error: 'not found' });
+    if (CACHE_MS > 0) cache.set(req.url, { until: Date.now() + CACHE_MS, body: out });
+    send(200, out, { 'cache-control': `public, max-age=${CACHE_MS / 1000 | 0}`, 'x-cache': 'MISS' });
   } catch (e) {
-    send(e.status || 502, { error: e.message });
+    send(e.status || (e instanceof URIError ? 400 : 502), { error: e.message });
   }
 }
 

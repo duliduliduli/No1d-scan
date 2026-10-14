@@ -20,6 +20,7 @@ npm start     # http://127.0.0.1:8080
 | `DB_PATH` | `./noid.db` | SQLite file |
 | `PORT` / `HOST` | `8080` / `127.0.0.1` | |
 | `RATE_LIMIT` | `120` | API requests per IP per minute |
+| `CACHE_MS` | `5000` | How long an API response is reused (in memory, and via `Cache-Control` for Cloudflare/browsers) |
 | `TRUST_PROXY` | – | Set it behind Caddy/nginx so rate limiting uses `X-Forwarded-For` |
 | `DONATE_ADDRESS` | – | `o1…` address shown in the footer |
 
@@ -32,9 +33,11 @@ All amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); large values com
 ## Deploy (one VPS)
 
 1. **Node:** download the Core release and verify its SHA256. `./parano1d --check-hardware` must report `NODE READY`. Install to `/usr/local/bin` and run it under systemd with RPC on `127.0.0.1:9601`. Never expose the RPC port publicly. Check it with `parano1d-cli status`.
-2. **Explorer:** put this repo in `/opt/noid-scan`, then `useradd -r noidscan`, `cp deploy/noid-scan.service /etc/systemd/system/` and `systemctl enable --now noid-scan`.
+2. **Explorer:** install Node 22+ (Ubuntu's own package is too old: use NodeSource or `nvm`), put this repo in `/opt/noid-scan`, then `useradd -r noidscan`, `cp deploy/noid-scan.service /etc/systemd/system/` and `systemctl enable --now noid-scan`.
 3. **TLS:** install Caddy, point DNS for `parano1d-scan.com` and `www` at the VPS (A records), then copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile`.
-4. **Backups:** back up `/var/lib/noid-scan/noid.db`. It is the only data the node no longer has.
+4. **Backups:** back up `/var/lib/noid-scan/noid.db` (plus its `-wal` file, or use `sqlite3 noid.db '.backup out.db'`). It is the only data the node no longer has.
+5. **Monitoring:** point an uptime check at `/api/stats`; its `indexer.at` is the time of the last successful indexer pass. Alert if it is more than a few minutes old.
+6. **Traffic (optional):** put Cloudflare's free plan in front and add a cache rule for `/api/*` honouring origin `Cache-Control`. Most visitors are then served without touching the node. Set `trusted_proxies` in Caddy so the rate limiter sees real client IPs.
 
 Run the indexer continuously. Any block body it misses is gone once the node prunes it.
 

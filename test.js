@@ -21,6 +21,7 @@ const node = {
   getMiningInfo: () => ({ difficulty_bits: 30 }),
   getSlotsByOwner: () => [{ slot_index: 1, value: '9007199254740993' }, { slot_index: 2, value: 7 }],
   getRecentTransactions: () => ({ total: 0, transactions: [] }),
+  getStateInfo: () => ({}), getNodeStatus: () => ({}),
 };
 
 const rpcServer = http.createServer((req, res) => {
@@ -37,7 +38,7 @@ test('indexer + api', async (t) => {
   process.env.DB_PATH = ':memory:';
   const { server, tick, db } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
-  const get = async (p) => { const r = await fetch(`http://127.0.0.1:${server.address().port}/api/${p}`); return [r.status, await r.json()]; };
+  const get = async (p) => { const r = await fetch(`http://127.0.0.1:${server.address().port}/api/${p}`); return [r.status, await r.json(), r.headers]; };
   t.after(() => { server.close(); rpcServer.close(); });
 
   await tick();
@@ -79,6 +80,12 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('address/notanaddress'))[0], 400);
   assert.strictEqual((await get('block/99999'))[0], 404);
   assert.strictEqual((await get('constructor'))[0], 404);
+  assert.strictEqual((await get('block/%zz'))[0], 400, 'bad percent-encoding must not crash the server');
+  assert.strictEqual((await get('block/1'))[0], 200, 'server still alive');
+
+  // Second identical request within CACHE_MS is served from memory.
+  assert.strictEqual((await get('stats'))[2].get('x-cache'), 'MISS');
+  assert.strictEqual((await get('stats'))[2].get('x-cache'), 'HIT');
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
