@@ -6,10 +6,10 @@
 <title>NOID Scan</title>
 <style>
   /* Retro control-panel look: teal terminal panels on a circuit-board background. */
-  :root { color-scheme:dark; --bg:#071113; --fg:#e4eeee; --muted:#7f9a9b; --card:#0c1a1d; --head:#10262a; --line:#1b3438; --accent:#5ee8d2; --gold:#f7b733; --glow:0 0 10px rgba(94,232,210,.35); --mono:ui-monospace, 'IBM Plex Mono', Menlo, monospace }
+  :root { color-scheme:dark; --bg:#020607; --fg:#e4eeee; --muted:#7f9a9b; --card:#071113; --head:#0b1b1e; --line:#152a2d; --accent:#a8f5e9; --gold:#f7b733; --glow:0 0 10px rgba(168,245,233,.35); --mono:ui-monospace, 'IBM Plex Mono', Menlo, monospace }
   * { box-sizing:border-box }
   body { margin:0; color:var(--fg); font:14px/1.5 system-ui, sans-serif; min-height:100vh;
-    background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%235ee8d2' stroke-opacity='.09'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%235ee8d2' fill-opacity='.18' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
+    background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%23a8f5e9' stroke-opacity='.09'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%23a8f5e9' fill-opacity='.18' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
   a { color:var(--accent); text-decoration:none } a:hover { text-shadow:var(--glow) }
   header, main, footer { max-width:1100px; margin:0 auto; padding:16px }
   header { display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--line) }
@@ -26,7 +26,7 @@
   .stat b .mono { font-size:inherit }
   table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top }
   th { color:var(--muted); font:500 11px var(--mono); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap } td { word-break:break-all }
-  tr:hover td { background:rgba(94,232,210,.04) }
+  tr:hover td { background:rgba(168,245,233,.04) }
   .mono { font-family:var(--mono); font-size:13px } .muted { color:var(--muted) }
   /* Card titles become panel header strips. */
   h2 { margin:-14px -16px 12px; padding:10px 16px; background:var(--head); border-bottom:1px solid var(--line); color:var(--accent); font:700 12px var(--mono); letter-spacing:.14em; text-transform:uppercase }
@@ -83,7 +83,7 @@ function spark(title, pts) {
   const lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
   const line = ys.map((y, i) => `${(i / (ys.length - 1)) * 300},${88 - ((y - lo) / span) * 84}`).join(' ');
   return `<div class="card"><h2>${esc(title)} <small class="muted">${esc(lo.toLocaleString())} – ${esc(hi.toLocaleString())}</small></h2>
-    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5ee8d2" stop-opacity=".25"/><stop offset="1" stop-color="#5ee8d2" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
+    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a8f5e9" stop-opacity=".25"/><stop offset="1" stop-color="#a8f5e9" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
 }
 
 const pages = {
