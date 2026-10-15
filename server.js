@@ -235,6 +235,7 @@ async function handle(req, res) {
     res.setHeader('x-tier', paid ? 'paid' : 'free');
 
     if (url.pathname.startsWith('/api/pay/')) res.setHeader('cache-control', 'no-store');
+    if (url.pathname === '/api/live') return live(req, res);
     const hit = !url.pathname.startsWith('/api/pay/') && cache.get(req.url);
     if (hit && hit.until > Date.now()) return send(200, hit.body, { 'cache-control': `public, max-age=${CACHE_MS / 1000 | 0}`, 'x-cache': 'HIT' });
 
@@ -249,6 +250,36 @@ async function handle(req, res) {
   } catch (e) {
     send(e.status || (e instanceof URIError ? 400 : 502), { error: e.message });
   }
+}
+
+// Live feed: one shared poll of the node every LIVE_MS while anyone is watching, pushed to every open page (SSE).
+// Cost is flat in the number of viewers.
+const LIVE_MS = Number(process.env.LIVE_MS || 2000);
+const listeners = new Set();
+let liveOn = false, lastLive = null;
+async function livePoll() {
+  try {
+    const [chain, peers, mining, state, node] = await Promise.all([
+      rpc('getChainInfo'), rpc('getPeerCount'), rpc('getMiningInfo'), rpc('getStateInfo'), rpc('getNodeStatus'),
+    ]);
+    const header = lastLive?.chain.height === chain.height ? lastLive.header : await rpc('getBlockHeader', [chain.height]);
+    lastLive = { chain, peers, mining, state, node: { synced: node.synced, sync_stage: node.sync_stage }, header, at: Date.now() };
+    for (const res of listeners) res.write(`data: ${JSON.stringify(lastLive)}\n\n`);
+  } catch (e) {
+    for (const res of listeners) res.write(`event: down\ndata: ${JSON.stringify(e.message)}\n\n`);
+  }
+  if (listeners.size) setTimeout(livePoll, LIVE_MS); else liveOn = false;
+}
+function live(req, res) {
+  if (listeners.size >= 1000) return res.writeHead(503).end();
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'x-accel-buffering': 'no', 'access-control-allow-origin': '*' });
+  res.write('retry: 3000\n\n');
+  if (lastLive) res.write(`data: ${JSON.stringify(lastLive)}\n\n`);
+  listeners.add(res);
+  const drop = () => listeners.delete(res);
+  req.on('close', drop);
+  res.on('error', drop);
+  if (!liveOn) { liveOn = true; livePoll(); }
 }
 
 const server = http.createServer(handle);

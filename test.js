@@ -104,6 +104,18 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('stats?key=bogus'))[2].get('x-tier'), 'free');
   assert.strictEqual((await get('pay/nope'))[0], 404);
 
+  // Live feed pushes the node's current numbers.
+  const ac = new AbortController();
+  const r = await fetch(`http://127.0.0.1:${server.address().port}/api/live`, { signal: ac.signal });
+  assert.strictEqual(r.headers.get('content-type'), 'text/event-stream');
+  const reader = r.body.getReader();
+  let buf = '';
+  while (!buf.includes('data: {')) buf += new TextDecoder().decode((await reader.read()).value);
+  const evt = JSON.parse(buf.slice(buf.indexOf('data: {') + 6).split('\n')[0]);
+  assert.strictEqual(evt.chain.height, tip);
+  assert.strictEqual(evt.header.height, tip);
+  ac.abort();
+
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
 });

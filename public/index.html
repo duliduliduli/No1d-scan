@@ -41,6 +41,16 @@
   svg { width:100%; height:90px; display:block } polyline { fill:none; stroke:var(--accent); stroke-width:1.5; filter:drop-shadow(0 0 3px var(--accent)) }
   polygon { fill:url(#glow-fill) }
   footer { color:var(--muted); font:13px/1.6 var(--mono) }
+  /* Live feed */
+  .livebar { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:12px; font:12px var(--mono); color:var(--muted); letter-spacing:.06em }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:var(--glow); animation:pulse 1.6s infinite }
+  .dot.off { background:#ff6b6b; animation:none; box-shadow:none }
+  @keyframes pulse { 50% { opacity:.25 } }
+  .flash { animation:flash 1.2s ease-out }
+  @keyframes flash { from { color:var(--gold); text-shadow:0 0 12px rgba(247,183,51,.6) } }
+  tr.new td { animation:rowin 2.5s ease-out }
+  @keyframes rowin { from { background:rgba(168,245,233,.18) } }
+  .stat[title] { cursor:help }
 </style>
 </head>
 <body>
@@ -79,9 +89,12 @@ function val(k, v) {
   if (typeof v === 'object') return `<pre class="mono">${esc(JSON.stringify(v, null, 2))}</pre>`;
   return `<span class="mono">${esc(v)}</span>`;
 }
-const kv = (o) => `<table>${Object.entries(o || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${val(k, v)}</td></tr>`).join('')}</table>`;
+// Human labels for node field names; unknown fields fall back to their name without underscores.
+const LABELS = { height: 'Height', hash: 'Block hash', prev_hash: 'Previous block', state_root: 'State root', tx_root: 'Transactions root', timestamp: 'Time', miner: 'Miner', nonce_hex: 'Nonce', difficulty_target: 'Difficulty target', log_slots: 'State size (log₂ slots)', active_slot_count: 'Active slots', alloc_counter: 'Slots ever allocated', tx_hash: 'Transaction', txid: 'Transaction', block_hash: 'Block hash', tx_position: 'Position in block', slot_index: 'Slot #', value: 'Amount', creation_id: 'Created by', reward_micronoid: 'Block reward', total_fees_micronoid: 'Total fees', fee_micronoid: 'Fee', block_bytes: 'Block size (bytes)', proof_class: 'Proof class', indexed: 'Body saved here', total: 'Total', total_pages: 'Pages', tip_height: 'Chain height', retained_from_height: 'Bodies kept from block', address_spent_micronoid: 'Total sent', address_received_micronoid: 'Total received' };
+const label = (k) => LABELS[k] ?? k.replace(/_micronoid$/, '').replace(/_/g, ' ');
+const kv = (o) => `<table>${Object.entries(o || {}).map(([k, v]) => `<tr><th>${esc(label(k))}</th><td>${val(k, v)}</td></tr>`).join('')}</table>`;
 const rows = (list, cols) => list?.length
-  ? `<table class="list"><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c) => `<td>${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
+  ? `<table class="list"><tr>${cols.map((c) => `<th>${esc(label(c))}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c) => `<td>${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
   : '<p class="muted">Nothing here.</p>';
 
 function spark(title, pts) {
@@ -93,31 +106,80 @@ function spark(title, pts) {
     <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a8f5e9" stop-opacity=".25"/><stop offset="1" stop-color="#a8f5e9" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
 }
 
+// ---- live helpers
+let feed = null, ticker = null;
+const $ = (id) => document.getElementById(id);
+function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+function setText(id, s) { const el = $(id); if (el && el.textContent !== String(s)) { el.textContent = s; flash(el); } }
+// Count from the shown value to the new one so changes are visible.
+function setNum(id, n) {
+  const el = $(id); if (!el || n == null) return;
+  const to = Number(n), from = Number(el.dataset.v ?? to);
+  el.dataset.v = to;
+  if (from === to) { el.textContent = to.toLocaleString(); return; }
+  flash(el);
+  const t0 = performance.now();
+  const step = (t) => { const k = Math.min((t - t0) / 700, 1); el.textContent = Math.round(from + (to - from) * k).toLocaleString(); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+const ago = (ts) => { const s = Math.max(0, Math.round(Date.now() / 1000 - (ts > 1e12 ? ts / 1000 : ts))); return s < 120 ? `${s}s ago` : `${Math.round(s / 60)}m ago`; };
+function charts(c) {
+  const gaps = c.slice(1).map((p, i) => p.ts && c[i].ts ? p.ts - c[i].ts : NaN);
+  return `${spark('Block time (seconds)', gaps)}${spark('Difficulty (bits)', c.map((p) => p.difficulty_bits))}
+    ${spark('Active slots (live outputs)', c.map((p) => p.active_slot_count))}${spark('Connected peers', c.map((p) => p.peers))}`;
+}
+function markNew(tableId, oldTip) {
+  for (const tr of document.querySelectorAll(`#${tableId} tr`)) if (Number(tr.cells[0]?.textContent) > oldTip) tr.classList.add('new');
+}
+
 const pages = {
   async home() {
     const [s, b, t, c] = await Promise.all([api('stats'), api('blocks?limit=15'), api('txs').catch(() => null), api('charts')]);
-    const stat = (k, v) => `<div class="card stat"><small>${k}</small><b>${v}</b></div>`;
-    const gaps = c.slice(1).map((p, i) => p.ts && c[i].ts ? p.ts - c[i].ts : NaN);
+    const stat = (k, id, v, tip) => `<div class="card stat" title="${esc(tip)}"><small>${k}</small><b id="${id}">${v}</b></div>`;
+    const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, Object.keys(t.transactions?.[0] || {}))}` : '';
     app.innerHTML = `
+      <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
       <div class="grid">
-        ${stat('Height', link('block', s.chain.height, Number(s.chain.height).toLocaleString()))}
-        ${stat('Circulating supply', esc(noid(s.chain.circulating_supply_micronoid)))}
-        ${stat('Block reward', esc(noid(s.mining.block_reward_micronoid)))}
-        ${stat('Active slots', esc(Number(s.state.active_slots).toLocaleString()) + ` <small class="muted">${esc(s.state.fill_pct)}% full</small>`)}
-        ${stat('Difficulty bits', esc(s.mining.difficulty_bits))}
-        ${stat('Peers', esc(s.peers))}
-        ${stat('Node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage))}
-        ${stat('State size', esc(String(s.state.state_size_human).split(' / ')[0]))}
+        ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
+        ${stat('Last block', 'ago', esc(ago(b.blocks[0]?.timestamp)), 'Time since the newest block was mined.')}
+        ${stat('Circulating supply', 'supply', esc(noid(s.chain.circulating_supply_micronoid)), 'All NOID currently in existence.')}
+        ${stat('Block reward', 'reward', esc(noid(s.mining.block_reward_micronoid)), 'NOID paid to the miner of each new block.')}
+        ${stat('Active slots', 'slots', esc(Number(s.state.active_slots).toLocaleString()), 'Unspent outputs in the Live State (like UTXOs).')}
+        ${stat('State fill', 'fill', esc(s.state.fill_pct) + '%', 'How full the current Live State table is; it doubles in size at 75%.')}
+        ${stat('Difficulty (bits)', 'diff', esc(s.mining.difficulty_bits), 'Proof-of-work difficulty: leading zero bits a block hash needs.')}
+        ${stat('Connected peers', 'peers', esc(s.peers), 'Other nodes this explorer’s node is talking to.')}
+        ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
       </div>
-      <div class="grid">
-        ${spark('Block time (s)', gaps)}
-        ${spark('Difficulty bits', c.map((p) => p.difficulty_bits))}
-        ${spark('Active slots', c.map((p) => p.active_slot_count))}
-        ${spark('Peers', c.map((p) => p.peers))}
-      </div>
-      <div class="card"><h2>Latest blocks</h2>${rows(b.blocks, ['height', 'hash', 'timestamp', 'miner', 'active_slot_count'])}
+      <div class="grid" id="charts">${charts(c)}</div>
+      <div class="card"><h2>Latest blocks</h2><div id="blocks">${rows(b.blocks, ['height', 'hash', 'timestamp', 'miner', 'active_slot_count'])}</div>
         <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p></div>
-      ${t ? `<div class="card"><h2>Recent transactions <small class="muted">retained from height ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, Object.keys(t.transactions?.[0] || {}))}</div>` : ''}`;
+      <div class="card" id="txs">${txsCard(t)}</div>`;
+    for (const id of ['h', 'slots', 'peers']) $(id).dataset.v = { h: s.chain.height, slots: s.state.active_slots, peers: s.peers }[id];
+
+    let tip = Number(s.chain.height), tipTs = b.blocks[0]?.timestamp;
+    ticker = setInterval(() => tipTs && ($('ago').textContent = ago(tipTs)), 1000);
+    feed = new EventSource('/api/live');
+    feed.onmessage = async (e) => {
+      const d = JSON.parse(e.data);
+      $('dot').classList.remove('off'); $('livemsg').textContent = `LIVE · updates every 2 s · checked ${new Date(d.at).toLocaleTimeString()}`;
+      setText('supply', noid(d.chain.circulating_supply_micronoid));
+      setText('reward', noid(d.mining.block_reward_micronoid));
+      setNum('slots', d.state.active_slots); setText('fill', d.state.fill_pct + '%');
+      setText('diff', d.mining.difficulty_bits); setNum('peers', d.peers);
+      setText('node', d.node.synced ? 'synced' : 'syncing: ' + d.node.sync_stage);
+      const h = Number(d.chain.height);
+      if (h <= tip) return;
+      const old = tip; tip = h; tipTs = d.header?.timestamp ?? tipTs;
+      $('h').href = `/block/${h}`; setNum('h', h);
+      flash($('ago'));
+      // ?at= makes each new height a fresh (but still shared) cache entry.
+      const [nb, nt, nc] = await Promise.all([api(`blocks?limit=15&at=${h}`), api(`txs?at=${h}`).catch(() => null), api(`charts?at=${h}`)]);
+      if (!feed) return;
+      $('blocks').innerHTML = rows(nb.blocks, ['height', 'hash', 'timestamp', 'miner', 'active_slot_count']); markNew('blocks', old);
+      $('txs').innerHTML = txsCard(nt); $('charts').innerHTML = charts(nc);
+    };
+    feed.addEventListener('down', () => { $('dot').classList.add('off'); $('livemsg').textContent = 'Node not responding · retrying'; });
+    feed.onerror = () => { $('dot')?.classList.add('off'); $('livemsg') && ($('livemsg').textContent = 'Connection lost · reconnecting…'); };
     if (s.donate) document.getElementById('foot').innerHTML += `<p>Support this explorer: ${link('address', s.donate)}</p>`;
   },
   async blocks(before) {
@@ -173,6 +235,7 @@ const pages = {
 
 async function render() {
   const [, type, id] = location.pathname.split('/');
+  feed?.close(); feed = null; clearInterval(ticker);
   app.innerHTML = '<p class="muted">Loading…</p>';
   try {
     await (pages[type] && (id || type === 'api-access') ? pages[type](decodeURIComponent(id || '')) : pages.home());
