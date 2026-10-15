@@ -13,9 +13,10 @@ const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const today = () => new Date().toISOString().slice(0, 10);
 const hashKey = (key) => createHash('sha256').update(key).digest('hex');
 
-// A NOID payment is credited only after this many blocks on top of the one it was first seen in.
-// Parano1d never reorganizes deeper than 17 blocks, so 17 confirmations is final.
-const CONFIRMATIONS = Number(process.env.NOID_CONFIRMATIONS ?? 17);
+// A NOID payment is credited only once the tip is this many blocks above the tip when it was first seen (which is
+// at or above its inclusion block). Consensus allows replacing up to 18 blocks (CONSENSUS_FINALITY_DEPTH in Parano1d
+// Core, noid_chain/src/consensus/params.rs; the docs' "17" is out of date), so tip >= inclusion + 18 is final.
+const CONFIRMATIONS = Number(process.env.NOID_CONFIRMATIONS ?? 18);
 const QUOTE_MS = 24 * 3600_000; // a quote is valid this long
 const HOLD_MS = 7 * 86400_000; // after expiry its last digits stay reserved this long, so a late payment can't match a newer order
 const PRICE_MAX_AGE_MS = Number(process.env.PRICE_MAX_AGE_MS || 15 * 60_000);

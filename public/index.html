@@ -788,7 +788,7 @@ const pages = {
         ? `<span class="spin"></span><span>Payment seen on chain. Confirming: ${esc(Math.min(conf.have, conf.need))} of ${esc(conf.need)} blocks (about ${esc(Math.max(1, Math.ceil(((conf.need - conf.have) * 30) / 60)))} min left). Credits are added automatically after the last confirmation.</span>`
         : t.status === 'expired'
           ? '<span>This quote has expired. Start a new order. If you already sent NOID for it, it is still credited to this account at the quoted rate when it arrives within 7 days.</span>'
-          : '<span class="spin"></span><span>Waiting for your payment… this page updates itself. Once it lands, it needs ' + esc(P.noid?.confirmations ?? 17) + ' block confirmations (about ' + esc(Math.ceil(((P.noid?.confirmations ?? 17) * 30) / 60)) + ' minutes) before credits are added.</span>';
+          : '<span class="spin"></span><span>Waiting for your payment… this page updates itself. Once it lands, it needs ' + esc(P.noid?.confirmations ?? 18) + ' block confirmations (about ' + esc(Math.ceil(((P.noid?.confirmations ?? 18) * 30) / 60)) + ' minutes) before credits are added.</span>';
       $('payout').innerHTML = `<div class="checkout"><div class="head"><b>Checkout · order ${esc(t.id)}</b>${steps(conf ? 1 : 0)}</div>
         <div class="body">
           <div><div class="qr">${qrSvg(t.address) || '<small class="muted">QR unavailable</small>'}</div><p class="muted" style="font-size:12px;margin:8px 0 0">Scan the address with your NOID wallet, then enter the exact amount.</p></div>

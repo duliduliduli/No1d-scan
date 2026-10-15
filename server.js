@@ -150,10 +150,10 @@ function networkStats() {
 // One indexer pass. Re-checking the whole retained window by hash also handles reorgs:
 // a replaced block has a new hash at the same height and gets overwritten.
 const indexer = { tip: null, at: null, supply: null, error: null }; // last successful pass, exposed in /api/stats for uptime monitors
-const MAX_REORG = 17; // Parano1d never reorganizes deeper than this
+const MAX_REORG = 18; // Parano1d consensus never replaces more blocks than this (CONSENSUS_FINALITY_DEPTH)
 async function tick() {
   const tip = await rpc('blockCount');
-  // The node's tip went down: a short reorg drops the blocks above the new tip, which are no longer canonical.
+  // The node's tip went down: a reorg (at most 18 blocks) drops the blocks above the new tip, which are no longer canonical.
   // Anything deeper is not a normal reorg (a node reset or resync): stop and keep every archived body until a person looks.
   const top = q.topBlock.get().h;
   if (top != null && tip < top) {

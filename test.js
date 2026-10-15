@@ -135,7 +135,7 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('me'))[0], 401);
   assert.strictEqual((await get('me', { headers: { 'x-api-key': 'nk_' + '0'.repeat(40) } }))[0], 401);
 
-  // NOID top-up: unique amount -> matching slot appears -> credited once, after 17 confirmations.
+  // NOID top-up: unique amount -> matching slot appears -> credited once the tip is 18 blocks past it.
   const credits = async () => (await get('me', { headers: K }))[1].credits;
   const mine = async (n) => { tip += n; await tick(); };
   // An output already on the address before the order was quoted can never pay it, even with matching digits.
@@ -152,27 +152,27 @@ test('indexer + api', async (t) => {
   paySlots = [{ slot_index: 9, value: String(micro), creation_id: 'c1' }];
   await tick();
   const [, conf] = await get(`topup/${quote.id}`, { headers: K });
-  assert.deepStrictEqual([conf.status, conf.confirmations], ['confirming', { have: 0, need: 17 }]);
-  await mine(16);
-  assert.strictEqual(await credits(), 0, 'not credited at 16 confirmations');
+  assert.deepStrictEqual([conf.status, conf.confirmations], ['confirming', { have: 0, need: 18 }]);
+  await mine(17);
+  assert.strictEqual(await credits(), 0, 'not credited at depth 17');
   await mine(1);
   assert.strictEqual((await get(`topup/${quote.id}`, { headers: K }))[1].paid, true);
   await tick();
-  assert.strictEqual(await credits(), 5000, 'credited exactly once at 17 confirmations');
+  assert.strictEqual(await credits(), 5000, 'credited exactly once at depth 18');
   // A payment that disappears (reorged out) before it is final never credits.
   const [, q2] = await post('topup', { method: 'noid', usd: 5 }, K);
   const micro2 = Math.round(Number(q2.amount_noid) * 1e6);
   paySlots = [{ slot_index: 10, value: String(micro2), creation_id: 'c2' }];
   await tick();
   paySlots = [];
-  await mine(17);
+  await mine(18);
   assert.strictEqual(await credits(), 5000, 'reorged-out payment not credited');
   paySlots = [{ slot_index: 9, value: String(micro2), creation_id: 'c1' }];
-  await mine(17);
+  await mine(18);
   assert.strictEqual(await credits(), 5000, 'an already-used slot cannot pay a second quote');
   // Overpayment with the same last digits is credited at the quoted rate: +1 NOID on a 25 NOID pack = +200 credits.
   paySlots = [{ slot_index: 11, value: String(micro2 + 1_000_000), creation_id: 'c3' }];
-  await tick(); await mine(17);
+  await tick(); await mine(18);
   assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000 + 5000 + 200, 'overpayment credited proportionally');
   assert.strictEqual((await get(`topup/${q2.id}`, { headers: K }))[1].credits_added, 5200);
   assert.strictEqual((await get(`stats?key=${acct.key}`))[2].get('x-tier'), 'paid');
@@ -227,14 +227,14 @@ test('indexer + api', async (t) => {
   assert.throws(() => db.prepare('insert into noid_topups (id, account, amount, credits, created, dust) values (?, ?, ?, ?, ?, ?)').run('x', acct.id, micro3, 5000, Date.now(), micro3 % 10000), /UNIQUE/, 'a newer order cannot take the held digits');
   const before = await credits();
   paySlots = [{ slot_index: 12, value: String(micro3), creation_id: 'c4' }];
-  await tick(); await mine(17);
+  await tick(); await mine(18);
   assert.strictEqual(await credits(), before + 5000, 'late payment credited to the account that ordered it');
   // Fault injection: if crediting fails, the order is not marked paid and no ledger row is written.
   const [, other] = await post('account', {});
   const [, q4] = await post('topup', { method: 'noid', usd: 5 }, { 'x-api-key': other.key });
   db.prepare('update accounts set id = ? where id = ?').run('gone', other.id); // the order's account no longer exists
   paySlots = [{ slot_index: 13, value: String(Math.round(Number(q4.amount_noid) * 1e6)), creation_id: 'c5' }];
-  await tick(); await mine(17);
+  await tick(); await mine(18);
   assert.strictEqual(db.prepare('select paid_ref from noid_topups where id = ?').get(q4.id).paid_ref, null, 'order not claimed');
   assert.strictEqual(db.prepare("select count(*) n from ledger where ref = 'noid:c5'").get().n, 0, 'no ledger entry');
   assert.strictEqual(db.prepare("select status from noid_seen where ref = 'noid:c5'").get().status, 'review', 'flagged for a manual look');
@@ -278,7 +278,7 @@ test('indexer + api', async (t) => {
   assert.strictEqual(db.prepare('select max(height) h from blocks').get().h, tip);
   assert.strictEqual(db.prepare('select max(height) h from headers').get().h, tip);
   const kept = db.prepare('select count(*) n from blocks').get().n;
-  tip -= 18;
+  tip -= 19;
   await assert.rejects(tick(), /indexing paused, nothing deleted/);
   assert.strictEqual(db.prepare('select count(*) n from blocks').get().n, kept);
   tip = top; await tick();
