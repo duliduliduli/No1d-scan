@@ -585,7 +585,7 @@ const pages = {
           <tr><td>API requests</td><td>${n(120)} per minute with a free account key</td><td>${n(3000)} per minute · 1 credit per ${n(P.requests_per_credit)} requests</td></tr>
           <tr><td>AI assistant</td><td>${P.free_chats_per_day} questions per day</td><td>${P.chat_cost} credits per question</td></tr>
         </table>
-        <p class="muted">${n(P.credits_per_usd)} credits = $1. Credits never expire. Pay by ${[P.card && 'card', P.noid && 'NOID'].filter(Boolean).join(' or ') || '(payments not enabled yet)'}.
+        <p class="muted">${n(P.credits_per_usd)} credits = $1. Credits never expire. Pay with ${[P.noid && 'NOID', P.card && 'card'].filter(Boolean).join(' or ') || '(payments not enabled yet)'}.
         ${P.noid ? `NOID price used: $${esc(P.noid.usd_per_noid)} per NOID.` : ''}</p></div>
       <div class="card" id="acct"></div>
       <div class="card"><h2>API reference</h2>
@@ -641,8 +641,8 @@ const pages = {
       </div>
       ${new URLSearchParams(location.search).get('paid') === 'card' ? '<p id="cardwait">Thanks! Waiting for Stripe to confirm your card payment… this page updates itself.</p>' : ''}
       <h2 style="margin-top:14px">Add credits</h2>
-      ${P.card ? `<p class="row"><span class="muted">Card:</span> ${pay('card')}</p>` : ''}
-      ${P.noid ? `<p class="row"><span class="muted">NOID:</span> ${pay('noid')}</p>` : ''}
+      ${P.noid ? `<p class="row"><span class="muted">Pay with NOID:</span> ${pay('noid')}</p>` : ''}
+      ${P.card ? `<p class="row"><span class="muted">Pay by card:</span> ${pay('card')}</p>` : '<p class="muted">Card payments are coming soon. Pay with NOID from any wallet: you get an exact amount to send and credits land automatically.</p>'}
       ${!P.card && !P.noid ? '<p class="muted">Payments are not enabled yet.</p>' : ''}
       <div id="payout"></div>
       <h2 style="margin-top:14px">Usage (last 30 days)</h2>${rows(me.usage, ['day', 'requests', 'chats'])}

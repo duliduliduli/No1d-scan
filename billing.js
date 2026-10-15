@@ -21,7 +21,16 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
   };
   const STRIPE = process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET && { key: process.env.STRIPE_SECRET_KEY, whsec: process.env.STRIPE_WEBHOOK_SECRET };
   const SITE = process.env.SITE_URL || 'https://parano1d-scan.com';
-  let cardBlockedUntil = 0; // set when Stripe rejects a session (e.g. cards pending approval); hides the card buttons meanwhile
+  // Card buttons appear only once Stripe reports card payments active for this account; checked every 10 minutes.
+  let cardActive = false;
+  async function checkStripe() {
+    if (!STRIPE) return;
+    const r = await fetch('https://api.stripe.com/v1/account', { headers: { authorization: `Bearer ${STRIPE.key}` }, signal: AbortSignal.timeout(15_000) });
+    const a = await r.json();
+    cardActive = r.ok && a.capabilities?.card_payments === 'active';
+    if (r.ok && !cardActive) console.log(`stripe: card payments ${a.capabilities?.card_payments || 'not enabled'}; card buttons hidden`);
+  }
+  if (STRIPE && process.env.NODE_ENV !== 'test') { const run = () => checkStripe().catch((e) => console.error('stripe:', e.message)); run(); setInterval(run, 600_000).unref(); }
 
   db.exec(`
     create table if not exists accounts (id text primary key, key_hash text unique not null, credits integer not null default 0, requests integer not null default 0, created integer not null);
@@ -129,10 +138,7 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
       headers: { authorization: `Bearer ${STRIPE.key}`, 'content-type': 'application/x-www-form-urlencoded' },
     });
     const s = await r.json();
-    if (!r.ok) {
-      if (/payment method types/i.test(s.error?.message || '')) { cardBlockedUntil = Date.now() + 600_000; throw bad('Card payments are not available yet (the card processor is still approving this site). Please pay with NOID for now.', 502); }
-      throw bad(`card payment unavailable: ${s.error?.message || r.status}`, 502);
-    }
+    if (!r.ok) throw bad(`card payment unavailable: ${s.error?.message || r.status}`, 502);
     return { url: s.url };
   }
 
@@ -159,7 +165,7 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
   const pricing = () => ({
     credits_per_usd: CREDITS_PER_USD, packs_usd: PACKS_USD, chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY,
     requests_per_credit: REQUESTS_PER_CREDIT,
-    card: !!STRIPE && Date.now() > cardBlockedUntil, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: !Number(process.env.USD_PER_NOID) },
+    card: !!STRIPE && cardActive, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: !Number(process.env.USD_PER_NOID) },
   });
 
   // shortcut: in-memory, per process; enough to stop casual account spam.
@@ -187,7 +193,7 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
       const usd = Number(body.usd);
       if (!PACKS_USD.includes(usd)) throw bad(`amount must be one of ${PACKS_USD.join(', ')} USD`);
       if (body.method === 'card') {
-        if (!STRIPE) throw bad('card payments are not enabled', 404);
+        if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
         return stripeCheckout(acct, usd);
       }
       const NOID = noid();

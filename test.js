@@ -62,6 +62,7 @@ test('indexer + api', async (t) => {
   process.env.USD_PER_NOID = '0.20'; // $5 pack = 25 NOID
   process.env.STRIPE_SECRET_KEY = 'sk_test_x';
   process.env.STRIPE_WEBHOOK_SECRET = WHSEC;
+  process.env.NODE_ENV = 'test';
   await new Promise((r) => aiServer.listen(0, r));
   process.env.OPENROUTER_API_KEY = 'or-test';
   process.env.OPENROUTER_URL = `http://127.0.0.1:${aiServer.address().port}`;
