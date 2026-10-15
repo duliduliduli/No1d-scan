@@ -62,7 +62,11 @@ test('indexer + api', async (t) => {
   process.env.OPENROUTER_URL = `http://127.0.0.1:${aiServer.address().port}`;
   const { server, tick, db } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
-  const get = async (p, opt = {}) => { const r = await fetch(`http://127.0.0.1:${server.address().port}/api/${p}`, opt); return [r.status, await r.json(), r.headers]; };
+  const get = async (p, opt = {}) => {
+    const headers = opt.bare ? opt.headers : { 'sec-fetch-site': 'same-origin', ...opt.headers };
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/api/${p}`, { ...opt, headers });
+    return [r.status, await r.json(), r.headers];
+  };
   const post = (p, body, headers = {}) => get(p, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } });
   t.after(() => { server.close(); rpcServer.close(); aiServer.close(); });
 
@@ -136,6 +140,11 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000, 'an already-used slot cannot pay a second quote');
   assert.strictEqual((await get(`stats?key=${acct.key}`))[2].get('x-tier'), 'paid');
 
+  // API gate: scripts need a key, our own pages and keyed clients don't; stats stays open for uptime monitors.
+  assert.strictEqual((await get('txs', { bare: true }))[0], 401);
+  assert.strictEqual((await get('txs', { bare: true, headers: K }))[0], 200);
+  assert.strictEqual((await get('stats', { bare: true }))[0], 200);
+
   // Stripe webhook: only correctly signed events credit, and replays are ignored.
   const evt = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_1', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, metadata: { credits: '20000' } } } });
   const sign = (body, ts = Math.floor(Date.now() / 1000)) => `t=${ts},v1=${require('node:crypto').createHmac('sha256', WHSEC).update(`${ts}.${body}`).digest('hex')}`;
@@ -161,6 +170,18 @@ test('indexer + api', async (t) => {
   aiDown = false;
   const hist = (await get('me', { headers: K }))[1].history.map((h) => h.reason);
   assert.ok(hist.includes('AI question') && hist.some((r) => r.startsWith('Card top-up')) && hist.some((r) => r.startsWith('NOID top-up')));
+
+  // Live feed pushes the node's current numbers.
+  const ac = new AbortController();
+  const liveRes = await fetch(`http://127.0.0.1:${server.address().port}/api/live`, { signal: ac.signal, headers: { 'sec-fetch-site': 'same-origin' } });
+  assert.strictEqual(liveRes.headers.get('content-type'), 'text/event-stream');
+  const reader = liveRes.body.getReader();
+  let buf = '';
+  while (!buf.includes('data: {')) buf += new TextDecoder().decode((await reader.read()).value);
+  const live = JSON.parse(buf.slice(buf.indexOf('data: {') + 6).split('\n')[0]);
+  assert.strictEqual(live.chain.height, tip);
+  assert.strictEqual(live.header.height, tip);
+  ac.abort();
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);

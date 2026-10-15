@@ -20,7 +20,7 @@ npm start     # http://127.0.0.1:8080
 | `DB_PATH` | `./noid.db` | SQLite file |
 | `PORT` / `HOST` | `8080` / `127.0.0.1` | |
 | `RATE_LIMIT` | `120` | API requests per IP per minute |
-| `CACHE_MS` | `5000` | How long an API response is reused (in memory, and via `Cache-Control` for Cloudflare/browsers) |
+| `CACHE_MS` | `5000` | How long an API response is reused in server memory (and by the visitor's browser) |
 | `TRUST_PROXY` | – | Set it behind Caddy/nginx so rate limiting uses `X-Forwarded-For` |
 | `DONATE_ADDRESS` | – | `o1…` address shown in the footer |
 
@@ -37,7 +37,7 @@ All amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); large values com
 3. **TLS:** install Caddy and copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile`. In Cloudflare add A records for `@` and `www` pointing at the droplet, first with the proxy **off** (grey cloud) so Caddy can obtain its certificate; once `https://parano1d-scan.com` loads, set Cloudflare SSL mode to **Full (strict)** and turn the proxy **on** (orange cloud).
 4. **Backups:** back up `/var/lib/noid-scan/noid.db` (plus its `-wal` file, or use `sqlite3 noid.db '.backup out.db'`). It is the only data the node no longer has.
 5. **Monitoring:** point an uptime check at `/api/stats`; its `indexer.at` is the time of the last successful indexer pass. Alert if it is more than a few minutes old.
-6. **Cloudflare:** add a cache rule for `/api/*` that respects origin `Cache-Control`, so most visitors never reach the node. In the DigitalOcean cloud firewall allow ports 80/443 only from [Cloudflare's IP ranges](https://www.cloudflare.com/ips/), plus 9600 from anywhere (node peers) and 22 from your IP. That keeps the rate limiter's client IPs honest.
+6. **Cloudflare:** do *not* add a cache rule for `/api/*`: API responses are `private` so the CDN cannot hand keyed data to keyless scripts; the server's own 5 s cache and the shared live feed already keep node load flat. In the DigitalOcean cloud firewall allow ports 80/443 only from [Cloudflare's IP ranges](https://www.cloudflare.com/ips/), plus 9600 from anywhere (node peers) and 22 from your IP. That keeps the rate limiter's client IPs honest.
 
 Run the indexer continuously. Any block body it misses is gone once the node prunes it.
 

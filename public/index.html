@@ -103,14 +103,16 @@ function val(k, v) {
   if (k.endsWith('_micronoid') || k === 'value') return esc(noid(v));
   if (k === 'timestamp') return esc(when(v));
   if (typeof v === 'string' && /^o1[0-9a-z]{6,}$/.test(v)) return link('address', v);
-  if (k === 'prev_hash' || (k === 'hash' && /^[0-9a-f]{64}$/.test(v))) return link('block', v);
+  if (k === 'prev_hash' || k === 'block_hash' || (k === 'hash' && /^[0-9a-f]{64}$/.test(v))) return link('block', v);
+  if (typeof v === 'boolean') return v ? 'yes' : '–';
   if (/^(tx_hash|txid)$/.test(k)) return link('tx', v);
   if (k === 'height' || k === 'block_height') return link('block', v);
   if (typeof v === 'object') return `<pre class="mono">${esc(JSON.stringify(v, null, 2))}</pre>`;
   return `<span class="mono">${esc(v)}</span>`;
 }
 // Human labels for node field names; unknown fields fall back to their name without underscores.
-const LABELS = { height: 'Height', hash: 'Block hash', prev_hash: 'Previous block', state_root: 'State root', tx_root: 'Transactions root', timestamp: 'Time', miner: 'Miner', nonce_hex: 'Nonce', difficulty_target: 'Difficulty target', log_slots: 'State size (log₂ slots)', active_slot_count: 'Active slots', alloc_counter: 'Slots ever allocated', tx_hash: 'Transaction', txid: 'Transaction', block_hash: 'Block hash', tx_position: 'Position in block', slot_index: 'Slot #', value: 'Amount', creation_id: 'Created by', reward_micronoid: 'Block reward', total_fees_micronoid: 'Total fees', fee_micronoid: 'Fee', block_bytes: 'Block size (bytes)', proof_class: 'Proof class', indexed: 'Body saved here', total: 'Total', total_pages: 'Pages', tip_height: 'Chain height', retained_from_height: 'Bodies kept from block', address_spent_micronoid: 'Total sent', address_received_micronoid: 'Total received' };
+const LABELS = { height: 'Height', hash: 'Block hash', prev_hash: 'Previous block', state_root: 'State root', tx_root: 'Transactions root', timestamp: 'Time', miner: 'Miner', nonce_hex: 'Nonce', difficulty_target: 'Difficulty target', log_slots: 'State size (log₂ slots)', active_slot_count: 'Active slots', alloc_counter: 'Slots ever allocated', tx_hash: 'Transaction', txid: 'Transaction', block_hash: 'Block hash', tx_position: 'Position in block', slot_index: 'Slot #', value: 'Amount', creation_id: 'Created by', reward_micronoid: 'Block reward', total_fees_micronoid: 'Total fees', fee_micronoid: 'Fee', block_bytes: 'Block size (bytes)', proof_class: 'Proof class', indexed: 'Body saved here', total: 'Total', total_pages: 'Pages', tip_height: 'Chain height', retained_from_height: 'Bodies kept from block', address_spent_micronoid: 'Total sent', address_received_micronoid: 'Total received', position: 'Position in block', live_inputs: 'Inputs', live_outputs: 'Outputs', coinbase: 'Mining reward', development_payout: 'Dev payout', input_owner: 'From', input_sum_micronoid: 'Inputs total', output_sum_micronoid: 'Amount moved', page_count: 'Pages' };
+const TX_COLS = ['height', 'txid', 'output_sum_micronoid', 'fee_micronoid', 'input_owner', 'coinbase'];
 const label = (k) => LABELS[k] ?? k.replace(/_micronoid$/, '').replace(/_/g, ' ');
 const kv = (o) => `<table>${Object.entries(o || {}).map(([k, v]) => `<tr><th>${esc(label(k))}</th><td>${val(k, v)}</td></tr>`).join('')}</table>`;
 const rows = (list, cols) => list?.length
@@ -156,7 +158,7 @@ const pages = {
   async home() {
     const [s, b, t, c] = await Promise.all([api('stats'), api('blocks?limit=15'), api('txs').catch(() => null), api('charts')]);
     const stat = (k, id, v, tip) => `<div class="card stat" title="${esc(tip)}"><small>${k}</small><b id="${id}">${v}</b></div>`;
-    const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, Object.keys(t.transactions?.[0] || {}))}` : '';
+    const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, TX_COLS)}` : '';
     app.innerHTML = `
       <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
       <div class="grid">
@@ -233,14 +235,14 @@ const pages = {
       <div class="card"><h2>Pricing</h2>
         <table class="price"><tr><th></th><th>Free</th><th>With credits</th></tr>
           <tr><td>Explorer website, live data</td><td>Unlimited</td><td>Unlimited</td></tr>
-          <tr><td>API requests</td><td>${n(120)} per minute per IP, no key</td><td>${n(3000)} per minute · 1 credit per ${n(P.requests_per_credit)} requests</td></tr>
+          <tr><td>API requests</td><td>${n(120)} per minute with a free account key</td><td>${n(3000)} per minute · 1 credit per ${n(P.requests_per_credit)} requests</td></tr>
           <tr><td>AI assistant</td><td>${P.free_chats_per_day} questions per day</td><td>${P.chat_cost} credits per question</td></tr>
         </table>
         <p class="muted">${n(P.credits_per_usd)} credits = $1. Credits never expire. Pay by ${[P.card && 'card', P.noid && 'NOID'].filter(Boolean).join(' or ') || '(payments not enabled yet)'}.
         ${P.noid ? `NOID price used: $${esc(P.noid.usd_per_noid)} per NOID.` : ''}</p></div>
       <div class="card" id="acct"></div>
       <div class="card"><h2>API reference</h2>
-        <p>Base URL <code>${esc(location.origin)}/api</code>. Send your key as the <code>x-api-key</code> header (or <code>?key=</code>). Without a key you are on the free tier.</p>
+        <p>Base URL <code>${esc(location.origin)}/api</code>. Every request needs your key as the <code>x-api-key</code> header (or <code>?key=</code>); create one free above. Keys without credits get the free tier.</p>
         <table>
           <tr><th>Endpoint</th><th>Returns</th></tr>
           <tr><td><code>GET /stats</code></td><td>Height, supply, difficulty, block reward, Live State, peers, node status</td></tr>
@@ -356,7 +358,7 @@ const pages = {
         <div class="grid"><div class="stat"><small>Balance (Live State)</small><b>${esc(noid(a.balance_micronoid))}</b></div>
         <div class="stat"><small>Live slots</small><b>${a.slots.length}</b></div></div></div>
       <div class="card"><h2>Live slots</h2>${rows(a.slots, ['slot_index', 'value', 'creation_id'])}</div>
-      <div class="card"><h2>Recent activity</h2>${kv(summary)}${rows(transactions, Object.keys(transactions?.[0] || {}))}</div>`;
+      <div class="card"><h2>Recent activity</h2>${kv(summary)}${rows(transactions, TX_COLS)}</div>`;
   },
 };
 

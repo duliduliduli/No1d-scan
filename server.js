@@ -228,17 +228,21 @@ async function handle(req, res) {
     }
     if (req.method !== 'GET') return send(405, { error: 'GET only' });
 
+    // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
+    // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
+    const ownPage = req.headers['sec-fetch-site'] === 'same-origin' || /^https?:\/\/([^/]+)/.exec(req.headers.referer || '')?.[1] === req.headers.host;
+    if (!acct && !ownPage && name !== 'stats') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
     if (url.pathname === '/api/live') return live(req, res);
     if (acct) bill.countRequest(acct);
     const hit = cache.get(req.url);
-    if (hit && hit.until > Date.now()) return send(200, hit.body, { 'cache-control': `public, max-age=${CACHE_MS / 1000 | 0}`, 'x-cache': 'HIT' });
+    if (hit && hit.until > Date.now()) return send(200, hit.body, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': 'HIT' });
 
     const route = Object.hasOwn(routes, name) && routes[name];
     if (!route) return send(404, { error: 'unknown endpoint' });
     const out = await route(decodeURIComponent(id), url.searchParams);
     if (out == null) return send(404, { error: 'not found' });
     if (CACHE_MS > 0) cache.set(req.url, { until: Date.now() + CACHE_MS, body: out });
-    send(200, out, { 'cache-control': `public, max-age=${CACHE_MS / 1000 | 0}`, 'x-cache': 'MISS' });
+    send(200, out, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': 'MISS' });
   } catch (e) {
     send(e.status || (e instanceof URIError ? 400 : 502), { error: e.message });
   }
