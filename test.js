@@ -22,7 +22,8 @@ const aiServer = http.createServer((req, res) => {
     res.end(JSON.stringify({ choices: [{ message }] }));
   });
 });
-let tip = 99, fork = ''; // `fork` changes hashes from height 98 up to simulate a reorg
+let tip = 99, fork = '';
+const holes = new Set(); // heights the fake node has no header for // `fork` changes hashes from height 98 up to simulate a reorg
 const hash = (h) => H(h, h >= 98 ? fork : '');
 // Target 2^240 little-endian -> 2^16 expected hashes per block; blocks 60 s apart; two alternating miners.
 const TARGET = '00'.repeat(30) + '0100';
@@ -32,7 +33,7 @@ const tx = (h) => ({ tx_hash: H(`tx${h}`), fee_micronoid: 10 });
 const node = {
   blockCount: () => tip,
   getBlockHash: ([h]) => header(h)?.hash ?? null,
-  getBlockHeader: ([h]) => header(h),
+  getBlockHeader: ([h]) => (holes.has(h) ? null : header(h)),
   getBlockDetails: ([h]) => header(h) && { header: header(h), retained: h > tip - 42 ? { reward_micronoid: 5e6, transactions: [tx(h)] } : null },
   getTx: ([id]) => (id === H('tx70') ? { tx_hash: id, height: 70, block_hash: hash(70), tx_position: 0 } : null),
   getChainInfo: () => ({ height: tip, active_slot_count: 10, circulating_supply_micronoid: '123000000' }),
@@ -321,6 +322,19 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual((await get(`search?q=${hash(5)}`))[1], { type: 'block', id: hash(5) }, 'any block hash is searchable');
   const [, bl] = await get('blocks?limit=3');
   assert.strictEqual(bl.blocks[0].txs, 1, 'tx count from captured body');
+
+  // Holes in the header history are refilled, not just the top; a height the node can't serve is not re-walked forever.
+  db.prepare('delete from headers where height between 30 and 40').run();
+  await tick();
+  assert.strictEqual(db.prepare('select count(*) n from headers').get().n, tip + 1, 'hole below the top refilled');
+  holes.add(5); db.prepare('delete from headers where height = 5').run();
+  let calls = 0; const realHeader = node.getBlockHeader; node.getBlockHeader = (a) => { calls++; return realHeader(a); };
+  await tick(); const first = calls; calls = 0; await tick();
+  assert.ok(first > tip - 10 && calls < 50, `walked from the hole once (${first} reads), then back to the top only (${calls})`);
+  assert.strictEqual(db.prepare('select count(*) n from headers').get().n, tip, 'the one unservable height stays missing');
+  node.getBlockHeader = realHeader; holes.clear();
+  // Big grouped queries keep temp data in memory (the service's /tmp is read-only).
+  assert.strictEqual(db.prepare('pragma temp_store').get().temp_store, 2);
 
   // Icons and link-preview image are served as files; anything else falls back to the app page.
   const base = `http://127.0.0.1:${server.address().port}`;

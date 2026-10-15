@@ -16,6 +16,9 @@ const CACHE_MS = Number(process.env.CACHE_MS ?? 5000); // API responses are reus
 const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'noid.db'));
 db.exec(`
   pragma journal_mode = wal;
+  -- Sorting/grouping big queries (miners or history over 7d+) needs temp space. The service runs with
+  -- ProtectSystem=strict, so /tmp is read-only and a temp file fails with "disk I/O error". Keep it in memory.
+  pragma temp_store = memory;
   create table if not exists blocks (height integer primary key, hash text not null, details text not null);
   create index if not exists blocks_hash on blocks(hash);
   create table if not exists stats (height integer primary key, ts integer, data text not null);
@@ -40,6 +43,9 @@ const q = {
   topBlock: db.prepare('select max(height) h from blocks'),
   charts: db.prepare('select height, ts, data from stats order by height desc limit 500'),
   headerTop: db.prepare('select max(height) h, count(*) n from headers'),
+  // Lowest height missing below the top (0 if genesis is missing), for refilling holes.
+  firstGap: db.prepare(`select case when not exists (select 1 from headers where height = 0) then 0
+    else (select min(a.height) + 1 from headers a where not exists (select 1 from headers b where b.height = a.height + 1)) end h`),
   addTick: db.prepare('insert or replace into price_ticks (ts, usd, volume_24h, supply) values (?, ?, ?, ?)'),
   ticks: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, avg(usd) usd, max(usd) hi, min(usd) lo, avg(volume_24h) volume_24h, avg(supply) supply
     from price_ticks where ts >= :since group by ts / cast(:b as integer) order by t`),
@@ -104,11 +110,15 @@ const workOf = (hex) => Number((1n << 256n) / (BigInt(`0x${hex.match(/../g).reve
 
 // Header history: walks forward from genesis, HEADER_BATCH x 200 headers per indexer pass, and re-reads the
 // last RETAINED heights each pass so reorgs overwrite. The first run backfills the whole chain in minutes.
+// If a height is missing below that (the node returned no header for it once), the walk restarts from the hole.
 const HEADER_BATCH = Number(process.env.HEADER_BATCH || 25);
-const history = { synced_to: -1, tip: 0 };
+const history = { synced_to: -1, tip: 0, missing: 0 };
+let stuckGap = null;
 async function syncHeaders(tip) {
-  const top = q.headerTop.get().h ?? -1;
-  let h = Math.max(0, top - RETAINED + 1);
+  const { h: top, n } = q.headerTop.get();
+  let h = Math.max(0, (top ?? -1) - RETAINED + 1);
+  const gap = top != null && n < top + 1 ? q.firstGap.get().h : null;
+  if (gap != null && gap !== stuckGap) h = Math.min(h, gap);
   for (let round = 0; round < HEADER_BATCH && h <= tip; round++) {
     const heights = Array.from({ length: Math.min(200, tip - h + 1) }, (_, i) => h + i);
     const rows = await rpcBatch(heights.map((x) => ['getBlockHeader', [x]]));
@@ -119,7 +129,9 @@ async function syncHeaders(tip) {
     } catch (e) { db.exec('rollback'); throw e; }
     h += heights.length;
   }
-  Object.assign(history, { synced_to: q.headerTop.get().h ?? -1, tip });
+  if (gap != null && q.firstGap.get().h === gap) stuckGap = gap; // the node had nothing for it either: don't re-walk every pass
+  const after = q.headerTop.get();
+  Object.assign(history, { synced_to: after.h ?? -1, tip, missing: after.h == null ? 0 : after.h + 1 - after.n });
 }
 
 // Current network numbers from the header history.

@@ -323,6 +323,17 @@ function minersCard(m) {
     return r.miner ? `<a class="bar" href="/address/${encodeURIComponent(r.miner)}" data-link title="${esc(r.miner)}">${inner}</a>` : `<div class="bar">${inner}</div>`;
   }).join('')}</div>`;
 }
+// Replaces the miners card, then wires its new tab buttons (the old ones are gone). A failed load says so
+// instead of leaving the previous window's numbers on screen.
+async function showMiners(path, onPick) {
+  try {
+    $('miners').innerHTML = minersCard(await api(path));
+    growBars();
+  } catch (e) {
+    $('miners').querySelector('.bars, .muted, .msg')?.replaceWith(Object.assign(document.createElement('p'), { className: 'msg err', textContent: `Could not load this window: ${e.message}` }));
+  }
+  onTabs('mwin', onPick);
+}
 const growBars = () => requestAnimationFrame(() => requestAnimationFrame(() => {
   for (const f of document.querySelectorAll('.fill[data-w]')) f.style.width = `${f.dataset.w}%`;
 }));
@@ -488,8 +499,8 @@ const pages = {
     for (const [id, v] of Object.entries({ h: s.chain.height, gh: s.chain.height, slots: s.state.active_slots, peers: s.peers, gpeers: s.peers, gcc: net?.peers.length })) $(id).dataset.v = v ?? 0;
     growBars();
     const loadCharts = async () => { $('charts').innerHTML = charts(await api(`history?window=${chartWin}&at=${tip}`)); };
-    const loadMiners = async () => { $('miners').innerHTML = minersCard(await api(`miners?window=${minerWin}&at=${tip}`)); growBars(); onTabs('mwin', (v) => { minerWin = v; loadMiners(); }); };
-    onTabs('cwin', (v) => { chartWin = v; loadCharts(); });
+    const loadMiners = () => showMiners(`miners?window=${minerWin}&at=${tip}`, (v) => { minerWin = v; loadMiners(); });
+    onTabs('cwin', (v) => { chartWin = v; loadCharts().catch((e) => { $('charts').innerHTML = `<p class="msg err">Could not load this window: ${esc(e.message)}</p>`; }); });
     onTabs('mwin', (v) => { minerWin = v; loadMiners(); });
     mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
@@ -648,7 +659,8 @@ const pages = {
     };
     for (const id of ['mh', 'mu', 'mw', 'mk']) $(id).oninput = calc;
     calc(); growBars();
-    onTabs('mwin', async (v) => { $('miners').innerHTML = minersCard(await api(`miners?window=${v}`)); growBars(); });
+    const pick = (v) => showMiners(`miners?window=${v}`, pick);
+    onTabs('mwin', pick);
   },
 
 
