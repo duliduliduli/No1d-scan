@@ -1,0 +1,35 @@
+# Every push to main: run the tests, then copy the code to the droplet and restart the explorer.
+# Needs repo secrets DEPLOY_HOST (droplet IP) and DEPLOY_KEY (private key of the droplet's `deploy` user); skips deploy until both exist.
+name: Test and deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency: deploy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to droplet
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then echo "DEPLOY_HOST / DEPLOY_KEY not set yet, skipping deploy"; exit 0; fi
+          mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          SSH="ssh -i $HOME/.ssh/deploy -o StrictHostKeyChecking=accept-new"
+          rsync -az --delete --exclude .git --exclude 'noid.db*' -e "$SSH" ./ "deploy@$HOST:/opt/noid-scan/"
+          $SSH "deploy@$HOST" 'sudo systemctl restart noid-scan && sleep 3 && systemctl is-active noid-scan && curl -fsS -o /dev/null http://127.0.0.1:8080/ && echo "deployed OK"'

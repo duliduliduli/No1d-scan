@@ -41,6 +41,20 @@ All amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); large values com
 
 Run the indexer continuously. Any block body it misses is gone once the node prunes it.
 
+### Auto-deploy
+
+`.github/workflows/deploy.yml` runs the tests on every push to `main` and, if they pass, copies the code to the droplet and restarts `noid-scan`. One-time setup on the droplet (as root):
+
+```bash
+useradd -m -s /bin/bash deploy
+chown -R deploy:deploy /opt/noid-scan
+echo 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart noid-scan' > /etc/sudoers.d/deploy && chmod 440 /etc/sudoers.d/deploy
+sudo -u deploy sh -c 'mkdir -p -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -C github-deploy -f ~/.ssh/id_deploy && cat ~/.ssh/id_deploy.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+cat /home/deploy/.ssh/id_deploy
+```
+
+Copy the printed private key (all of it, including the `BEGIN`/`END` lines) into the GitHub secret `DEPLOY_KEY`, put the droplet IP in `DEPLOY_HOST`, then delete the server copy: `rm /home/deploy/.ssh/id_deploy`. GitHub's runners connect over SSH, so port 22 must be open to them (key-only login).
+
 ## Monetization
 
 Set `DONATE_ADDRESS` to show a donation address in the footer.
