@@ -19,6 +19,10 @@ db.exec(`
   create table if not exists blocks (height integer primary key, hash text not null, details text not null);
   create index if not exists blocks_hash on blocks(hash);
   create table if not exists stats (height integer primary key, ts integer, data text not null);
+  -- Every header since genesis (headers are never pruned): powers all-time hashrate, block time and miner stats.
+  create table if not exists headers (height integer primary key, hash text not null, ts integer not null, miner text, work real not null, slots integer);
+  create index if not exists headers_hash on headers(hash);
+  create index if not exists headers_ts on headers(ts);
 `);
 const q = {
   hashAt: db.prepare('select hash from blocks where height = ?'),
@@ -28,8 +32,22 @@ const q = {
   hasStat: db.prepare('select 1 from stats where height = ?'),
   addStat: db.prepare('insert or replace into stats (height, ts, data) values (?, ?, ?)'),
   charts: db.prepare('select height, ts, data from stats order by height desc limit 500'),
-  miners: db.prepare(`select json_extract(details, '$.header.miner') miner, count(*) blocks, max(height) last
-    from (select details, height from blocks order by height desc limit ?) group by miner order by blocks desc`),
+  headerTop: db.prepare('select max(height) h, count(*) n from headers'),
+  putHeader: db.prepare('insert or replace into headers (height, hash, ts, miner, work, slots) values (?, ?, ?, ?, ?, ?)'),
+  headerByHash: db.prepare('select height from headers where hash = ?'),
+  recentWork: db.prepare('select count(*) n, min(ts) t0, max(ts) t1, sum(work) w from (select ts, work from headers order by height desc limit ?)'),
+  tipWork: db.prepare('select work from headers order by height desc limit 1'),
+  blocksSince: db.prepare('select count(*) n from headers where ts >= ?'),
+  // One row per bucket: hashrate = work done / time it took; block time = time / blocks.
+  // node:sqlite binds JS numbers as REAL, so the bucket is cast to integer for integer division.
+  history: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, count(*) blocks, avg(work) work, max(slots) slots,
+      case when max(ts) > min(ts) then sum(work) / (max(ts) - min(ts)) end hashrate,
+      case when count(*) > 1 then (max(ts) - min(ts)) * 1.0 / (count(*) - 1) end block_time
+    from headers where ts >= :since group by ts / cast(:b as integer) order by t`),
+  minersSince: db.prepare('select miner, count(*) blocks, max(height) last from headers where ts >= ? group by miner order by blocks desc'),
+  bodyStats: db.prepare(`select height, json_extract(details, '$.retained.reward_micronoid') reward, json_extract(details, '$.retained.total_fees_micronoid') fees,
+      json_array_length(details, '$.retained.transactions') txs from blocks where height between ? and ?`),
+  txs24h: db.prepare(`select sum(json_array_length(details, '$.retained.transactions')) n, count(*) blocks from blocks where json_extract(details, '$.header.timestamp') >= ?`),
 };
 
 async function rpc(method, params = []) {
@@ -42,6 +60,57 @@ async function rpc(method, params = []) {
   const body = await res.json();
   if (body.error) throw new Error(`${method}: ${body.error.message}`);
   return body.result;
+}
+
+// JSON-RPC batch: [[method, params], ...] -> results in order. The node accepts batches up to ~2 MB.
+async function rpcBatch(calls) {
+  const res = await fetch(RPC_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(RPC_TOKEN && { authorization: `Bearer ${RPC_TOKEN}` }) },
+    body: JSON.stringify(calls.map(([m, params], id) => ({ jsonrpc: '2.0', id, method: `paranoid_${m}`, params }))),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = await res.json();
+  if (!Array.isArray(body)) throw new Error(`batch: ${body?.error?.message || 'not supported'}`);
+  const out = [];
+  for (const r of body) { if (r.error) throw new Error(`batch: ${r.error.message}`); out[r.id] = r.result; }
+  return out;
+}
+
+// Expected hashes per block. Targets are little-endian 256-bit (checked against live blocks: ~6.5 TH at height 221,614).
+const workOf = (hex) => Number((1n << 256n) / (BigInt(`0x${hex.match(/../g).reverse().join('')}`) + 1n));
+
+// Header history: walks forward from genesis, HEADER_BATCH x 200 headers per indexer pass, and re-reads the
+// last RETAINED heights each pass so reorgs overwrite. The first run backfills the whole chain in minutes.
+const HEADER_BATCH = Number(process.env.HEADER_BATCH || 25);
+const history = { synced_to: -1, tip: 0 };
+async function syncHeaders(tip) {
+  const top = q.headerTop.get().h ?? -1;
+  let h = Math.max(0, top - RETAINED + 1);
+  for (let round = 0; round < HEADER_BATCH && h <= tip; round++) {
+    const heights = Array.from({ length: Math.min(200, tip - h + 1) }, (_, i) => h + i);
+    const rows = await rpcBatch(heights.map((x) => ['getBlockHeader', [x]]));
+    db.exec('begin');
+    try {
+      for (const r of rows) if (r?.difficulty_target) q.putHeader.run(r.height, r.hash, r.timestamp, r.miner ?? null, workOf(r.difficulty_target), r.active_slot_count ?? null);
+      db.exec('commit');
+    } catch (e) { db.exec('rollback'); throw e; }
+    h += heights.length;
+  }
+  Object.assign(history, { synced_to: q.headerTop.get().h ?? -1, tip });
+}
+
+// Current network numbers from the header history.
+function networkStats() {
+  const r = q.recentWork.get(120); // ~1 hour at the 30 s target
+  const span = r.t1 - r.t0;
+  return {
+    hashrate: span > 0 ? r.w / span : null, // hashes per second
+    avg_block_time: r.n > 1 ? span / (r.n - 1) : null,
+    difficulty_work: q.tipWork.get()?.work ?? null, // expected hashes per block
+    blocks_24h: q.blocksSince.get(Math.floor(Date.now() / 1000) - 86400).n,
+    history,
+  };
 }
 
 // One indexer pass. Re-checking the whole retained window by hash also handles reorgs:
@@ -67,6 +136,7 @@ async function tick() {
     };
     q.addStat.run(tip, header?.timestamp ?? null, JSON.stringify(data));
   }
+  await syncHeaders(tip);
   await bill.settleNoid();
   Object.assign(indexer, { tip, at: Date.now() });
 }
@@ -176,12 +246,14 @@ async function pollNetwork() {
 
 const bill = require('./billing.js')(db, rpc, () => price.now?.usd);
 
+const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
+
 const routes = {
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
       rpc('getChainInfo'), rpc('getStateInfo'), rpc('getNodeStatus'), rpc('getPeerCount'), rpc('getMiningInfo'),
     ]);
-    return { chain, state, node, peers, mining, indexer, price: price.now, donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled };
+    return { chain, state, node, peers, mining, indexer, network: networkStats(), txs_24h: q.txs24h.get(Math.floor(Date.now() / 1000) - 86400), price: price.now, donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled };
   },
 
   async blocks(_, params) {
@@ -191,13 +263,18 @@ const routes = {
     const heights = [];
     for (let h = before; h >= 0 && heights.length < limit; h--) heights.push(h);
     const headers = await Promise.all(heights.map((h) => rpc('getBlockHeader', [h])));
-    return { tip, blocks: headers.filter(Boolean).map((b) => ({ ...b, indexed: !!q.hashAt.get(b.height) })) };
+    // Tx count, reward and fees exist only for bodies this explorer captured.
+    const body = new Map(q.bodyStats.all(heights.at(-1) ?? 0, heights[0] ?? 0).map((r) => [r.height, r]));
+    return { tip, blocks: headers.filter(Boolean).map((b) => {
+      const x = body.get(b.height);
+      return { ...b, txs: x?.txs ?? null, reward_micronoid: x?.reward ?? null, total_fees_micronoid: x?.fees ?? null, indexed: !!x };
+    }) };
   },
 
   async block(id) {
     if (RE.height.test(id)) return blockByHeight(Number(id));
     if (RE.hash.test(id)) {
-      const row = q.heightOf.get(id);
+      const row = q.heightOf.get(id) ?? q.headerByHash.get(id);
       return row ? blockByHeight(row.height) : null;
     }
     throw Object.assign(new Error('expected a height or 64-char hex hash'), { status: 400 });
@@ -229,12 +306,34 @@ const routes = {
     return network;
   },
 
-  // Who mined the last N blocks this explorer has indexed.
+  // Who mined blocks in a window (24h, 7d, 30d, all), from the full header history.
   async miners(_, params) {
-    const n = Math.min(Math.max(Number(params.get('blocks')) || 500, 10), 5000);
-    const rows = q.miners.all(n);
+    const since = Math.floor(Date.now() / 1000) - (WINDOWS[params.get('window')] ?? WINDOWS['24h']);
+    const rows = q.minersSince.all(since);
     const total = rows.reduce((s, r) => s + r.blocks, 0);
-    return { blocks: total, miners: rows.slice(0, 15).map((r) => ({ ...r, share: r.blocks / total })) };
+    return { window: params.get('window') || '24h', blocks: total, miner_count: rows.length, miners: rows.slice(0, 15).map((r) => ({ ...r, share: r.blocks / total })) };
+  },
+
+  // Time series for charts: hashrate, block time, difficulty, active slots per bucket.
+  async history(_, params) {
+    const w = params.get('window') || '24h';
+    const now = Math.floor(Date.now() / 1000);
+    const bucket = { '24h': 3600, '7d': 3 * 3600, '30d': 86400, all: 86400 }[w] ?? 3600;
+    return { window: w, bucket, points: q.history.all({ b: bucket, since: now - (WINDOWS[w] ?? WINDOWS['24h']) }), sync: history };
+  },
+
+  async mempool() {
+    const [info, f11, f12, f22] = await Promise.all([
+      rpc('getMempoolInfo'), rpc('estimateFeeDetailed', [1, 1]), rpc('estimateFeeDetailed', [1, 2]), rpc('estimateFeeDetailed', [2, 2]),
+    ]);
+    const txs = info?.txs ?? [];
+    return {
+      size: info?.size ?? txs.length, fee_floor: info?.fee_floor ?? null,
+      total_fees_micronoid: txs.reduce((s, t) => s + Number(t.fee_micronoid || 0), 0),
+      txs: txs.slice(0, 100),
+      // Minimum accepted fee for common shapes (inputs -> outputs); NOID fees are rule-based, not an auction.
+      fees: [{ shape: '1 → 1', ...f11 }, { shape: '1 → 2 (typical payment)', ...f12 }, { shape: '2 → 2', ...f22 }].map((f) => ({ shape: f.shape, fee_micronoid: f.fee_micronoid, burn_slots: f.net_new_slots })),
+    };
   },
 
   async price() {
@@ -251,7 +350,7 @@ const routes = {
     if (RE.address.test(s)) return { type: 'address', id: s };
     if (RE.hash.test(s)) {
       if (await rpc('getTx', [s])) return { type: 'tx', id: s };
-      if (q.heightOf.get(s)) return { type: 'block', id: s };
+      if (q.heightOf.get(s) || q.headerByHash.get(s)) return { type: 'block', id: s };
     }
     return null;
   },
@@ -352,7 +451,9 @@ async function livePoll() {
       rpc('getChainInfo'), rpc('getPeerCount'), rpc('getMiningInfo'), rpc('getStateInfo'), rpc('getNodeStatus'),
     ]);
     const header = lastLive?.chain.height === chain.height ? lastLive.header : await rpc('getBlockHeader', [chain.height]);
-    lastLive = { chain, peers, mining, state, node: { synced: node.synced, sync_stage: node.sync_stage }, header, price: price.now, at: Date.now() };
+    const mp = await rpc('getMempoolInfo').catch(() => null);
+    const mempool = mp && { size: mp.size ?? mp.txs?.length ?? 0, fee_floor: mp.fee_floor ?? null, total_fees_micronoid: (mp.txs ?? []).reduce((s, t) => s + Number(t.fee_micronoid || 0), 0) };
+    lastLive = { chain, peers, mining, state, node: { synced: node.synced, sync_stage: node.sync_stage }, header, mempool, network: networkStats(), price: price.now, at: Date.now() };
     for (const res of listeners) res.write(`data: ${JSON.stringify(lastLive)}\n\n`);
   } catch (e) {
     for (const res of listeners) res.write(`event: down\ndata: ${JSON.stringify(e.message)}\n\n`);
@@ -384,4 +485,4 @@ if (require.main === module) {
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, peerIps };
+module.exports = { server, tick, db, price, peerIps, workOf };

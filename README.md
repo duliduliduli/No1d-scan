@@ -26,7 +26,9 @@ npm start     # http://127.0.0.1:8080
 
 ## API
 
-`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…`
+`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price` · `/api/live` (server-sent events)
+
+**Full history.** Block headers are never pruned, so the indexer stores every header since genesis (height, hash, time, miner, expected work) and keeps the newest in step, 25 × 200 headers per pass via JSON-RPC batches (`HEADER_BATCH`). On a fresh database the first ~221k headers take a few minutes. Hashrate = expected work per block (`2^256 / target`, target read little-endian) ÷ observed block time; every block hash becomes searchable.
 
 All amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); large values come as decimal strings. A block hash is searchable only once the explorer has indexed that block, because the node looks blocks up by height only.
 

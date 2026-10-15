@@ -18,7 +18,9 @@ const TOOLS = [
   fn('transaction', 'One transaction by 64-hex txid.', { txid: { type: 'string' } }, ['txid']),
   fn('address', 'Balance, live slots and recent activity of an o1… address.', { address: { type: 'string' } }, ['address']),
   fn('recent_transactions', 'Most recent transactions across the chain.'),
-  fn('history', 'Per-block history of difficulty, active slots, supply and peers, for trends.'),
+  fn('network_history', 'Hashrate (H/s), average block time (s), difficulty (expected hashes per block) and active slots over time, from every header since genesis.', { window: { type: 'string', enum: ['24h', '7d', '30d', 'all'] } }),
+  fn('top_miners', 'Miner addresses ranked by blocks mined in a time window, with share of blocks.', { window: { type: 'string', enum: ['24h', '7d', '30d', 'all'] } }),
+  fn('mempool', 'Pending transactions, fee floor and the current minimum fee for common transaction shapes.'),
 ];
 
 module.exports = function chat(routes) {
@@ -31,7 +33,9 @@ module.exports = function chat(routes) {
     transaction: (a) => routes.tx(String(a.txid)),
     address: (a) => routes.address(String(a.address), p({})),
     recent_transactions: () => routes.txs('', p({})),
-    history: async () => (await routes.charts()).slice(-60),
+    network_history: async (a) => { const h = await routes.history('', p({ window: a.window || '7d' })); return { ...h, points: h.points.slice(-60) }; },
+    top_miners: (a) => routes.miners('', p({ window: a.window || '24h' })),
+    mempool: () => routes.mempool(),
   };
 
   async function call(messages) {

@@ -24,7 +24,9 @@ const aiServer = http.createServer((req, res) => {
 });
 let tip = 99, fork = ''; // `fork` changes hashes from height 98 up to simulate a reorg
 const hash = (h) => H(h, h >= 98 ? fork : '');
-const header = (h) => (h <= tip ? { height: h, hash: hash(h), prev_hash: hash(h - 1), timestamp: 1700000000 + h * 60 } : null);
+// Target 2^240 little-endian -> 2^16 expected hashes per block; blocks 60 s apart; two alternating miners.
+const TARGET = '00'.repeat(30) + '0100';
+const header = (h) => (h <= tip ? { height: h, hash: hash(h), prev_hash: hash(h - 1), timestamp: 1700000000 + h * 60, miner: h % 2 ? 'o1minerodd' : 'o1minereven', difficulty_target: TARGET, active_slot_count: 1000 + h } : null);
 const tx = (h) => ({ tx_hash: H(`tx${h}`), fee_micronoid: 10 });
 
 const node = {
@@ -39,13 +41,16 @@ const node = {
   getSlotsByOwner: ([a]) => (a === PAY_ADDR ? paySlots : [{ slot_index: 1, value: '9007199254740993' }, { slot_index: 2, value: 7 }]),
   getRecentTransactions: () => ({ total: 0, transactions: [] }),
   getStateInfo: () => ({}), getNodeStatus: () => ({}),
+  getMempoolInfo: () => ({ size: 2, fee_floor: 5000, txs: [{ tx_hash: H('m1'), fee_micronoid: 9000, fee_rate: 1285, n_inputs: 1, n_outputs: 2 }, { tx_hash: H('m2'), fee_micronoid: 6000, fee_rate: 654, n_inputs: 1, n_outputs: 1 }] }),
+  estimateFeeDetailed: ([i, o]) => ({ n_inputs: i, n_outputs: o, net_new_slots: o - i, fee_micronoid: 5000 + 1000 * o }),
 };
 
 const rpcServer = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c)).on('end', () => {
-    const { method, params } = JSON.parse(body);
-    res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: node[method.replace('paranoid_', '')](params) }));
+    const call = ({ id, method, params }) => ({ jsonrpc: '2.0', id, result: node[method.replace('paranoid_', '')](params) });
+    const req = JSON.parse(body);
+    res.end(JSON.stringify(Array.isArray(req) ? req.map(call) : call(req)));
   });
 });
 
@@ -183,6 +188,25 @@ test('indexer + api', async (t) => {
   assert.strictEqual(live.header.height, tip);
   ac.abort();
 
+  // Header history: every height from genesis, overwritten on reorg; hashrate = work / time.
+  assert.strictEqual(db.prepare('select count(*) n from headers').get().n, tip + 1, 'all headers since genesis');
+  assert.strictEqual(db.prepare('select hash from headers where height = 100').get().hash, hash(100), 'reorged header replaced');
+  const [, st] = await get('stats');
+  assert.ok(Math.abs(st.network.hashrate - 65536 / 60) < 15, `hashrate ${st.network.hashrate}`);
+  assert.strictEqual(st.network.avg_block_time, 60);
+  const [, allMiners] = await get('miners?window=all');
+  assert.deepStrictEqual(allMiners.miners.map((m) => m.miner).sort(), ['o1minereven', 'o1minerodd']);
+  assert.strictEqual(allMiners.blocks, tip + 1);
+  const [, series] = await get('history?window=all');
+  assert.ok(series.points.length >= 1 && series.points[0].hashrate > 0 && series.points[0].block_time === 60);
+  const [, mp] = await get('mempool');
+  assert.strictEqual(mp.size, 2);
+  assert.strictEqual(mp.total_fees_micronoid, 15000);
+  assert.strictEqual(mp.fees[1].fee_micronoid, 7000);
+  assert.deepStrictEqual((await get(`search?q=${hash(5)}`))[1], { type: 'block', id: hash(5) }, 'any block hash is searchable');
+  const [, bl] = await get('blocks?limit=3');
+  assert.strictEqual(bl.blocks[0].txs, 1, 'tx count from captured body');
+
   // Peer map: only established connections on the P2P port with public IPs count.
   const { peerIps } = require('./server.js');
   const procNet = [
@@ -195,8 +219,6 @@ test('indexer + api', async (t) => {
     '   5: 00000000000000000000000000000000:2580 0000000000000000FFFF00000A0B0C0D:C351 01', // v4-mapped v6
   ].join('\n');
   assert.deepStrictEqual(peerIps(procNet).sort(), ['1.1.1.1', '13.12.11.10', '8.8.8.8']);
-  const [, miners] = await get('miners?blocks=50');
-  assert.ok(miners.blocks > 0 && miners.miners.every((m) => m.share > 0 && m.share <= 1));
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
