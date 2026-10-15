@@ -7,6 +7,21 @@ const H = (n, salt = '') => require('node:crypto').createHash('sha256').update(`
 const ADDR = 'o1qqqqqqqqqqqq';
 const PAY_ADDR = 'o1payqqqqqqqq';
 let paySlots = [];
+const WHSEC = 'whsec_test';
+// Fake OpenRouter: first asks for the chain_stats tool, then answers from the tool result.
+let aiDown = false;
+const aiServer = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c)).on('end', () => {
+    if (aiDown) { res.writeHead(500); return res.end(JSON.stringify({ error: { message: 'down' } })); }
+    const { messages } = JSON.parse(body);
+    const toolMsg = messages.find((m) => m.role === 'tool');
+    const message = toolMsg
+      ? { role: 'assistant', content: `The height is ${JSON.parse(toolMsg.content).chain.height}.` }
+      : { role: 'assistant', content: '', tool_calls: [{ id: 't1', type: 'function', function: { name: 'chain_stats', arguments: '{}' } }] };
+    res.end(JSON.stringify({ choices: [{ message }] }));
+  });
+});
 let tip = 99, fork = ''; // `fork` changes hashes from height 98 up to simulate a reorg
 const hash = (h) => H(h, h >= 98 ? fork : '');
 const header = (h) => (h <= tip ? { height: h, hash: hash(h), prev_hash: hash(h - 1), timestamp: 1700000000 + h * 60 } : null);
@@ -39,11 +54,17 @@ test('indexer + api', async (t) => {
   process.env.RPC_URL = `http://127.0.0.1:${rpcServer.address().port}`;
   process.env.DB_PATH = ':memory:';
   process.env.PAY_ADDRESS = PAY_ADDR;
-  process.env.KEY_PRICE_NOID = '25';
+  process.env.USD_PER_NOID = '0.20'; // $5 pack = 25 NOID
+  process.env.STRIPE_SECRET_KEY = 'sk_test_x';
+  process.env.STRIPE_WEBHOOK_SECRET = WHSEC;
+  await new Promise((r) => aiServer.listen(0, r));
+  process.env.OPENROUTER_API_KEY = 'or-test';
+  process.env.OPENROUTER_URL = `http://127.0.0.1:${aiServer.address().port}`;
   const { server, tick, db } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
-  const get = async (p) => { const r = await fetch(`http://127.0.0.1:${server.address().port}/api/${p}`); return [r.status, await r.json(), r.headers]; };
-  t.after(() => { server.close(); rpcServer.close(); });
+  const get = async (p, opt = {}) => { const r = await fetch(`http://127.0.0.1:${server.address().port}/api/${p}`, opt); return [r.status, await r.json(), r.headers]; };
+  const post = (p, body, headers = {}) => get(p, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } });
+  t.after(() => { server.close(); rpcServer.close(); aiServer.close(); });
 
   await tick();
   const count = () => db.prepare('select count(*) n, min(height) lo from blocks').get();
@@ -91,30 +112,55 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('stats'))[2].get('x-cache'), 'MISS');
   assert.strictEqual((await get('stats'))[2].get('x-cache'), 'HIT');
 
-  // Buy an API key with NOID: unique amount -> matching slot appears -> key issued.
-  const [, order] = await get('pay/new');
-  assert.ok(order.amount > 25e6 && order.amount < 25.01e6 && order.paid === false && order.address === PAY_ADDR);
-  paySlots = [{ slot_index: 9, value: String(order.amount), creation_id: 'c1' }, { slot_index: 10, value: String(order.amount), creation_id: 'c2' }];
-  await tick();
-  const [, paid] = await get(`pay/${order.id}`);
-  assert.ok(paid.paid && /^[0-9a-f]{32}$/.test(paid.key) && paid.expires > Date.now());
-  await tick();
-  assert.strictEqual((await get(`pay/${order.id}`))[1].key, paid.key, 'a second pass does not re-issue');
-  assert.strictEqual((await get(`stats?key=${paid.key}`))[2].get('x-tier'), 'paid');
-  assert.strictEqual((await get('stats?key=bogus'))[2].get('x-tier'), 'free');
-  assert.strictEqual((await get('pay/nope'))[0], 404);
+  // Accounts: key shown once, only its hash stored.
+  const [, acct] = await post('account', {});
+  assert.match(acct.key, /^nk_[0-9a-f]{40}$/);
+  assert.strictEqual(db.prepare('select count(*) n from accounts where key_hash = ?').get(acct.key).n, 0, 'raw key never stored');
+  const K = { 'x-api-key': acct.key };
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 0);
+  assert.strictEqual((await get('me'))[0], 401);
+  assert.strictEqual((await get('me', { headers: { 'x-api-key': 'nk_' + '0'.repeat(40) } }))[0], 401);
 
-  // Live feed pushes the node's current numbers.
-  const ac = new AbortController();
-  const r = await fetch(`http://127.0.0.1:${server.address().port}/api/live`, { signal: ac.signal });
-  assert.strictEqual(r.headers.get('content-type'), 'text/event-stream');
-  const reader = r.body.getReader();
-  let buf = '';
-  while (!buf.includes('data: {')) buf += new TextDecoder().decode((await reader.read()).value);
-  const evt = JSON.parse(buf.slice(buf.indexOf('data: {') + 6).split('\n')[0]);
-  assert.strictEqual(evt.chain.height, tip);
-  assert.strictEqual(evt.header.height, tip);
-  ac.abort();
+  // NOID top-up: unique amount -> matching slot appears -> credits added once.
+  const [, quote] = await post('topup', { method: 'noid', usd: 5 }, K);
+  const micro = Math.round(Number(quote.amount_noid) * 1e6);
+  assert.ok(micro > 25e6 && micro < 25.01e6 && quote.paid === false && quote.address === PAY_ADDR);
+  assert.strictEqual((await post('topup', { method: 'noid', usd: 7 }, K))[0], 400, 'only fixed packs');
+  paySlots = [{ slot_index: 9, value: String(micro), creation_id: 'c1' }];
+  await tick(); await tick();
+  assert.strictEqual((await get(`topup/${quote.id}`, { headers: K }))[1].paid, true);
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000, 'credited exactly once');
+  const [, q2] = await post('topup', { method: 'noid', usd: 5 }, K);
+  paySlots = [{ slot_index: 9, value: String(Math.round(Number(q2.amount_noid) * 1e6)), creation_id: 'c1' }];
+  await tick();
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000, 'an already-used slot cannot pay a second quote');
+  assert.strictEqual((await get(`stats?key=${acct.key}`))[2].get('x-tier'), 'paid');
+
+  // Stripe webhook: only correctly signed events credit, and replays are ignored.
+  const evt = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_1', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, metadata: { credits: '20000' } } } });
+  const sign = (body, ts = Math.floor(Date.now() / 1000)) => `t=${ts},v1=${require('node:crypto').createHmac('sha256', WHSEC).update(`${ts}.${body}`).digest('hex')}`;
+  assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': 't=1,v1=00' }))[0], 400);
+  assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt, 1000) }))[0], 400, 'old timestamp rejected');
+  assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) }))[0], 200);
+  await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) });
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 25000, 'webhook replay credits once');
+
+  // Chatbot: answers via tools from real routes; 3 free a day, then paid at 5 credits; refunded on model errors.
+  const ask = (h = {}) => post('chat', { messages: [{ role: 'user', content: 'what is the height?' }] }, h);
+  const [, a1] = await ask();
+  assert.match(a1.reply, new RegExp(`height is ${tip}`), 'answer built from the chain_stats tool');
+  assert.strictEqual(a1.free_left, 2);
+  await ask(); await ask();
+  assert.strictEqual((await ask())[0], 402, 'free quota used up');
+  const [, a5] = await ask(K);
+  assert.strictEqual(a5.paid, true);
+  assert.strictEqual(a5.credits, 24995);
+  aiDown = true;
+  assert.strictEqual((await ask(K))[0], 502);
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 24995, 'refunded when the model fails');
+  aiDown = false;
+  const hist = (await get('me', { headers: K }))[1].history.map((h) => h.reason);
+  assert.ok(hist.includes('AI question') && hist.some((r) => r.startsWith('Card top-up')) && hist.some((r) => r.startsWith('NOID top-up')));
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);

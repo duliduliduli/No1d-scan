@@ -15,7 +15,15 @@
   header { display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--line) }
   header h1 { margin:0; font:700 15px var(--mono); letter-spacing:.14em; text-transform:uppercase } header h1 a { color:var(--accent) }
   header h1 a::before { content:''; display:inline-block; width:8px; height:8px; background:var(--accent); box-shadow:var(--glow); margin-right:10px; vertical-align:1px }
-  nav a { font:600 12px var(--mono); letter-spacing:.1em; text-transform:uppercase }
+  nav { display:flex; gap:16px } nav a { font:600 12px var(--mono); letter-spacing:.1em; text-transform:uppercase }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center } .row input { flex:1; min-width:200px }
+  .price td, .price th { white-space:normal }
+  .msgs { display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow-y:auto; margin-bottom:12px }
+  .msg { padding:10px 14px; border-radius:6px; white-space:pre-wrap; line-height:1.55; max-width:85% }
+  .msg.user { align-self:flex-end; background:var(--head); border:1px solid var(--line) }
+  .msg.bot { align-self:flex-start; background:rgba(168,245,233,.06); border:1px solid rgba(168,245,233,.25) }
+  .msg.err { border-color:#ff6b6b; color:#ffb3b3 }
+  button:disabled { opacity:.5; cursor:wait }
   form { flex:1; display:flex; min-width:240px }
   button { padding:9px 14px; border:1px solid var(--accent); border-radius:3px; background:transparent; color:var(--accent); font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; cursor:pointer } button:hover { box-shadow:var(--glow) }
   .big { font:700 22px var(--mono); color:var(--gold); user-select:all } .addr { font:14px var(--mono); user-select:all; word-break:break-all }
@@ -31,7 +39,7 @@
   .stat b .mono { font-size:inherit }
   table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top }
   th { color:var(--muted); font:600 12px var(--mono); letter-spacing:.06em; text-transform:uppercase; white-space:nowrap } td { word-break:break-all }
-  .list td { white-space:nowrap } .list td .mono { display:inline-block; max-width:26ch; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom }
+  .list td { white-space:nowrap } .list td a.mono { display:inline-block; max-width:26ch; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom }
   tr:hover td { background:rgba(168,245,233,.04) }
   .mono { font-family:var(--mono); font-size:14px } .muted { color:var(--muted) }
   /* Card titles become panel header strips. */
@@ -56,7 +64,7 @@
 <body>
 <header>
   <h1><a href="/" data-link>NOID Scan</a></h1>
-  <nav><a href="/api-access" data-link>API</a></nav>
+  <nav><a href="/account" data-link>API &amp; Credits</a> <a href="/chat" data-link>Ask AI</a></nav>
   <form id="search"><input name="q" placeholder="Height, block hash, txid or o1… address" aria-label="Search" autocomplete="off"></form>
 </header>
 <main id="app" aria-live="polite"></main>
@@ -64,7 +72,19 @@
 <script>
 const app = document.getElementById('app');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const api = async (p) => { const r = await fetch('/api/' + p); const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; };
+const myKey = () => { try { return localStorage.getItem('nk') || ''; } catch { return ''; } };
+const saveKey = (k) => { try { k ? localStorage.setItem('nk', k) : localStorage.removeItem('nk'); } catch {} };
+// Sends the account key (if any) so paid users get their tier everywhere.
+const api = async (p, body) => {
+  const k = myKey();
+  const r = await fetch('/api/' + p, body === undefined ? { headers: k ? { 'x-api-key': k } : {} }
+    : { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...(k && { 'x-api-key': k }) } });
+  const j = await r.json();
+  if (!r.ok) throw Object.assign(new Error(j.error), { status: r.status });
+  return j;
+};
+const n0 = (x) => Number(x ?? 0).toLocaleString();
+const usd = (credits, per) => `$${(credits / per).toFixed(2)}`;
 
 // μNOID integer (number or decimal string) -> "1.234567 NOID", without float rounding.
 function noid(v) {
@@ -201,27 +221,134 @@ const pages = {
     app.innerHTML = `<div class="card"><h2>Transaction</h2>${kv(ptr)}</div>
       <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
   },
-  'api-access': async () => {
-    const s = await api('stats');
-    const p = s.pay;
-    const order = async (id) => {
-      const o = await api('pay/' + id);
-      try { localStorage.setItem('order', o.id); } catch {}
-      document.getElementById('order').innerHTML = o.paid
-        ? `<p>Paid. Your key (save it, it is shown only here):</p><p class="big">${esc(o.key)}</p><p class="muted">Valid until ${esc(when(o.expires / 1000))}.</p>`
-        : `<p>Send <b>exactly</b> this amount to the address below. The key appears here automatically, usually within a minute of the payment confirming. Quote valid 24 h.</p>
-           <p class="big">${esc(o.amount_noid)} NOID</p><p class="addr">${esc(o.address)}</p><p class="muted">Order ${esc(o.id)} · waiting for payment…</p>`;
-      if (!o.paid && location.pathname === '/api-access') setTimeout(() => order(o.id).catch(() => {}), 10_000);
+  'api-access': () => go('/account'),
+
+  async account() {
+    const P = await api('pricing');
+    const key = myKey();
+    let me = null;
+    if (key) try { me = await api('me'); } catch (e) { if (e.status === 401) saveKey(''); else throw e; }
+    const n = (x) => Number(x).toLocaleString();
+    app.innerHTML = `
+      <div class="card"><h2>Pricing</h2>
+        <table class="price"><tr><th></th><th>Free</th><th>With credits</th></tr>
+          <tr><td>Explorer website, live data</td><td>Unlimited</td><td>Unlimited</td></tr>
+          <tr><td>API requests</td><td>${n(120)} per minute per IP, no key</td><td>${n(3000)} per minute · 1 credit per ${n(P.requests_per_credit)} requests</td></tr>
+          <tr><td>AI assistant</td><td>${P.free_chats_per_day} questions per day</td><td>${P.chat_cost} credits per question</td></tr>
+        </table>
+        <p class="muted">${n(P.credits_per_usd)} credits = $1. Credits never expire. Pay by ${[P.card && 'card', P.noid && 'NOID'].filter(Boolean).join(' or ') || '(payments not enabled yet)'}.
+        ${P.noid ? `NOID price used: $${esc(P.noid.usd_per_noid)} per NOID.` : ''}</p></div>
+      <div class="card" id="acct"></div>
+      <div class="card"><h2>API reference</h2>
+        <p>Base URL <code>${esc(location.origin)}/api</code>. Send your key as the <code>x-api-key</code> header (or <code>?key=</code>). Without a key you are on the free tier.</p>
+        <table>
+          <tr><th>Endpoint</th><th>Returns</th></tr>
+          <tr><td><code>GET /stats</code></td><td>Height, supply, difficulty, block reward, Live State, peers, node status</td></tr>
+          <tr><td><code>GET /live</code></td><td>Server-sent events: the stats above, pushed every 2 s</td></tr>
+          <tr><td><code>GET /blocks?before=H&amp;limit=N</code></td><td>Block headers, newest first (max 50)</td></tr>
+          <tr><td><code>GET /block/:height|:hash</code></td><td>One block, with its transactions while retained</td></tr>
+          <tr><td><code>GET /tx/:txid</code></td><td>Transaction location and details</td></tr>
+          <tr><td><code>GET /address/:o1…</code></td><td>Balance, live slots, recent activity</td></tr>
+          <tr><td><code>GET /txs?page=N</code></td><td>Recent transactions chain-wide</td></tr>
+          <tr><td><code>GET /charts</code></td><td>Per-block history for charts</td></tr>
+          <tr><td><code>GET /search?q=</code></td><td>Resolves a height, hash, txid or address</td></tr>
+          <tr><td><code>GET /me</code></td><td>Your balance, usage and payment history (key required)</td></tr>
+        </table>
+        <p>Example: <code>curl -H "x-api-key: YOUR_KEY" ${esc(location.origin)}/api/stats</code>. Amounts are integers in μNOID (1 NOID = 1,000,000 μNOID).</p></div>`;
+    const box = $('acct');
+
+    if (!me) {
+      box.innerHTML = `<h2>Your account</h2>
+        <p>No email or password: your account is a secret key. Create one free, then add credits.</p>
+        <p><button id="create">Create free account</button></p>
+        <p class="muted">Already have a key?</p>
+        <div class="row"><input id="kin" placeholder="nk_…" autocomplete="off"><button id="login">Log in</button></div><p id="aerr" class="muted"></p>`;
+      $('create').onclick = async () => {
+        $('create').disabled = true;
+        try {
+          const a = await api('account', {});
+          saveKey(a.key);
+          box.innerHTML = `<h2>Your account key</h2><p><b>Save this key now.</b> It is your login, it is shown only once, and it cannot be recovered.</p>
+            <p class="big" style="word-break:break-all">${esc(a.key)}</p>
+            <div class="row"><button id="copy">Copy key</button><button id="saved">I saved it</button></div>`;
+          $('copy').onclick = () => navigator.clipboard?.writeText(a.key).then(() => ($('copy').textContent = 'Copied'));
+          $('saved').onclick = () => pages.account();
+        } catch (e) { $('aerr').textContent = e.message; $('create').disabled = false; }
+      };
+      $('login').onclick = async () => {
+        saveKey($('kin').value.trim());
+        try { await api('me'); pages.account(); } catch { saveKey(''); $('aerr').textContent = 'That key was not found.'; }
+      };
+      return;
+    }
+
+    const pay = (m) => P.packs_usd.map((u) => `<button data-pay="${m}" data-usd="${u}">$${u} · ${n(u * P.credits_per_usd)} credits</button>`).join('');
+    box.innerHTML = `<h2>Your account <small class="muted">${esc(me.id)}</small></h2>
+      <div class="grid">
+        <div class="stat"><small>Credits</small><b>${n(me.credits)}</b><small class="muted">≈ ${usd(me.credits, P.credits_per_usd)}</small></div>
+        <div class="stat"><small>AI questions left</small><b>${n(Math.floor(me.credits / P.chat_cost))}</b></div>
+        <div class="stat"><small>API requests made</small><b>${n(me.requests)}</b></div>
+        <div class="stat"><small>Tier</small><b>${me.credits > 0 ? 'Paid' : 'Free'}</b></div>
+      </div>
+      ${new URLSearchParams(location.search).get('paid') === 'card' ? '<p>Thanks! Card payments show up here within a few seconds of Stripe confirming them. Refresh if your balance has not changed yet.</p>' : ''}
+      <h2 style="margin-top:14px">Add credits</h2>
+      ${P.card ? `<p class="row"><span class="muted">Card:</span> ${pay('card')}</p>` : ''}
+      ${P.noid ? `<p class="row"><span class="muted">NOID:</span> ${pay('noid')}</p>` : ''}
+      ${!P.card && !P.noid ? '<p class="muted">Payments are not enabled yet.</p>' : ''}
+      <div id="payout"></div>
+      <h2 style="margin-top:14px">Usage (last 30 days)</h2>${rows(me.usage, ['day', 'requests', 'chats'])}
+      <h2 style="margin-top:14px">History</h2>${rows(me.history.map((h) => ({ when: new Date(h.at).toLocaleString(), credits: (h.delta > 0 ? '+' : '') + n(h.delta), what: h.reason })), ['when', 'credits', 'what'])}
+      <p class="row"><button id="copyk">Copy my key</button><button id="logout">Log out on this device</button></p>`;
+    $('copyk').onclick = () => navigator.clipboard?.writeText(key).then(() => ($('copyk').textContent = 'Copied'));
+    $('logout').onclick = () => { saveKey(''); pages.account(); };
+    const watch = async (id) => {
+      const t = await api('topup/' + id);
+      $('payout').innerHTML = t.paid
+        ? `<p><b>Payment received.</b> ${n(t.credits)} credits added.</p>`
+        : `<p>Send <b>exactly</b> this amount from your NOID wallet. Credits appear automatically about a minute after the payment confirms. This quote is valid for 24 hours.</p>
+           <p class="big">${esc(t.amount_noid)} NOID</p><p class="addr">${esc(t.address)}</p><p class="muted">Waiting for payment… (payment ${esc(t.id)})</p>`;
+      if (t.paid) return setTimeout(() => location.pathname === '/account' && pages.account(), 2500);
+      if (location.pathname === '/account') setTimeout(() => watch(id).catch(() => {}), 10_000);
     };
-    app.innerHTML = `<div class="card"><h2>API access</h2>
-      <p>Free: ${p ? esc(p.free_rate_limit) : 120} requests/min per IP, no key. Endpoints: <code>/api/stats</code> <code>/api/blocks</code> <code>/api/block/:h</code> <code>/api/tx/:id</code> <code>/api/address/:o1…</code> <code>/api/txs</code> <code>/api/charts</code> <code>/api/search?q=</code></p>
-      ${p ? `<p>Paid: <b>${esc(p.rate_limit)} requests/min</b> for <b>${esc(p.price_noid)} NOID</b> per ${esc(p.days)} days. Use the key as <code>x-api-key</code> header or <code>?key=</code>.</p>
-      <p><button id="buy">Get a key</button></p><div id="order"></div>` : '<p class="muted">Paid keys are not enabled on this explorer.</p>'}</div>`;
-    if (!p) return;
-    document.getElementById('buy').onclick = () => order('new').catch((e) => (document.getElementById('order').textContent = e.message));
-    let saved = null; try { saved = localStorage.getItem('order'); } catch {}
-    if (saved) order(saved).catch(() => {});
+    for (const b of document.querySelectorAll('[data-pay]')) b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await api('topup', { method: b.dataset.pay, usd: Number(b.dataset.usd) });
+        if (r.url) return (location.href = r.url); // Stripe Checkout
+        await watch(r.id);
+      } catch (e) { $('payout').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
+      b.disabled = false;
+    };
   },
+
+  async chat() {
+    const P = await api('pricing');
+    const s = await api('stats');
+    const hist = [];
+    app.innerHTML = `<div class="card"><h2>Ask AI <small class="muted">answers from live NOID chain data</small></h2>
+      ${s.ai ? '' : '<p class="msg err">The AI assistant is not enabled on this explorer yet.</p>'}
+      <div class="msgs" id="msgs"><div class="msg bot">Ask me anything about the NOID chain: "What's the latest block?", "How has difficulty changed?", "What's in block 1200?", "What does address o1… hold?"</div></div>
+      <form id="ask" class="row"><input id="q" placeholder="Ask about blocks, addresses, supply, difficulty…" autocomplete="off" maxlength="2000"><button id="send">Ask</button></form>
+      <p class="muted" id="quota">${myKey() ? `Using your account: ${P.chat_cost} credits per question.` : `${P.free_chats_per_day} free questions a day. <a href="/account" data-link>Get credits</a> for more.`}</p></div>`;
+    const add = (cls, text) => { const d = document.createElement('div'); d.className = `msg ${cls}`; d.textContent = text; $('msgs').append(d); $('msgs').scrollTop = 1e9; return d; };
+    $('ask').onsubmit = async (e) => {
+      e.preventDefault();
+      const text = $('q').value.trim();
+      if (!text) return;
+      $('q').value = ''; $('send').disabled = true;
+      add('user', text); hist.push({ role: 'user', content: text });
+      const wait = add('bot', 'Looking that up on the chain…');
+      try {
+        const r = await api('chat', { messages: hist });
+        wait.textContent = r.reply; hist.push({ role: 'assistant', content: r.reply });
+        $('quota').innerHTML = r.paid ? `${n0(r.credits)} credits left · ${P.chat_cost} per question` : `${r.free_left} free questions left today. <a href="/account" data-link>Get credits</a> for more.`;
+      } catch (err) {
+        wait.className = 'msg bot err'; wait.textContent = err.message; hist.pop();
+      }
+      $('send').disabled = false; $('q').focus();
+    };
+  },
+
   async address(id, page = 1) {
     const a = await api(`address/${encodeURIComponent(id)}?page=${page}`);
     const { transactions, ...summary } = a.activity || {};
@@ -238,7 +365,7 @@ async function render() {
   feed?.close(); feed = null; clearInterval(ticker);
   app.innerHTML = '<p class="muted">Loading…</p>';
   try {
-    await (pages[type] && (id || type === 'api-access') ? pages[type](decodeURIComponent(id || '')) : pages.home());
+    await (pages[type] && (id || ['api-access', 'account', 'chat'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>Not found</h2><p class="muted">${esc(e.message)}</p></div>`;
   }

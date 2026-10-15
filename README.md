@@ -55,17 +55,37 @@ cat /home/deploy/.ssh/id_deploy
 
 Copy the printed private key (all of it, including the `BEGIN`/`END` lines) into the GitHub secret `DEPLOY_KEY`, put the droplet IP in `DEPLOY_HOST`, then delete the server copy: `rm /home/deploy/.ssh/id_deploy`. GitHub's runners connect over SSH, so port 22 must be open to them (key-only login).
 
-## Monetization
+## Payments and AI
 
-Set `DONATE_ADDRESS` to show a donation address in the footer.
+**Accounts** are API keys (`nk_…`): no email or password. Only the key's SHA-256 is stored. Anyone can create one free on the **API & Credits** page; the key is shown once.
 
-**Paid API keys, bought in NOID.** Set `PAY_ADDRESS` to an `o1…` address you control and the `/api-access` page goes live. Each buyer gets a quote with a unique fractional amount (e.g. `25.004217 NOID`); when a slot with exactly that value lands on `PAY_ADDRESS`, the indexer issues a 32-hex key automatically. Keys go in an `x-api-key` header or `?key=` and raise the rate limit to `PAID_RATE_LIMIT`.
+**Prepaid credits**: 1,000 credits = $1, sold in $5 / $20 / $100 packs, never expire. With credits a key gets `PAID_RATE_LIMIT` requests/min and pays 1 credit per 1,000 requests; the AI assistant costs `CHAT_COST` credits per question. Without credits everyone keeps the free tier, including `FREE_CHATS_PER_DAY` AI questions per IP.
+
+- **Card** (Stripe Checkout): credits are added only by Stripe's signed webhook, never by the browser redirect. Replays are ignored.
+- **NOID**: the buyer gets a quote with unique micro-NOID "dust" (e.g. `25.004217 NOID`); when a slot with exactly that value lands on `PAY_ADDRESS`, the indexer credits the account. A slot can pay only once.
+- **AI assistant** (`/chat`): OpenRouter, default `qwen/qwen3.5-flash-02-23`. The model answers by calling the explorer's own routes as tools, so numbers come from the node. A question costs you roughly $0.0005; credits are refunded if the model call fails.
+
+Put secrets in `/etc/noid-scan.env` (`chmod 600`, owned by root), one per line, then `systemctl restart noid-scan`:
+
+```
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+OPENROUTER_API_KEY=sk-or-...
+PAY_ADDRESS=o1...
+USD_PER_NOID=0.20
+SITE_URL=https://parano1d-scan.com
+```
 
 | Env | Default | |
 |---|---|---|
-| `PAY_ADDRESS` | – | Your receiving address (watch-only: the server never holds a secret) |
-| `KEY_PRICE_NOID` | `25` | Price per key |
-| `KEY_DAYS` | `30` | Key lifetime |
-| `PAID_RATE_LIMIT` | `3000` | Requests/min for paid keys |
+| `PAY_ADDRESS` + `USD_PER_NOID` | – | Enable NOID top-ups. The address is watch-only: the server never holds a wallet secret. Update the price as the market moves |
+| `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | – | Enable card top-ups. In Stripe: Developers → Webhooks → endpoint `https://<site>/api/stripe-webhook`, event `checkout.session.completed` |
+| `OPENROUTER_API_KEY` | – | Enables the AI assistant. Set a monthly spending limit on the key in OpenRouter as a hard cap |
+| `OPENROUTER_MODEL` | `qwen/qwen3.5-flash-02-23` | Any OpenRouter model with tool calling |
+| `CHAT_COST` / `FREE_CHATS_PER_DAY` | `5` / `3` | |
+| `PAID_RATE_LIMIT` | `3000` | Requests/min for accounts with credits |
+| `LIVE_MS` | `2000` | How often the live feed polls the node (shared by all viewers) |
+| `SITE_URL` | `https://parano1d-scan.com` | Where Stripe sends buyers back to |
+| `DONATE_ADDRESS` | – | `o1…` address shown in the footer |
 
-Unpaid quotes expire after 24 h. A payment that arrives late or with the wrong amount is not matched; handle those by hand (`sqlite3 noid.db "select * from orders where created > ..."`) and spend the funds normally from your wallet. Payments are visible on-chain like any NOID transfer.
+Crypto received for a service is ordinary income at its dollar value when received; keep the History tab or `select * from ledger` as your record.
