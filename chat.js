@@ -23,6 +23,9 @@ const TOOLS = [
   fn('mempool', 'Pending transactions, fee floor and the current minimum fee for common transaction shapes.'),
 ];
 
+// Some models (Qwen) put their private reasoning in the reply, ending with </think>; only show what comes after.
+const clean = (text) => String(text ?? '').replace(/^[\s\S]*<\/think>/, '').replace(/<think>[\s\S]*$/, '').trim();
+
 module.exports = function chat(routes) {
   const KEY = process.env.OPENROUTER_API_KEY;
   const p = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]));
@@ -42,7 +45,7 @@ module.exports = function chat(routes) {
     const r = await fetch(`${process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1'}/chat/completions`, {
       method: 'POST', signal: AbortSignal.timeout(45_000),
       headers: { authorization: `Bearer ${KEY}`, 'content-type': 'application/json', 'x-title': 'NOID Scan' },
-      body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, max_tokens: 800 }),
+      body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, max_tokens: 800, reasoning: { exclude: true } }),
     });
     const j = await r.json();
     if (!r.ok || !j.choices?.[0]) throw Object.assign(new Error(`AI unavailable: ${j.error?.message || r.status}`), { status: 502 });
@@ -62,7 +65,7 @@ module.exports = function chat(routes) {
     const convo = [{ role: 'system', content: SYSTEM }, ...msgs];
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const m = await call(convo);
-      if (!m.tool_calls?.length) return { reply: m.content || '(no answer)' };
+      if (!m.tool_calls?.length) return { reply: clean(m.content) || '(no answer)' };
       convo.push({ role: 'assistant', content: m.content ?? '', tool_calls: m.tool_calls });
       for (const tc of m.tool_calls) {
         let out;

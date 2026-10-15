@@ -17,7 +17,7 @@ const aiServer = http.createServer((req, res) => {
     const { messages } = JSON.parse(body);
     const toolMsg = messages.find((m) => m.role === 'tool');
     const message = toolMsg
-      ? { role: 'assistant', content: `The height is ${JSON.parse(toolMsg.content).chain.height}.` }
+      ? { role: 'assistant', content: `Let me think about the user.\n</think>\n\nThe height is ${JSON.parse(toolMsg.content).chain.height}.` }
       : { role: 'assistant', content: '', tool_calls: [{ id: 't1', type: 'function', function: { name: 'chain_stats', arguments: '{}' } }] };
     res.end(JSON.stringify({ choices: [{ message }] }));
   });
@@ -162,7 +162,7 @@ test('indexer + api', async (t) => {
   // Chatbot: answers via tools from real routes; 3 free a day, then paid at 5 credits; refunded on model errors.
   const ask = (h = {}) => post('chat', { messages: [{ role: 'user', content: 'what is the height?' }] }, h);
   const [, a1] = await ask();
-  assert.match(a1.reply, new RegExp(`height is ${tip}`), 'answer built from the chain_stats tool');
+  assert.match(a1.reply, new RegExp(`^The height is ${tip}`), 'answer built from the chain_stats tool, reasoning stripped');
   assert.strictEqual(a1.free_left, 2);
   await ask(); await ask();
   assert.strictEqual((await ask())[0], 402, 'free quota used up');
