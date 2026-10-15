@@ -15,11 +15,11 @@
 <meta property="og:title" content="NOID Scan – live Parano1d (NOID) explorer">
 <meta property="og:description" content="Blocks, transactions, addresses, network globe, full-history charts and an AI assistant.">
 <meta property="og:url" content="https://parano1d-scan.com/">
-<meta property="og:image" content="https://parano1d-scan.com/og.png?v=2">
+<meta property="og:image" content="https://parano1d-scan.com/og.png?v=3">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://parano1d-scan.com/og.png?v=2">
+<meta name="twitter:image" content="https://parano1d-scan.com/og.png?v=3">
 <script>try { document.documentElement.dataset.theme = localStorage.getItem('theme') || 'dark'; } catch {}</script>
 <style>
   /* Retro control-panel look: teal terminal panels on a circuit-board background. */
@@ -118,6 +118,7 @@
   /* Globe hero */
   .globe { position:relative; padding:0; height:min(66vh, 640px); overflow:hidden; background:radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%), var(--card) }
   @media (pointer:coarse) { .globe { height:52vh } }
+  @media (max-width:640px) { .globe .event { bottom:auto; top:12px; right:12px; left:auto } }
   .globe #globe { position:absolute; inset:0 }
   .globe .over { position:absolute; left:12px; right:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; z-index:2 }
   .chip { background:color-mix(in srgb, var(--card) 78%, transparent); border:1px solid var(--line); border-radius:4px; padding:6px 10px; font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); backdrop-filter:blur(6px) }
