@@ -40,7 +40,10 @@ const node = {
   getMiningInfo: () => ({ difficulty_bits: 30 }),
   getSlotsByOwner: ([a]) => (a === PAY_ADDR ? paySlots : [{ slot_index: 1, value: '9007199254740993' }, { slot_index: 2, value: 7 }]),
   getRecentTransactions: () => ({ total: 0, transactions: [] }),
-  getStateInfo: () => ({}), getNodeStatus: () => ({}),
+  getStateInfo: () => ({ log_slots: 4 }), getNodeStatus: () => ({}), // 16-slot state keeps the sweep tiny
+  getSlot: ([i]) => ({ 0: ['o1minerodd', 700], 3: ['o1minereven', 200], 9: ['o1minerodd', 300], 12: ['o1whalewhale', 5000] }[i]
+    ? { slot_index: i, value: { 0: 700, 3: 200, 9: 300, 12: 5000 }[i], creation_id: '9223372036854775' + i, owner: { 0: 'o1minerodd', 3: 'o1minereven', 9: 'o1minerodd', 12: 'o1whalewhale' }[i], empty: false }
+    : { slot_index: i, value: 0, creation_id: 0, owner: '', empty: true }),
   getMempoolInfo: () => ({ size: 2, fee_floor: 5000, txs: [{ tx_hash: H('m1'), fee_micronoid: 9000, fee_rate: 1285, n_inputs: 1, n_outputs: 2 }, { tx_hash: H('m2'), fee_micronoid: 6000, fee_rate: 654, n_inputs: 1, n_outputs: 1 }] }),
   estimateFeeDetailed: ([i, o]) => ({ n_inputs: i, n_outputs: o, net_new_slots: o - i, fee_micronoid: 5000 + 1000 * o }),
 };
@@ -231,6 +234,30 @@ test('indexer + api', async (t) => {
     assert.strictEqual(r.status, 200, p); assert.strictEqual(r.headers.get('content-type'), type, p); assert.ok((await r.arrayBuffer()).byteLength > 100, p);
   }
   assert.match(await (await fetch(base + '/../server.js')).text(), /<title>NOID Scan/, 'no path escapes into the filesystem');
+
+  // Holders sweep: aggregates every funded slot by owner; rich list and concentration follow.
+  const { sweepHolders } = require('./server.js');
+  await sweepHolders();
+  const [, hol] = await get('holders');
+  assert.strictEqual(hol.latest.holders, 3); assert.strictEqual(hol.latest.supply, 6200); assert.strictEqual(hol.latest.slots, 4);
+  const [, rich] = await get('richlist?limit=2');
+  assert.deepStrictEqual(rich.rows.map((r) => [r.address, r.balance, r.slots]), [['o1whalewhale', 5000, 1], ['o1minerodd', 1000, 2]]);
+  assert.ok(Math.abs(rich.rows[0].share - 5000 / 6200) < 1e-9);
+  assert.strictEqual((await get('address/o1whalewhale'))[1].rank, 1);
+
+  // Price ticks: samples bucket into series with market cap from supply.
+  db.prepare('insert into price_ticks values (?, ?, ?, ?)').run(Math.floor(Date.now() / 1000) - 600, 0.5, 1000, 2_000_000);
+  db.prepare('insert into price_ticks values (?, ?, ?, ?)').run(Math.floor(Date.now() / 1000) - 300, 0.6, 1200, 2_000_000);
+  const { price: priceState } = require('./server.js');
+  priceState.now = { usd: 0.6 };
+  const [, ps] = await get('price?window=24h');
+  assert.ok(ps.points.length >= 2 && ps.points.at(-1).usd === 0.6 && Math.abs(ps.points.at(-1).market_cap_usd - 1.2) < 1e-9);
+
+  // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
+  const { parseRpc } = require('./server.js');
+  const big = parseRpc('{"result":[{"creation_id":9223372036854775807,"value":5},{"creation_id":9223372036854775806,"value":5}]}');
+  assert.notStrictEqual(big.result[0].creation_id, big.result[1].creation_id);
+  assert.strictEqual(big.result[0].creation_id, '9223372036854775807');
 
   // Peer map: only established connections on the P2P port with public IPs count.
   const { peerIps } = require('./server.js');

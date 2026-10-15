@@ -26,7 +26,7 @@ npm start     # http://127.0.0.1:8080
 
 ## API
 
-`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price` · `/api/live` (server-sent events)
+`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price?window=…` (3-minute ticks, market cap, volume, markets) · `/api/holders?window=…` · `/api/richlist?limit=N` · `/api/supply?window=…` · `/api/live` (server-sent events)
 
 **Full history.** Block headers are never pruned, so the indexer stores every header since genesis (height, hash, time, miner, expected work) and keeps the newest in step, 25 × 200 headers per pass via JSON-RPC batches (`HEADER_BATCH`). On a fresh database the first ~221k headers take a few minutes. Hashrate = expected work per block (`2^256 / target`, target read little-endian) ÷ observed block time; every block hash becomes searchable.
 
@@ -91,6 +91,7 @@ SITE_URL=https://parano1d-scan.com
 | `SITE_URL` | `https://parano1d-scan.com` | Where Stripe sends buyers back to |
 | `DONATE_ADDRESS` | – | `o1…` address shown in the footer |
 | `P2P_PORT` | `9600` | Node P2P port, used to find peer connections for the globe |
+| `HOLDERS_EVERY_MS` | `1800000` | How often the Live State is swept (every slot via batched `getSlot`, ~2 min for 2^24 slots) for the holders count, concentration and rich list |
 
 **Network globe** (home page): countries of peers connected to this explorer's node, read from established TCP connections on `P2P_PORT` in `/proc/net` and resolved to a country with [country.is](https://country.is) (free, no key, cached per IP). Only country codes and counts leave the server. It is one node's view of the network at country level: not miner or user locations, which the chain does not reveal. Each new block draws arcs from the peer countries into the node. The globe is [globe.gl](https://globe.gl) 2.46.2, loaded from jsDelivr only on the home page.
 

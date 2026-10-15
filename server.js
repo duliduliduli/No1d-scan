@@ -20,6 +20,11 @@ db.exec(`
   create index if not exists blocks_hash on blocks(hash);
   create table if not exists stats (height integer primary key, ts integer, data text not null);
   -- Every header since genesis (headers are never pruned): powers all-time hashrate, block time and miner stats.
+  -- Our own price samples every 3 minutes (CoinPaprika's free history is hourly for 24 h, daily beyond).
+  create table if not exists price_ticks (ts integer primary key, usd real not null, volume_24h real, supply integer);
+  -- Live State sweeps: holders over time, and the current rich list.
+  create table if not exists holders (ts integer primary key, holders integer not null, supply integer not null, top10 integer not null, top100 integer not null, slots integer not null);
+  create table if not exists rich_list (rank integer primary key, address text not null, balance integer not null, slots integer not null);
   create table if not exists headers (height integer primary key, hash text not null, ts integer not null, miner text, work real not null, slots integer);
   create index if not exists headers_hash on headers(hash);
   create index if not exists headers_ts on headers(ts);
@@ -33,6 +38,17 @@ const q = {
   addStat: db.prepare('insert or replace into stats (height, ts, data) values (?, ?, ?)'),
   charts: db.prepare('select height, ts, data from stats order by height desc limit 500'),
   headerTop: db.prepare('select max(height) h, count(*) n from headers'),
+  addTick: db.prepare('insert or replace into price_ticks (ts, usd, volume_24h, supply) values (?, ?, ?, ?)'),
+  ticks: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, avg(usd) usd, max(usd) hi, min(usd) lo, avg(volume_24h) volume_24h, avg(supply) supply
+    from price_ticks where ts >= :since group by ts / cast(:b as integer) order by t`),
+  firstTick: db.prepare('select min(ts) t from price_ticks'),
+  supplySeries: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, max(cast(json_extract(data, '$.circulating_supply_micronoid') as real)) supply
+    from stats where ts >= :since group by ts / cast(:b as integer) order by t`),
+  addHolders: db.prepare('insert or replace into holders (ts, holders, supply, top10, top100, slots) values (?, ?, ?, ?, ?, ?)'),
+  holdersSeries: db.prepare('select ts t, holders, supply, top10, top100, slots from holders where ts >= ? order by ts'),
+  lastHolders: db.prepare('select ts, holders, supply, top10, top100, slots from holders order by ts desc limit 1'),
+  richList: db.prepare('select rank, address, balance, slots from rich_list order by rank limit ?'),
+  richRank: db.prepare('select rank, balance from rich_list where address = ?'),
   putHeader: db.prepare('insert or replace into headers (height, hash, ts, miner, work, slots) values (?, ?, ?, ?, ?, ?)'),
   headerByHash: db.prepare('select height from headers where hash = ?'),
   recentWork: db.prepare('select count(*) n, min(ts) t0, max(ts) t1, sum(work) w from (select ts, work from headers order by height desc limit ?)'),
@@ -50,6 +66,10 @@ const q = {
   txs24h: db.prepare(`select sum(json_array_length(details, '$.retained.transactions')) n, count(*) blocks from blocks where json_extract(details, '$.header.timestamp') >= ?`),
 };
 
+// The node emits creation_id as a 64-bit integer (~9.2e18). JSON.parse would round it, making different
+// slots look identical, so quote those numbers into strings before parsing.
+const parseRpc = (text) => JSON.parse(text.replace(/"creation_id":\s*(\d{16,})/g, '"creation_id":"$1"'));
+
 async function rpc(method, params = []) {
   const res = await fetch(RPC_URL, {
     method: 'POST',
@@ -57,7 +77,7 @@ async function rpc(method, params = []) {
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: `paranoid_${method}`, params }),
     signal: AbortSignal.timeout(10_000),
   });
-  const body = await res.json();
+  const body = parseRpc(await res.text());
   if (body.error) throw new Error(`${method}: ${body.error.message}`);
   return body.result;
 }
@@ -70,7 +90,7 @@ async function rpcBatch(calls) {
     body: JSON.stringify(calls.map(([m, params], id) => ({ jsonrpc: '2.0', id, method: `paranoid_${m}`, params }))),
     signal: AbortSignal.timeout(30_000),
   });
-  const body = await res.json();
+  const body = parseRpc(await res.text());
   if (!Array.isArray(body)) throw new Error(`batch: ${body?.error?.message || 'not supported'}`);
   const out = [];
   for (const r of body) { if (r.error) throw new Error(`batch: ${r.error.message}`); out[r.id] = r.result; }
@@ -115,7 +135,7 @@ function networkStats() {
 
 // One indexer pass. Re-checking the whole retained window by hash also handles reorgs:
 // a replaced block has a new hash at the same height and gets overwritten.
-const indexer = { tip: null, at: null }; // last successful pass, exposed in /api/stats for uptime monitors
+const indexer = { tip: null, at: null, supply: null }; // last successful pass, exposed in /api/stats for uptime monitors
 async function tick() {
   const tip = await rpc('blockCount');
   for (let h = Math.max(0, tip - RETAINED + 1); h <= tip; h++) {
@@ -135,6 +155,7 @@ async function tick() {
       peers,
     };
     q.addStat.run(tip, header?.timestamp ?? null, JSON.stringify(data));
+    indexer.supply = chain.circulating_supply_micronoid;
   }
   await syncHeaders(tip);
   await bill.settleNoid();
@@ -172,7 +193,7 @@ async function blockByHeight(h) {
 // NOID/USD from CoinPaprika (free, no key; aggregates SafeTrade and Cexius). Ticker every 3 min plus
 // history hourly is ~16k calls/month, under the free plan's 20k. Market cap is computed from our own supply.
 const PRICE_ID = process.env.PRICE_ID || 'noid-parano1d';
-const price = { now: null, hourly: [], daily: [] };
+const price = { now: null, hourly: [], daily: [], markets: [] };
 const paprika = async (p) => {
   const r = await fetch(`https://api.coinpaprika.com/v1${p}`, { signal: AbortSignal.timeout(10_000) });
   if (!r.ok) throw new Error(`price feed ${r.status}`);
@@ -181,7 +202,17 @@ const paprika = async (p) => {
 async function pollPrice() {
   const t = await paprika(`/tickers/${PRICE_ID}`);
   const u = t.quotes.USD;
-  price.now = { usd: u.price, change_24h_pct: u.percent_change_24h, volume_24h_usd: u.volume_24h, updated: t.last_updated, source: 'CoinPaprika (SafeTrade, Cexius)' };
+  price.now = {
+    usd: u.price, change_24h_pct: u.percent_change_24h, volume_24h_usd: u.volume_24h, updated: t.last_updated, source: 'CoinPaprika (SafeTrade, Cexius)',
+    change: { '15m': u.percent_change_15m, '1h': u.percent_change_1h, '6h': u.percent_change_6h, '24h': u.percent_change_24h, '7d': u.percent_change_7d, '30d': u.percent_change_30d },
+    volume_change_24h_pct: u.volume_24h_change_24h, ath_usd: u.ath_price, ath_date: u.ath_date, from_ath_pct: u.percent_from_price_ath, rank: t.rank,
+  };
+  q.addTick.run(Math.floor(Date.now() / 1000), u.price, u.volume_24h, Number(lastLive?.chain.circulating_supply_micronoid ?? indexer.supply ?? 0) || null);
+}
+async function pollMarkets() {
+  const rows = await paprika(`/coins/${PRICE_ID}/markets`);
+  price.markets = rows.map((m) => ({ exchange: m.exchange_name, pair: m.pair, usd: m.quotes?.USD?.price, volume_24h_usd: m.quotes?.USD?.volume_24h, share_pct: m.adjusted_volume_24h_share, url: m.market_url }))
+    .sort((a, b) => (b.volume_24h_usd || 0) - (a.volume_24h_usd || 0));
 }
 async function pollPriceHistory() {
   const iso = (ms) => new Date(Date.now() - ms).toISOString().replace(/\.\d+Z$/, 'Z');
@@ -244,6 +275,44 @@ async function pollNetwork() {
   network.updated = Date.now();
 }
 
+// Live State sweep: every funded slot via batched getSlot (~2 min for 2^24 slots on the node), aggregated by owner.
+// Yields the holders count, concentration and the rich list. Runs in the background; pauses briefly between batches.
+const HOLDERS_EVERY_MS = Number(process.env.HOLDERS_EVERY_MS || 1800_000);
+const sweep = { running: false, at: null, ms: null };
+async function sweepHolders() {
+  if (sweep.running) return;
+  sweep.running = true;
+  const t0 = Date.now();
+  try {
+    const { log_slots } = await rpc('getStateInfo');
+    const capacity = 2 ** Number(log_slots);
+    const owners = new Map();
+    const BATCH = 2000;
+    for (let i = 0; i < capacity; i += BATCH) {
+      const rows = await rpcBatch(Array.from({ length: Math.min(BATCH, capacity - i) }, (_, k) => ['getSlot', [i + k]]));
+      for (const s of rows) {
+        if (!s || s.empty || !s.owner) continue;
+        const o = owners.get(s.owner) || { balance: 0, slots: 0 };
+        o.balance += Number(s.value); o.slots += 1;
+        owners.set(s.owner, o);
+      }
+      await new Promise((r) => setTimeout(r, 5)); // leave the node breathing room
+    }
+    const list = [...owners].map(([address, o]) => ({ address, ...o })).sort((a, b) => b.balance - a.balance);
+    const supply = list.reduce((s, r) => s + r.balance, 0);
+    const sum = (n) => list.slice(0, n).reduce((s, r) => s + r.balance, 0);
+    db.exec('begin');
+    try {
+      db.exec('delete from rich_list');
+      const ins = db.prepare('insert into rich_list (rank, address, balance, slots) values (?, ?, ?, ?)');
+      list.slice(0, 500).forEach((r, i) => ins.run(i + 1, r.address, r.balance, r.slots));
+      q.addHolders.run(Math.floor(Date.now() / 1000), list.length, supply, sum(10), sum(100), list.reduce((s, r) => s + r.slots, 0));
+      db.exec('commit');
+    } catch (e) { db.exec('rollback'); throw e; }
+    Object.assign(sweep, { at: Date.now(), ms: Date.now() - t0 });
+  } finally { sweep.running = false; }
+}
+
 const bill = require('./billing.js')(db, rpc, () => price.now?.usd);
 
 const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
@@ -295,7 +364,7 @@ const routes = {
       rpc('getSlotsByOwner', [addr]), rpc('getRecentTransactions', [page, 32, addr]),
     ]);
     const balance = slots.reduce((sum, s) => sum + BigInt(s.value ?? 0), 0n);
-    return { address: addr, balance_micronoid: balance.toString(), slots, activity };
+    return { address: addr, balance_micronoid: balance.toString(), rank: q.richRank.get(addr)?.rank ?? null, slots, activity };
   },
 
   async txs(_, params) {
@@ -336,8 +405,42 @@ const routes = {
     };
   },
 
-  async price() {
-    return price.now && price;
+  // Price/market cap/volume series. Our own 3-minute ticks give full detail; before our first tick, CoinPaprika's
+  // daily history fills in. Points are bucketed so a window never exceeds ~600 points.
+  async price(_, params) {
+    if (!price.now) return null;
+    const w = params.get('window') || '24h';
+    const now = Math.floor(Date.now() / 1000);
+    const bucket = { '24h': 180, '7d': 900, '30d': 3600, all: 21600 }[w] ?? 180;
+    const since = now - (WINDOWS[w] ?? WINDOWS['24h']);
+    let points = q.ticks.all({ b: bucket, since }).map((p) => ({ t: p.t, usd: p.usd, hi: p.hi, lo: p.lo, volume_24h_usd: p.volume_24h, market_cap_usd: p.supply ? (p.supply / 1e6) * p.usd : null }));
+    const first = q.firstTick.get().t ?? now;
+    if (w === 'all' || w === '30d') {
+      const older = price.daily.filter((p) => p.t < first - 86400 && p.t >= since).map((p) => ({ t: p.t, usd: p.usd, hi: null, lo: null, volume_24h_usd: null, market_cap_usd: null }));
+      points = [...older, ...points];
+    } else if (w === '24h' && points.length < 8) {
+      points = [...price.hourly.filter((p) => p.t < first - 3600).map((p) => ({ t: p.t, usd: p.usd })), ...points];
+    }
+    return { window: w, bucket, points, now: price.now, markets: price.markets, ticks_since: first };
+  },
+
+  async holders(_, params) {
+    const w = params.get('window') || '30d';
+    const since = Math.floor(Date.now() / 1000) - (WINDOWS[w] ?? WINDOWS['30d']);
+    return { window: w, latest: q.lastHolders.get() ?? null, points: q.holdersSeries.all(since), sweep: { at: sweep.at, took_ms: sweep.ms, running: sweep.running, every_ms: HOLDERS_EVERY_MS } };
+  },
+
+  async richlist(_, params) {
+    const n = Math.min(Math.max(Number(params.get('limit')) || 50, 1), 500);
+    const latest = q.lastHolders.get();
+    return { updated: latest?.ts ?? null, supply: latest?.supply ?? null, holders: latest?.holders ?? null, rows: q.richList.all(n).map((r) => ({ ...r, share: latest?.supply ? r.balance / latest.supply : null })) };
+  },
+
+  async supply(_, params) {
+    const w = params.get('window') || '30d';
+    const now = Math.floor(Date.now() / 1000);
+    const bucket = { '24h': 900, '7d': 3600, '30d': 21600, all: 86400 }[w] ?? 21600;
+    return { window: w, points: q.supplySeries.all({ b: bucket, since: now - (WINDOWS[w] ?? WINDOWS['30d']) }) };
   },
 
   async charts() {
@@ -496,9 +599,11 @@ if (require.main === module) {
   const every = (fn, ms) => { const run = () => fn().catch((e) => console.error('price:', e.message)); run(); setInterval(run, ms); };
   every(pollPrice, 180_000);
   every(pollPriceHistory, 3600_000);
+  every(pollMarkets, 3600_000);
+  every(sweepHolders, HOLDERS_EVERY_MS);
   every(pollNetwork, 60_000);
   server.listen(Number(process.env.PORT || 8080), process.env.HOST || '127.0.0.1', () =>
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, peerIps, workOf };
+module.exports = { server, tick, db, price, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice() };

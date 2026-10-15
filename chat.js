@@ -21,6 +21,9 @@ const TOOLS = [
   fn('network_history', 'Hashrate (H/s), average block time (s), difficulty (expected hashes per block) and active slots over time, from every header since genesis.', { window: { type: 'string', enum: ['24h', '7d', '30d', 'all'] } }),
   fn('top_miners', 'Miner addresses ranked by blocks mined in a time window, with share of blocks.', { window: { type: 'string', enum: ['24h', '7d', '30d', 'all'] } }),
   fn('mempool', 'Pending transactions, fee floor and the current minimum fee for common transaction shapes.'),
+  fn('market', 'NOID price, market cap, 24h volume, price changes (15m to 30d), all-time high, and the exchanges it trades on.'),
+  fn('holders', 'Number of addresses holding NOID, concentration (top 10/100 share) and how the holder count changed over time.'),
+  fn('rich_list', 'Top addresses by balance with share of supply.', { limit: { type: 'integer', description: '1-100, default 20' } }),
 ];
 
 // Some models (Qwen) put their private reasoning in the reply, ending with </think>; only show what comes after.
@@ -39,6 +42,9 @@ module.exports = function chat(routes) {
     network_history: async (a) => { const h = await routes.history('', p({ window: a.window || '7d' })); return { ...h, points: h.points.slice(-60) }; },
     top_miners: (a) => routes.miners('', p({ window: a.window || '24h' })),
     mempool: () => routes.mempool(),
+    market: async () => { const r = await routes.price('', p({ window: '24h' })); return r && { now: r.now, markets: r.markets }; },
+    holders: async () => { const h = await routes.holders('', p({ window: '30d' })); return { ...h, points: h.points.slice(-30) }; },
+    rich_list: (a) => routes.richlist('', p({ limit: Math.min(a.limit ?? 20, 100) })),
   };
 
   async function call(messages) {

@@ -95,6 +95,7 @@
   .price-head { display:flex; gap:24px; flex-wrap:wrap; align-items:baseline }
   .price-head .big { font:700 30px var(--mono); color:var(--fg) }
   /* Checkout */
+  .delta { display:grid; grid-template-columns:repeat(auto-fit, minmax(90px, 1fr)); gap:8px } .delta div { text-align:center; padding:8px; border:1px solid var(--line); border-radius:4px } .delta small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase } .delta b { font:700 15px var(--mono) }
   .checkout { border:1px solid var(--accent); border-radius:6px; padding:0; overflow:hidden; margin-top:14px; box-shadow:var(--glow) }
   .checkout .head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 16px; background:var(--head); border-bottom:1px solid var(--line) }
   .checkout .head b { font:700 13px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--accent) }
@@ -129,9 +130,10 @@
   /* Interactive charts: draw in, then crosshair + tooltip under the pointer */
   .ichart { position:relative; touch-action:pan-y; cursor:crosshair }
   .ichart svg { width:100%; display:block }
-  .ichart .line { fill:none; stroke:var(--accent); stroke-width:2; vector-effect:non-scaling-stroke; stroke-dasharray:1; stroke-dashoffset:1; animation:draw 1.4s cubic-bezier(.2,.7,.2,1) forwards; filter:drop-shadow(0 0 3px var(--accent)) }
-  .ichart .area { opacity:0; animation:fadein .9s .5s forwards }
-  @keyframes draw { to { stroke-dashoffset:0 } } @keyframes fadein { to { opacity:1 } }
+  .ichart .line { fill:none; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; filter:drop-shadow(0 0 3px var(--accent)) }
+  .ichart svg { clip-path:inset(0 100% 0 0); animation:reveal 1.2s cubic-bezier(.2,.7,.2,1) forwards }
+  @keyframes reveal { to { clip-path:inset(0 0 0 0) } }
+  .ichart.flat .line { stroke-width:1 }
   .ichart .xh { position:absolute; top:0; width:1px; background:var(--muted); opacity:0; pointer-events:none }
   .ichart .pt { position:absolute; width:11px; height:11px; border-radius:50%; background:var(--accent); box-shadow:var(--glow), 0 0 0 3px var(--card); transform:translate(-50%,-50%); opacity:0; pointer-events:none; transition:left .08s, top .08s }
   .ichart .tip { position:absolute; transform:translate(-50%, calc(-100% - 12px)); background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); white-space:nowrap; opacity:0; pointer-events:none; z-index:3 }
@@ -158,6 +160,7 @@
       <a href="/blocks/latest" data-link>All blocks</a>
       <a href="/mempool" data-link>Mempool &amp; fees</a>
       <a href="/mining" data-link>Mining &amp; calculator</a>
+      <a href="/market" data-link>Market analytics</a>
       <a href="/account" data-link>API &amp; Credits</a>
       <a href="/chat" data-link>Ask AI</a>
       <button id="theme"></button>
@@ -249,6 +252,8 @@ const FMT = {
   day: (t) => new Date(t * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' }),
   dayhour: (t) => new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' }),
   hs: (v) => si(v, 'H/s'),
+  money: (v) => money(v, 0),
+  count: (v) => n0(v),
   work: (v) => si(v, 'H'),
 };
 // 6.5e12 -> "6.57 TH"
@@ -297,6 +302,15 @@ function chartHover(e) {
 }
 addEventListener('pointermove', chartHover);
 addEventListener('pointerdown', chartHover);
+
+// Price/market-cap/volume chart from /api/price: picks the x format from the window, flags sparse data.
+function priceSeries(h, key, height = 170) {
+  const pts = h.points.map((p) => [p.t, p[{ usd: 'usd', cap: 'market_cap_usd', vol: 'volume_24h_usd' }[key]]]).filter((p) => p[1] != null);
+  if (pts.length < 2) return '<p class="muted">Not enough data yet: this chart fills in as the explorer records prices every 3 minutes.</p>';
+  const fx = { '24h': 'hour', '7d': 'dayhour', '30d': 'day', all: 'day' }[h.window] || 'hour';
+  return ichart(pts, fx, key === 'usd' ? 'usd' : 'money', height);
+}
+function pct(v) { return v == null ? '<span class="muted">–</span>' : `<b class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2)}%</b>`; }
 
 function minersCard(m) {
   if (!m?.miners?.length) return `<h2>Top miners</h2>${m ? tabs('mwin', WINDOW_TABS, m.window) : ''}<p class="muted">No blocks in this window yet (history may still be loading).</p>`;
@@ -444,7 +458,7 @@ const pages = {
         <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
       <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
-        <div class="tabs" style="margin:12px 0"><button data-range="hourly" class="on">24 hours</button><button data-range="daily">Since listing</button></div>
+        <div class="row" style="margin:12px 0;justify-content:space-between">${tabs('pwin', WINDOW_TABS, '24h')}<a href="/market" data-link>Full market analytics →</a></div>
         <div id="pchart"><p class="muted">Loading chart…</p></div></div>
       <div class="grid">
         ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
@@ -475,12 +489,9 @@ const pages = {
     onTabs('mwin', (v) => { minerWin = v; loadMiners(); });
     mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
-    let range = 'hourly', hist = null;
-    const drawPrice = () => { $('pchart').innerHTML = hist?.[range]?.length ? ichart(hist[range].map((p) => [p.t, p.usd]), range === 'daily' ? 'day' : 'hour', 'usd', 170) : '<p class="muted">Price history unavailable right now.</p>'; };
-    api('price').then((h) => { hist = h; drawPrice(); }).catch(() => { $('pchart').innerHTML = '<p class="muted">Price history unavailable right now.</p>'; });
-    for (const b of document.querySelectorAll('[data-range]')) b.onclick = () => {
-      range = b.dataset.range; document.querySelectorAll('[data-range]').forEach((x) => x.classList.toggle('on', x === b)); drawPrice();
-    };
+    const drawPrice = (w) => api(`price?window=${w}`).then((h) => { $('pchart').innerHTML = priceSeries(h, 'usd', 170); }).catch(() => { $('pchart').innerHTML = '<p class="muted">Price history unavailable right now.</p>'; });
+    drawPrice('24h');
+    onTabs('pwin', drawPrice);
     let tip = Number(s.chain.height), tipTs = b.blocks[0]?.timestamp;
     ticker = setInterval(() => { if (tipTs) { $('ago').textContent = ago(tipTs); $('gago').textContent = ago(tipTs); } }, 1000);
     feed = new EventSource('/api/live');
@@ -538,6 +549,48 @@ const pages = {
       <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
   },
   'api-access': () => go('/account'),
+
+  async market() {
+    const [s, pr, ho, rl, su] = await Promise.all([api('stats'), api('price?window=24h'), api('holders?window=30d'), api('richlist?limit=25'), api('supply?window=30d')]);
+    const p = pr.now, supplyNoid = Number(s.chain.circulating_supply_micronoid) / 1e6;
+    const card = (title, html, id = '') => `<div class="card"${id ? ` id="${id}"` : ''}><h2>${title}</h2>${html}</div>`;
+    const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h')}<div id="${name}c" style="margin-top:10px">${priceSeries(h, key)}</div>`);
+    app.innerHTML = `
+      <div class="grid">
+        <div class="card stat"><small>NOID price</small><b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small></div>
+        <div class="card stat" title="Price × circulating supply from this node"><small>Market cap</small><b>${esc(money(supplyNoid * p.usd, 0))}</b></div>
+        <div class="card stat"><small>24h volume</small><b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small></div>
+        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small><b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'swept ' + ago(ho.latest.ts) : 'first sweep in progress'}</small></div>
+        <div class="card stat"><small>All-time high</small><b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small></div>
+        <div class="card stat"><small>Circulating supply</small><b>${esc(noid(s.chain.circulating_supply_micronoid))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small></div>
+      </div>
+      ${card('Price change', `<div class="delta">${['15m', '1h', '6h', '24h', '7d', '30d'].map((k) => `<div><small>${k}</small>${pct(p.change[k])}</div>`).join('')}</div>`)}
+      ${chartCard('NOID / USD', 'px', 'usd', pr, `<small class="muted">${pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`)}
+      <div class="grid">
+        ${chartCard('Market cap', 'mc', 'cap', pr)}
+        ${chartCard('24h volume', 'vo', 'vol', pr)}
+      </div>
+      <div class="grid">
+        ${card('Holders over time', `${tabs('hw', WINDOW_TABS, '30d')}<div id="hwc" style="margin-top:10px">${ho.points.length > 1 ? ichart(ho.points.map((x) => [x.t, x.holders]), 'day', 'count', 130) : '<p class="muted">Collecting: one point per sweep, every ' + Math.round(ho.sweep.every_ms / 60000) + ' minutes.</p>'}</div>`)}
+        ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d')}<div id="swc" style="margin-top:10px">${su.points.length > 1 ? ichart(su.points.map((x) => [x.t, x.supply / 1e6]), 'day', 'num', 130) : '<p class="muted">Collecting…</p>'}</div>`)}
+      </div>
+      ${card('Concentration', ho.latest ? `<div class="delta">
+          <div><small>Top 10 hold</small><b>${(100 * ho.latest.top10 / ho.latest.supply).toFixed(1)}%</b></div>
+          <div><small>Top 100 hold</small><b>${(100 * ho.latest.top100 / ho.latest.supply).toFixed(1)}%</b></div>
+          <div><small>Live slots</small><b>${n0(ho.latest.slots)}</b></div>
+          <div><small>Avg per holder</small><b>${esc(noid(Math.round(ho.latest.supply / ho.latest.holders)))}</b></div></div>` : '<p class="muted">Available after the first sweep.</p>')}
+      ${card(`Rich list <small class="muted">top 25 of ${rl.holders ? n0(rl.holders) : '…'} holders${rl.updated ? ' · updated ' + esc(ago(rl.updated)) : ''}</small>`,
+        rl.rows.length ? `<div class="bars">${rl.rows.map((r) => `<a class="bar" href="/address/${encodeURIComponent(r.address)}" data-link title="${esc(r.address)}">
+          <span class="name">#${r.rank} ${esc(r.address)}</span><span class="val">${esc(noid(r.balance))} · ${(100 * r.share).toFixed(2)}% · ${n0(r.slots)} slots</span>
+          <span class="track"><span class="fill" data-w="${(100 * r.balance / rl.rows[0].balance).toFixed(1)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Available after the first Live State sweep (a few minutes after start).</p>')}
+      ${card('Markets', pr.markets?.length ? rows(pr.markets.map((m) => ({ exchange: m.exchange, pair: m.pair, price: usd4(m.usd), volume_24h: money(m.volume_24h_usd, 0), share: (m.share_pct ?? 0).toFixed(1) + '%' })), ['exchange', 'pair', 'price', 'volume_24h', 'share'])
+        + '<p class="muted">Order books and individual trades are not published by these exchanges in a form this explorer can read; prices and volumes come from CoinPaprika.</p>' : '<p class="muted">Market list unavailable right now.</p>')}`;
+    growBars();
+    const reload = (name, key) => (w) => api(`price?window=${w}`).then((h) => { $(name + 'c').innerHTML = priceSeries(h, key); });
+    onTabs('px', reload('px', 'usd')); onTabs('mc', reload('mc', 'cap')); onTabs('vo', reload('vo', 'vol'));
+    onTabs('hw', (w) => api(`holders?window=${w}`).then((h) => { $('hwc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.holders]), BUCKET_FMT[w], 'count', 130) : '<p class="muted">Not enough sweeps in this window yet.</p>'; }));
+    onTabs('sw', (w) => api(`supply?window=${w}`).then((h) => { $('swc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.supply / 1e6]), BUCKET_FMT[w], 'num', 130) : '<p class="muted">Collecting…</p>'; }));
+  },
 
   async mempool() {
     const m = await api('mempool');
@@ -768,7 +821,8 @@ const pages = {
     const { transactions, ...summary } = a.activity || {};
     app.innerHTML = `<div class="card"><h2>Address</h2><p class="mono">${esc(a.address)}${copyBtn(a.address)}</p>
         <div class="grid"><div class="stat"><small>Balance (Live State)</small><b>${esc(noid(a.balance_micronoid))}</b></div>
-        <div class="stat"><small>Live slots</small><b>${a.slots.length}</b></div></div></div>
+        <div class="stat"><small>Live slots</small><b>${a.slots.length}</b></div>
+        ${a.rank ? `<div class="stat"><small>Rich list rank</small><b>#${n0(a.rank)}</b></div>` : ''}</div></div>
       <div class="card"><h2>Live slots</h2>${rows(a.slots, ['slot_index', 'value', 'creation_id'])}</div>
       <div class="card"><h2>Recent activity</h2>${kv(summary)}${rows(transactions, TX_COLS)}</div>`;
   },
@@ -780,7 +834,7 @@ async function render() {
   for (const a of document.querySelectorAll('#menu nav a')) a.classList.toggle('here', a.getAttribute('href') === location.pathname);
   app.innerHTML = '<p class="muted">Loading…</p>';
   try {
-    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
+    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>Not found</h2><p class="muted">${esc(e.message)}</p></div>`;
   }
