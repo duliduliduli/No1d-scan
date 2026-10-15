@@ -88,5 +88,8 @@ SITE_URL=https://parano1d-scan.com
 | `LIVE_MS` | `2000` | How often the live feed polls the node (shared by all viewers) |
 | `SITE_URL` | `https://parano1d-scan.com` | Where Stripe sends buyers back to |
 | `DONATE_ADDRESS` | – | `o1…` address shown in the footer |
+| `P2P_PORT` | `9600` | Node P2P port, used to find peer connections for the globe |
+
+**Network globe** (home page): countries of peers connected to this explorer's node, read from established TCP connections on `P2P_PORT` in `/proc/net` and resolved to a country with [country.is](https://country.is) (free, no key, cached per IP). Only country codes and counts leave the server. It is one node's view of the network at country level: not miner or user locations, which the chain does not reveal. Each new block draws arcs from the peer countries into the node. The globe is [globe.gl](https://globe.gl) 2.46.2, loaded from jsDelivr only on the home page.
 
 Crypto received for a service is ordinary income at its dollar value when received; keep the History tab or `select * from ledger` as your record.

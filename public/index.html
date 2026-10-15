@@ -81,7 +81,37 @@
   .up { color:#3ddc97 } .down { color:#ff6b6b }
   :root[data-theme="light"] .up { color:#0d8a54 } :root[data-theme="light"] .down { color:#c62828 }
   .tabs { display:flex; gap:6px } .tabs button.on { background:var(--accent); color:var(--bg) }
-  svg.pchart { height:160px } svg.pchart circle { fill:transparent } svg.pchart circle:hover { fill:var(--accent) }
+  /* Globe hero */
+  .globe { position:relative; padding:0; height:min(66vh, 640px); overflow:hidden; background:radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%), var(--card) }
+  @media (pointer:coarse) { .globe { height:52vh } }
+  .globe #globe { position:absolute; inset:0 }
+  .globe .over { position:absolute; left:12px; right:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; z-index:2 }
+  .chip { background:color-mix(in srgb, var(--card) 78%, transparent); border:1px solid var(--line); border-radius:4px; padding:6px 10px; font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); backdrop-filter:blur(6px) }
+  .chip b { display:block; font-size:16px; letter-spacing:0; text-transform:none; color:var(--fg) }
+  .globe .legend { position:absolute; left:12px; right:12px; bottom:10px; font:11px var(--mono); color:var(--muted); pointer-events:none; z-index:2 }
+  .globe .event { position:absolute; right:12px; bottom:34px; font:13px var(--mono); color:var(--gold); opacity:0; transform:translateY(8px); transition:opacity .4s, transform .4s; z-index:2; pointer-events:none }
+  .globe .event.show { opacity:1; transform:none }
+  .globe .glmsg { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font:13px var(--mono) }
+  .scene-tooltip { font:12px var(--mono) !important; background:var(--card) !important; color:var(--fg) !important; border:1px solid var(--accent); padding:4px 8px; border-radius:3px }
+  /* Interactive charts: draw in, then crosshair + tooltip under the pointer */
+  .ichart { position:relative; touch-action:pan-y; cursor:crosshair }
+  .ichart svg { width:100%; display:block }
+  .ichart .line { fill:none; stroke:var(--accent); stroke-width:2; vector-effect:non-scaling-stroke; stroke-dasharray:1; stroke-dashoffset:1; animation:draw 1.4s cubic-bezier(.2,.7,.2,1) forwards; filter:drop-shadow(0 0 3px var(--accent)) }
+  .ichart .area { opacity:0; animation:fadein .9s .5s forwards }
+  @keyframes draw { to { stroke-dashoffset:0 } } @keyframes fadein { to { opacity:1 } }
+  .ichart .xh { position:absolute; top:0; width:1px; background:var(--muted); opacity:0; pointer-events:none }
+  .ichart .pt { position:absolute; width:11px; height:11px; border-radius:50%; background:var(--accent); box-shadow:var(--glow), 0 0 0 3px var(--card); transform:translate(-50%,-50%); opacity:0; pointer-events:none; transition:left .08s, top .08s }
+  .ichart .tip { position:absolute; transform:translate(-50%, calc(-100% - 12px)); background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); white-space:nowrap; opacity:0; pointer-events:none; z-index:3 }
+  .ichart.hover .xh, .ichart.hover .pt, .ichart.hover .tip { opacity:1 }
+  .ichart .axis { display:flex; justify-content:space-between; gap:8px; font:11px var(--mono); color:var(--muted); margin-top:6px }
+  /* Bar chart */
+  .bars { display:flex; flex-direction:column; gap:10px }
+  .bar { display:grid; grid-template-columns:1fr auto; gap:4px 12px; color:var(--fg); text-decoration:none !important }
+  .bar .name { font:13px var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .bar .val { font:12px var(--mono); color:var(--muted) }
+  .bar .track { grid-column:1 / -1; height:8px; background:var(--head); border-radius:4px; overflow:hidden }
+  .bar .fill { display:block; height:100%; width:0; border-radius:4px; background:linear-gradient(90deg, color-mix(in srgb, var(--accent) 30%, transparent), var(--accent)); box-shadow:var(--glow); transition:width 1.2s cubic-bezier(.2,.7,.2,1) }
+  .bar:hover .name { color:var(--accent) } .bar:hover .fill { filter:brightness(1.25) }
 </style>
 </head>
 <body>
@@ -156,15 +186,6 @@ const rows = (list, cols) => list?.length
   ? `<table class="list"><tr>${cols.map((c) => `<th>${esc(label(c))}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c) => `<td>${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
   : '<p class="muted">Nothing here.</p>';
 
-function spark(title, pts) {
-  const ys = pts.map((p) => Number(p)).filter(Number.isFinite);
-  if (ys.length < 2) return `<div class="card"><h2>${esc(title)}</h2><p class="muted">Collecting data…</p></div>`;
-  const lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
-  const line = ys.map((y, i) => `${(i / (ys.length - 1)) * 300},${88 - ((y - lo) / span) * 84}`).join(' ');
-  return `<div class="card"><h2>${esc(title)} <small class="muted">${esc(lo.toLocaleString())} – ${esc(hi.toLocaleString())}</small></h2>
-    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".25"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
-}
-
 // ---- live helpers
 let feed = null, ticker = null;
 const $ = (id) => document.getElementById(id);
@@ -184,18 +205,59 @@ function setNum(id, n) {
 const ago = (ts) => { const s = Math.max(0, Math.round(Date.now() / 1000 - (ts > 1e12 ? ts / 1000 : ts))); return s < 120 ? `${s}s ago` : s < 7200 ? `${Math.round(s / 60)}m ago` : s < 172800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`; };
 const money = (x, d = 2) => x == null ? '–' : '$' + Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const usd4 = (x) => money(x, x < 1 ? 4 : 2);
-function priceChart(pts, daily) {
-  if (!pts?.length) return '<p class="muted">Price history unavailable right now.</p>';
-  const ys = pts.map((p) => p.usd), lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
-  const xy = pts.map((p, i) => [(i / Math.max(pts.length - 1, 1)) * 600, 150 - ((p.usd - lo) / span) * 140]);
-  const line = xy.map((p) => p.join(',')).join(' ');
-  const fmt = (t) => new Date(t * 1000).toLocaleString([], daily ? { month: 'short', day: 'numeric' } : { hour: 'numeric', minute: '2-digit' });
-  return `<svg class="pchart" viewBox="0 0 600 160" preserveAspectRatio="none" role="img" aria-label="NOID price chart">
-      <defs><linearGradient id="pfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".3"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs>
-      <polygon points="0,160 ${line} 600,160" style="fill:url(#pfill)"/><polyline points="${line}"/>
-      ${xy.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="6"><title>${esc(fmt(pts[i].t))}: ${esc(usd4(pts[i].usd))}</title></circle>`).join('')}</svg>
-    <div class="row muted" style="justify-content:space-between;font:12px var(--mono)"><span>${esc(fmt(pts[0].t))}</span><span>low ${esc(usd4(lo))} · high ${esc(usd4(hi))}</span><span>${esc(fmt(pts.at(-1).t))}</span></div>`;
+const FMT = {
+  num: (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }),
+  usd: (v) => usd4(v),
+  sec: (v) => `${Math.round(v)} s`,
+  block: (x) => `block #${Number(x).toLocaleString()}`,
+  hour: (t) => new Date(t * 1000).toLocaleString([], { hour: 'numeric', minute: '2-digit' }),
+  day: (t) => new Date(t * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+};
+let chartSeq = 0;
+// pts: [[x, y], ...]; fx/fy name entries of FMT for the axis and tooltip.
+function ichart(pts, fx, fy, h = 110) {
+  pts = pts.filter((p) => Number.isFinite(p[1]));
+  if (pts.length < 2) return '<p class="muted">Collecting data… (fills in as new blocks arrive)</p>';
+  const id = `cg${++chartSeq}`, ys = pts.map((p) => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
+  const xy = pts.map((p, i) => `${((i / (pts.length - 1)) * 600).toFixed(1)},${(h - 6 - ((p[1] - lo) / span) * (h - 12)).toFixed(1)}`).join(' ');
+  return `<div class="ichart" data-pts="${esc(JSON.stringify(pts))}" data-fx="${fx}" data-fy="${fy}" data-lo="${lo}" data-hi="${hi}" data-h="${h}">
+    <svg viewBox="0 0 600 ${h}" preserveAspectRatio="none" style="height:${h}px" aria-hidden="true">
+      <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".32"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs>
+      <polygon class="area" points="0,${h} ${xy} 600,${h}" fill="url(#${id})"/><polyline class="line" pathLength="1" points="${xy}"/></svg>
+    <div class="xh" style="height:${h}px"></div><div class="pt"></div><div class="tip"></div>
+    <div class="axis"><span>${esc(FMT[fx](pts[0][0]))}</span><span>low ${esc(FMT[fy](lo))} · high ${esc(FMT[fy](hi))}</span><span>${esc(FMT[fx](pts.at(-1)[0]))}</span></div></div>`;
 }
+function chartHover(e) {
+  const c = e.target.closest?.('.ichart');
+  for (const x of document.querySelectorAll('.ichart.hover')) if (x !== c) x.classList.remove('hover');
+  if (!c) return;
+  const r = c.querySelector('svg').getBoundingClientRect(), pts = (c._pts ??= JSON.parse(c.dataset.pts));
+  const i = Math.round(Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * (pts.length - 1));
+  const [x, y] = pts[i], lo = +c.dataset.lo, hi = +c.dataset.hi, h = +c.dataset.h;
+  const px = (i / (pts.length - 1)) * r.width, py = h - 6 - ((y - lo) / (hi - lo || 1)) * (h - 12);
+  c.querySelector('.xh').style.left = `${px}px`;
+  Object.assign(c.querySelector('.pt').style, { left: `${px}px`, top: `${py}px` });
+  const tip = c.querySelector('.tip');
+  Object.assign(tip.style, { left: `${Math.min(Math.max(px, 70), r.width - 70)}px`, top: `${py}px` });
+  tip.innerHTML = `<b>${esc(FMT[c.dataset.fy](y))}</b> · ${esc(FMT[c.dataset.fx](x))}`;
+  c.classList.add('hover');
+}
+addEventListener('pointermove', chartHover);
+addEventListener('pointerdown', chartHover);
+
+function minersCard(m) {
+  if (!m?.miners?.length) return '<h2>Top miners</h2><p class="muted">Collecting blocks…</p>';
+  const top = m.miners[0].blocks;
+  return `<h2>Top miners <small class="muted">share of the last ${n0(m.blocks)} blocks indexed here</small></h2><div class="bars">${m.miners.map((r) => {
+    const inner = `<span class="name">${esc(r.miner || 'unknown')}</span><span class="val">${(r.share * 100).toFixed(1)}% · ${n0(r.blocks)} blocks</span>
+      <span class="track"><span class="fill" data-w="${((r.blocks / top) * 100).toFixed(1)}"></span></span>`;
+    return r.miner ? `<a class="bar" href="/address/${encodeURIComponent(r.miner)}" data-link title="${esc(r.miner)}">${inner}</a>` : `<div class="bar">${inner}</div>`;
+  }).join('')}</div>`;
+}
+const growBars = () => requestAnimationFrame(() => requestAnimationFrame(() => {
+  for (const f of document.querySelectorAll('.fill[data-w]')) f.style.width = `${f.dataset.w}%`;
+}));
+
 function priceHead(p, supplyMicro) {
   if (!p) return '<p class="muted">Price feed unavailable right now.</p>';
   const ch = p.change_24h_pct, cap = supplyMicro ? (Number(supplyMicro) / 1e6) * p.usd : null;
@@ -208,21 +270,121 @@ function priceHead(p, supplyMicro) {
 }
 
 function charts(c) {
-  const gaps = c.slice(1).map((p, i) => p.ts && c[i].ts ? p.ts - c[i].ts : NaN);
-  return `${spark('Block time (seconds)', gaps)}${spark('Difficulty (bits)', c.map((p) => p.difficulty_bits))}
-    ${spark('Active slots (live outputs)', c.map((p) => p.active_slot_count))}${spark('Connected peers', c.map((p) => p.peers))}`;
+  const card = (title, html) => `<div class="card"><h2>${esc(title)}</h2>${html}</div>`;
+  const gaps = c.slice(1).map((p, i) => [p.height, p.ts && c[i].ts ? p.ts - c[i].ts : NaN]);
+  return card('Block time', ichart(gaps, 'block', 'sec'))
+    + card('Difficulty (bits)', ichart(c.map((p) => [p.height, p.difficulty_bits]), 'block', 'num'))
+    + card('Active slots (live outputs)', ichart(c.map((p) => [p.height, p.active_slot_count]), 'block', 'num'))
+    + card('Connected peers', ichart(c.map((p) => [p.height, p.peers]), 'block', 'num'));
 }
 function markNew(tableId, oldTip) {
   for (const tr of document.querySelectorAll(`#${tableId} tr`)) if (Number(tr.cells[0]?.textContent) > oldTip) tr.classList.add('new');
 }
 
+// ---- globe: countries of peers connected to this explorer's node (never exact locations, never miner locations)
+const GLOBE_JS = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js';
+const GEO_URL = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/example/datasets/ne_110m_admin_0_countries.geojson';
+const ISO_FIX = { France: 'FR', Norway: 'NO' }; // Natural Earth leaves these as -99
+// Small countries/territories (common hosting spots) that the 1:110m map omits; points only, no outline.
+const SMALL = { SG: [1.35, 103.82], HK: [22.32, 114.17], LU: [49.8, 6.13], MT: [35.9, 14.4], BH: [26.07, 50.55], MC: [43.73, 7.42], LI: [47.16, 9.55], AD: [42.51, 1.52], MU: [-20.2, 57.5], SC: [-4.68, 55.49], MV: [3.2, 73.22], BB: [13.19, -59.54], KY: [19.31, -81.25], GI: [36.14, -5.35], IM: [54.24, -4.55], JE: [49.21, -2.13], GG: [49.45, -2.58], MO: [22.2, 113.55], BM: [32.3, -64.78], AW: [12.52, -69.97], CW: [12.17, -68.98], VG: [18.42, -64.64] };
+const spot = (cc) => countries?.find((f) => f.properties.cc === cc)?.properties.c ?? (SMALL[cc] && { lat: SMALL[cc][0], lng: SMALL[cc][1] });
+let globe = null, globeTimer = null, globeResize = null, countries = null;
+const cssv = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const alpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+const loadScript = (src) => new Promise((ok, fail) => {
+  const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => fail(new Error('globe failed to load')); document.head.append(el);
+});
+function centroid(f) {
+  const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+  const ring = polys.map((p) => p[0]).sort((a, b) => b.length - a.length)[0];
+  const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+  return { lat: (Math.min(...ys) + Math.max(...ys)) / 2, lng: (Math.min(...xs) + Math.max(...xs)) / 2 };
+}
+const G = { peers: new Map(), seen: new Set(), home: null, arcs: [], bursts: [] };
+function globeColors() {
+  const acc = cssv('--accent'), gold = cssv('--gold');
+  globe.atmosphereColor(acc).globeMaterial().color.set(cssv('--card'));
+  globe.hexPolygonColor(({ properties: p }) => G.peers.has(p.cc) ? acc : G.seen.has(p.cc) ? alpha(acc, 0.45) : alpha(acc, 0.13))
+    .pointColor(() => acc).ringColor((r) => (t) => alpha(r.burst ? gold : acc, (1 - t) * (r.burst ? 1 : 0.7)))
+    .arcColor(() => [alpha(gold, 0.35), gold]);
+}
+function globeLayers() {
+  const pts = [...G.peers].map(([cc, count]) => ({ ...spot(cc), cc, count })).filter((p) => p.lat != null);
+  globe.pointsData(pts)
+    .ringsData([...(G.home ? [{ ...G.home, home: true }] : []), ...pts, ...G.bursts])
+    .arcsData(G.arcs);
+  globeColors();
+}
+async function mountGlobe(net) {
+  const el = $('globe');
+  if (!window.Globe) await loadScript(GLOBE_JS);
+  if (!countries) {
+    countries = (await (await fetch(GEO_URL)).json()).features;
+    for (const f of countries) { const p = f.properties; p.cc = p.ISO_A2.length === 2 ? p.ISO_A2 : ISO_FIX[p.ADMIN] || ''; p.c = centroid(f); }
+  }
+  if (!el.isConnected) return;
+  const peerLabel = (cc, name) => `<b>${esc(name)}</b><br>${G.peers.get(cc) ? `${G.peers.get(cc)} peer${G.peers.get(cc) > 1 ? 's' : ''} connected now` : G.seen.has(cc) ? 'peer seen in the last 24 h' : 'no peers seen'}`;
+  globe = Globe({ animateIn: true })(el)
+    .width(el.clientWidth).height(el.clientHeight).backgroundColor('rgba(0,0,0,0)')
+    .showAtmosphere(true).atmosphereAltitude(0.2)
+    .hexPolygonsData(countries).hexPolygonResolution(3).hexPolygonMargin(0.32)
+    .hexPolygonLabel(({ properties: p }) => peerLabel(p.cc, p.ADMIN))
+    .pointLat('lat').pointLng('lng').pointRadius(0.55).pointAltitude((d) => 0.015 + Math.min(d.count, 12) * 0.012)
+    .pointLabel((d) => peerLabel(d.cc, countries.find((f) => f.properties.cc === d.cc)?.properties.ADMIN || d.cc))
+    .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 4 : 2.5)).ringPropagationSpeed((r) => (r.burst ? 6 : 2)).ringRepeatPeriod((r) => (r.burst ? 9e9 : r.home ? 1200 : 1800))
+    .arcStartLat((a) => a.from.lat).arcStartLng((a) => a.from.lng).arcEndLat((a) => a.to.lat).arcEndLng((a) => a.to.lng)
+    .arcDashLength(0.7).arcDashGap(0.6).arcDashInitialGap(1).arcDashAnimateTime(1500).arcStroke(0.9).arcAltitudeAutoScale(0.45);
+  globe.hexPolygonUseDots?.(true);
+  const ctl = globe.controls();
+  Object.assign(ctl, { autoRotate: true, autoRotateSpeed: 0.55, enableDamping: true });
+  let idle; ctl.addEventListener('start', () => { ctl.autoRotate = false; clearTimeout(idle); });
+  ctl.addEventListener('end', () => { idle = setTimeout(() => (ctl.autoRotate = true), 6000); });
+  globeResize = new ResizeObserver(() => globe?.width(el.clientWidth).height(el.clientHeight));
+  globeResize.observe(el);
+  setNetwork(net);
+  if (G.home) globe.pointOfView({ ...G.home, altitude: 2.3 }, 1200);
+  globeTimer = setInterval(() => api('network').then(setNetwork).catch(() => {}), 60_000);
+}
+function setNetwork(net) {
+  if (!net) return;
+  G.peers = new Map(net.peers.map((p) => [p.country, p.count]));
+  G.seen = new Set(net.countries_24h);
+  G.home = spot(net.node_country) ?? G.home;
+  setNum('gcc', G.peers.size || G.seen.size);
+  if (globe) globeLayers();
+}
+// New block: arcs from every peer country into our node, plus a burst at the node.
+function globeBlock(h) {
+  const ev = $('gevent');
+  if (ev) { ev.textContent = `◆ Block #${h.toLocaleString()} received`; ev.classList.add('show'); setTimeout(() => ev.classList.remove('show'), 3500); }
+  if (!globe || !G.home) return;
+  const from = [...G.peers.keys()].map(spot).filter(Boolean);
+  const arcs = from.map((f) => ({ from: f, to: G.home })), burst = { ...G.home, burst: true };
+  G.arcs.push(...arcs); G.bursts.push(burst); globeLayers();
+  setTimeout(() => { G.arcs = G.arcs.filter((a) => !arcs.includes(a)); G.bursts = G.bursts.filter((b) => b !== burst); globe && globeLayers(); }, 3400);
+}
+function unmountGlobe() {
+  clearInterval(globeTimer); globeResize?.disconnect();
+  globe?._destructor?.(); globe = null;
+}
+
 const pages = {
   async home() {
-    const [s, b, t, c] = await Promise.all([api('stats'), api('blocks?limit=15'), api('txs').catch(() => null), api('charts')]);
+    const [s, b, t, c, net, mi] = await Promise.all([api('stats'), api('blocks?limit=15'), api('txs').catch(() => null), api('charts'), api('network').catch(() => null), api('miners').catch(() => null)]);
     const stat = (k, id, v, tip) => `<div class="card stat" title="${esc(tip)}"><small>${k}</small><b id="${id}">${v}</b></div>`;
     const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, TX_COLS)}` : '';
     app.innerHTML = `
       <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
+      <div class="card globe"><div id="globe"><div class="glmsg">Loading network globe…</div></div>
+        <div class="over">
+          <div class="chip">Block<b id="gh">${n0(s.chain.height)}</b></div>
+          <div class="chip">Last block<b id="gago">${esc(ago(b.blocks[0]?.timestamp))}</b></div>
+          <div class="chip">NOID<b id="gpx">${esc(s.price ? usd4(s.price.usd) : '–')}</b></div>
+          <div class="chip">Peers<b id="gpeers">${n0(s.peers)}</b></div>
+          <div class="chip">Countries<b id="gcc">${n0(net?.peers.length)}</b></div>
+        </div>
+        <div class="event" id="gevent"></div>
+        <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
       <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
         <div class="tabs" style="margin:12px 0"><button data-range="hourly" class="on">24 hours</button><button data-range="daily">Since listing</button></div>
@@ -239,44 +401,47 @@ const pages = {
         ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
       </div>
       <div class="grid" id="charts">${charts(c)}</div>
+      <div class="card" id="miners">${minersCard(mi)}</div>
       <div class="card"><h2>Latest blocks</h2><div id="blocks">${rows(b.blocks, ['height', 'hash', 'timestamp', 'miner', 'active_slot_count'])}</div>
         <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p></div>
       <div class="card" id="txs">${txsCard(t)}</div>`;
-    for (const id of ['h', 'slots', 'peers']) $(id).dataset.v = { h: s.chain.height, slots: s.state.active_slots, peers: s.peers }[id];
+    for (const [id, v] of Object.entries({ h: s.chain.height, gh: s.chain.height, slots: s.state.active_slots, peers: s.peers, gpeers: s.peers, gcc: net?.peers.length })) $(id).dataset.v = v ?? 0;
+    growBars();
+    mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
     let range = 'hourly', hist = null;
-    const drawPrice = () => { $('pchart').innerHTML = priceChart(hist?.[range], range === 'daily'); };
+    const drawPrice = () => { $('pchart').innerHTML = hist?.[range]?.length ? ichart(hist[range].map((p) => [p.t, p.usd]), range === 'daily' ? 'day' : 'hour', 'usd', 170) : '<p class="muted">Price history unavailable right now.</p>'; };
     api('price').then((h) => { hist = h; drawPrice(); }).catch(() => { $('pchart').innerHTML = '<p class="muted">Price history unavailable right now.</p>'; });
     for (const b of document.querySelectorAll('[data-range]')) b.onclick = () => {
       range = b.dataset.range; document.querySelectorAll('[data-range]').forEach((x) => x.classList.toggle('on', x === b)); drawPrice();
     };
     let tip = Number(s.chain.height), tipTs = b.blocks[0]?.timestamp;
-    ticker = setInterval(() => tipTs && ($('ago').textContent = ago(tipTs)), 1000);
+    ticker = setInterval(() => { if (tipTs) { $('ago').textContent = ago(tipTs); $('gago').textContent = ago(tipTs); } }, 1000);
     feed = new EventSource('/api/live');
     feed.onmessage = async (e) => {
       const d = JSON.parse(e.data);
       $('dot').classList.remove('off'); $('livemsg').textContent = `LIVE · updates every 2 s · checked ${new Date(d.at).toLocaleTimeString()}`;
       setText('supply', noid(d.chain.circulating_supply_micronoid));
       if (d.price) {
-        setText('px', usd4(d.price.usd)); setText('pxvol', money(d.price.volume_24h_usd, 0));
+        setText('px', usd4(d.price.usd)); setText('gpx', usd4(d.price.usd)); setText('pxvol', money(d.price.volume_24h_usd, 0));
         setText('pxcap', money((Number(d.chain.circulating_supply_micronoid) / 1e6) * d.price.usd, 0));
         const ch = d.price.change_24h_pct; $('pxch').className = ch >= 0 ? 'up' : 'down';
         $('pxch').innerHTML = `${ch >= 0 ? '▲' : '▼'} ${esc(Math.abs(ch).toFixed(2))}% <small class="muted">24h</small>`;
       }
       setText('reward', noid(d.mining.block_reward_micronoid));
       setNum('slots', d.state.active_slots); setText('fill', d.state.fill_pct + '%');
-      setText('diff', d.mining.difficulty_bits); setNum('peers', d.peers);
+      setText('diff', d.mining.difficulty_bits); setNum('peers', d.peers); setNum('gpeers', d.peers);
       setText('node', d.node.synced ? 'synced' : 'syncing: ' + d.node.sync_stage);
       const h = Number(d.chain.height);
       if (h <= tip) return;
       const old = tip; tip = h; tipTs = d.header?.timestamp ?? tipTs;
-      $('h').href = `/block/${h}`; setNum('h', h);
-      flash($('ago'));
+      $('h').href = `/block/${h}`; setNum('h', h); setNum('gh', h);
+      flash($('ago')); flash($('gago')); globeBlock(h);
       // ?at= makes each new height a fresh (but still shared) cache entry.
-      const [nb, nt, nc] = await Promise.all([api(`blocks?limit=15&at=${h}`), api(`txs?at=${h}`).catch(() => null), api(`charts?at=${h}`)]);
+      const [nb, nt, nc, nm] = await Promise.all([api(`blocks?limit=15&at=${h}`), api(`txs?at=${h}`).catch(() => null), api(`charts?at=${h}`), api(`miners?at=${h}`).catch(() => null)]);
       if (!feed) return;
       $('blocks').innerHTML = rows(nb.blocks, ['height', 'hash', 'timestamp', 'miner', 'active_slot_count']); markNew('blocks', old);
-      $('txs').innerHTML = txsCard(nt); $('charts').innerHTML = charts(nc);
+      $('txs').innerHTML = txsCard(nt); $('charts').innerHTML = charts(nc); $('miners').innerHTML = minersCard(nm); growBars();
     };
     feed.addEventListener('down', () => { $('dot').classList.add('off'); $('livemsg').textContent = 'Node not responding · retrying'; });
     feed.onerror = () => { $('dot')?.classList.add('off'); $('livemsg') && ($('livemsg').textContent = 'Connection lost · reconnecting…'); };
@@ -442,7 +607,7 @@ const pages = {
 
 async function render() {
   const [, type, id] = location.pathname.split('/');
-  feed?.close(); feed = null; clearInterval(ticker);
+  feed?.close(); feed = null; clearInterval(ticker); unmountGlobe();
   for (const a of document.querySelectorAll('#menu nav a')) a.classList.toggle('here', a.getAttribute('href') === location.pathname);
   app.innerHTML = '<p class="muted">Loading…</p>';
   try {
@@ -458,6 +623,7 @@ const setTheme = (t) => {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('theme', t); } catch {}
   $('theme').textContent = t === 'light' ? '☾  Dark mode' : '☀  Light mode';
+  if (globe) globeColors();
 };
 setTheme((() => { try { return localStorage.getItem('theme'); } catch {} })() || 'dark');
 $('theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');

@@ -28,6 +28,8 @@ const q = {
   hasStat: db.prepare('select 1 from stats where height = ?'),
   addStat: db.prepare('insert or replace into stats (height, ts, data) values (?, ?, ?)'),
   charts: db.prepare('select height, ts, data from stats order by height desc limit 500'),
+  miners: db.prepare(`select json_extract(details, '$.header.miner') miner, count(*) blocks, max(height) last
+    from (select details, height from blocks order by height desc limit ?) group by miner order by blocks desc`),
 };
 
 async function rpc(method, params = []) {
@@ -124,6 +126,54 @@ async function pollPriceHistory() {
   if (h.status === 'rejected' && d.status === 'rejected') throw h.reason;
 }
 
+// Network map: countries of peers connected to our node right now. The node has no peer-list RPC, so we read
+// established TCP connections on the P2P port from /proc/net (world-readable). Only country codes and counts
+// leave the server; peer IPs stay in this process's memory.
+const P2P_PORT = Number(process.env.P2P_PORT || 9600);
+const geo = new Map(); // ip -> ISO country code
+const seen = new Map(); // country -> last time a peer was there (for the 24 h view)
+const network = { node_country: null, peers: [], countries_24h: [], updated: null };
+function hexIp(h) {
+  const b = Buffer.from(h, 'hex');
+  for (let i = 0; i < b.length; i += 4) b.subarray(i, i + 4).reverse(); // /proc/net stores 32-bit words little-endian
+  if (b.length === 4) return [...b].join('.');
+  if (b.subarray(0, 10).every((x) => x === 0) && b[10] === 255 && b[11] === 255) return [...b.subarray(12)].join('.');
+  return b.toString('hex').match(/.{4}/g).join(':');
+}
+const isPublic = (ip) => !/^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip)
+  && !/^(0000:){7}000[01]$|^f[cde]/.test(ip);
+// Lines of /proc/net/tcp{,6} -> public remote IPs of ESTABLISHED connections on the P2P port (either side).
+function peerIps(text) {
+  const ips = new Set();
+  for (const line of text.split('\n')) {
+    const [, local, remote, st] = line.trim().split(/\s+/);
+    if (st !== '01' || !remote?.includes(':')) continue;
+    const [rh, rp] = remote.split(':');
+    if (parseInt(local.split(':')[1], 16) !== P2P_PORT && parseInt(rp, 16) !== P2P_PORT) continue;
+    const ip = hexIp(rh);
+    if (isPublic(ip)) ips.add(ip);
+  }
+  return [...ips];
+}
+const countryOf = async (ip = '') => {
+  const r = await fetch(`https://api.country.is/${ip}`, { signal: AbortSignal.timeout(8_000) });
+  return r.ok ? (await r.json()).country : null;
+};
+async function pollNetwork() {
+  network.node_country ??= await countryOf().catch(() => null);
+  const text = ['/proc/net/tcp', '/proc/net/tcp6'].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
+  const counts = {};
+  for (const ip of peerIps(text)) {
+    if (!geo.has(ip)) geo.set(ip, await countryOf(ip).catch(() => null));
+    const c = geo.get(ip);
+    if (c) { counts[c] = (counts[c] || 0) + 1; seen.set(c, Date.now()); }
+  }
+  for (const [c, t] of seen) if (t < Date.now() - 86400_000) seen.delete(c);
+  network.peers = Object.entries(counts).map(([country, count]) => ({ country, count })).sort((a, b) => b.count - a.count);
+  network.countries_24h = [...seen.keys()];
+  network.updated = Date.now();
+}
+
 const bill = require('./billing.js')(db, rpc, () => price.now?.usd);
 
 const routes = {
@@ -173,6 +223,18 @@ const routes = {
 
   async txs(_, params) {
     return rpc('getRecentTransactions', [Math.max(Number(params.get('page')) || 1, 1), 25, null]);
+  },
+
+  async network() {
+    return network;
+  },
+
+  // Who mined the last N blocks this explorer has indexed.
+  async miners(_, params) {
+    const n = Math.min(Math.max(Number(params.get('blocks')) || 500, 10), 5000);
+    const rows = q.miners.all(n);
+    const total = rows.reduce((s, r) => s + r.blocks, 0);
+    return { blocks: total, miners: rows.slice(0, 15).map((r) => ({ ...r, share: r.blocks / total })) };
   },
 
   async price() {
@@ -317,8 +379,9 @@ if (require.main === module) {
   const every = (fn, ms) => { const run = () => fn().catch((e) => console.error('price:', e.message)); run(); setInterval(run, ms); };
   every(pollPrice, 180_000);
   every(pollPriceHistory, 3600_000);
+  every(pollNetwork, 60_000);
   server.listen(Number(process.env.PORT || 8080), process.env.HOST || '127.0.0.1', () =>
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price };
+module.exports = { server, tick, db, price, peerIps };

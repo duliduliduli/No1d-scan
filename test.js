@@ -183,6 +183,21 @@ test('indexer + api', async (t) => {
   assert.strictEqual(live.header.height, tip);
   ac.abort();
 
+  // Peer map: only established connections on the P2P port with public IPs count.
+  const { peerIps } = require('./server.js');
+  const procNet = [
+    '  sl  local_address rem_address   st',
+    '   0: 0100007F:2580 0100007F:9C40 01', // loopback: private
+    '   1: 0F02000A:2580 08080808:C350 01', // inbound to :9600 from 8.8.8.8
+    '   2: 0F02000A:D431 01010101:2580 01', // outbound to 1.1.1.1:9600
+    '   3: 0F02000A:D432 04040808:2580 06', // TIME_WAIT: ignored
+    '   4: 0F02000A:01BB 09090909:D000 01', // HTTPS, not P2P: ignored
+    '   5: 00000000000000000000000000000000:2580 0000000000000000FFFF00000A0B0C0D:C351 01', // v4-mapped v6
+  ].join('\n');
+  assert.deepStrictEqual(peerIps(procNet).sort(), ['1.1.1.1', '13.12.11.10', '8.8.8.8']);
+  const [, miners] = await get('miners?blocks=50');
+  assert.ok(miners.blocks > 0 && miners.miners.every((m) => m.share > 0 && m.share <= 1));
+
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
 });
