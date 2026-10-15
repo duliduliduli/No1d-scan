@@ -144,6 +144,12 @@ test('indexer + api', async (t) => {
   paySlots = [{ slot_index: 9, value: String(Math.round(Number(q2.amount_noid) * 1e6)), creation_id: 'c1' }];
   await tick();
   assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000, 'an already-used slot cannot pay a second quote');
+  // Overpayment with the same last digits is credited at the quoted rate: +1 NOID on a 25 NOID pack = +200 credits.
+  const micro2 = Math.round(Number(q2.amount_noid) * 1e6);
+  paySlots = [{ slot_index: 11, value: String(micro2 + 1_000_000), creation_id: 'c3' }];
+  await tick();
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000 + 5000 + 200, 'overpayment credited proportionally');
+  assert.strictEqual((await get(`topup/${q2.id}`, { headers: K }))[1].credits_added, 5200);
   assert.strictEqual((await get(`stats?key=${acct.key}`))[2].get('x-tier'), 'paid');
 
   // API gate: scripts need a key, our own pages and keyed clients don't; stats stays open for uptime monitors.
@@ -158,16 +164,16 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt, 1000) }))[0], 400, 'old timestamp rejected');
   assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) }))[0], 200);
   await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) });
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 25000, 'webhook replay credits once; credits follow amount paid, not metadata');
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 30200, 'webhook replay credits once; credits follow amount paid, not metadata');
   const eur = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_2', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, currency: 'eur' } } });
   await post('stripe-webhook', eur, { 'stripe-signature': sign(eur) });
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 25000, 'non-USD session ignored');
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 30200, 'non-USD session ignored');
 
   // Professional API behaviour: wrong key fails loudly, rate-limit and credit headers on every keyed call.
   const [badStatus, badBody] = await get('blocks', { bare: true, headers: { 'x-api-key': 'nk_' + 'f'.repeat(40) } });
   assert.strictEqual(badStatus, 401); assert.match(badBody.error, /unknown API key/);
   const [, , hdr] = await get('blocks', { bare: true, headers: K });
-  assert.strictEqual(hdr.get('x-tier'), 'paid'); assert.strictEqual(hdr.get('x-ratelimit-limit'), '3000'); assert.strictEqual(hdr.get('x-credits-remaining'), '25000');
+  assert.strictEqual(hdr.get('x-tier'), 'paid'); assert.strictEqual(hdr.get('x-ratelimit-limit'), '3000'); assert.strictEqual(hdr.get('x-credits-remaining'), '30200');
   assert.strictEqual((await get('me', { headers: K }))[1].tier, 'paid');
 
   // Chatbot: answers via tools from real routes; 3 free a day, then paid at 5 credits; refunded on model errors.
@@ -179,10 +185,10 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await ask())[0], 402, 'free quota used up');
   const [, a5] = await ask(K);
   assert.strictEqual(a5.paid, true);
-  assert.strictEqual(a5.credits, 24995);
+  assert.strictEqual(a5.credits, 30195);
   aiDown = true;
   assert.strictEqual((await ask(K))[0], 502);
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 24995, 'refunded when the model fails');
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 30195, 'refunded when the model fails');
   aiDown = false;
   const hist = (await get('me', { headers: K }))[1].history.map((h) => h.reason);
   assert.ok(hist.includes('AI question') && hist.some((r) => r.startsWith('Card top-up')) && hist.some((r) => r.startsWith('NOID top-up')));

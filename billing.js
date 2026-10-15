@@ -38,9 +38,13 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
     create index if not exists ledger_account on ledger(account, at);
     create table if not exists usage (account text not null, day text not null, requests integer not null default 0, chats integer not null default 0, primary key (account, day));
     create table if not exists noid_topups (id text primary key, account text not null, amount integer not null, credits integer not null, created integer not null, paid_ref text unique);
-    create unique index if not exists noid_topups_open on noid_topups(amount) where paid_ref is null;
     create table if not exists free_chat (who text not null, day text not null, n integer not null, primary key (who, day));
   `);
+  // The last 4 digits (μNOID "dust") identify an order, so a buyer may send more than quoted and still match;
+  // extra is credited at the same rate. Dust is unique among open orders.
+  try { db.exec('alter table noid_topups add column dust integer'); } catch {}
+  db.exec('update noid_topups set dust = amount % 10000 where dust is null');
+  try { db.exec('drop index if exists noid_topups_open; create unique index if not exists noid_topups_dust on noid_topups(dust) where paid_ref is null'); } catch {}
   const q = {
     insertAccount: db.prepare('insert into accounts (id, key_hash, created) values (?, ?, ?)'),
     byKey: db.prepare('select id, credits, requests, created from accounts where key_hash = ?'),
@@ -53,11 +57,12 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
     useDay: db.prepare(`insert into usage (account, day, requests, chats) values (?, ?, ?, ?)
       on conflict (account, day) do update set requests = requests + excluded.requests, chats = chats + excluded.chats`),
     usage: db.prepare('select day, requests, chats from usage where account = ? order by day desc limit 30'),
-    newTopup: db.prepare('insert into noid_topups (id, account, amount, credits, created) values (?, ?, ?, ?, ?)'),
+    newTopup: db.prepare('insert into noid_topups (id, account, amount, credits, created, dust) values (?, ?, ?, ?, ?, ? % 10000)'),
     topup: db.prepare('select id, account, amount, credits, created, paid_ref from noid_topups where id = ?'),
+    paidAt: db.prepare('select at from ledger where ref = ?'),
     openTopups: db.prepare('select count(*) n from noid_topups where paid_ref is null'),
     expireTopups: db.prepare('delete from noid_topups where paid_ref is null and created < ?'),
-    openByAmount: db.prepare('select id, account, credits from noid_topups where amount = ? and paid_ref is null'),
+    openByDust: db.prepare('select id, account, amount, credits from noid_topups where dust = ? and paid_ref is null'),
     markTopup: db.prepare('update noid_topups set paid_ref = ? where id = ?'),
     freeUsed: db.prepare('select n from free_chat where who = ? and day = ?'),
     freeUse: db.prepare('insert into free_chat (who, day, n) values (?, ?, 1) on conflict (who, day) do update set n = n + 1'),
@@ -105,18 +110,22 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
     return { paid: false, free_left: FREE_CHATS_PER_DAY - used - 1, refund: () => db.prepare('update free_chat set n = n - 1 where who = ? and day = ?').run(ip, today()) };
   }
 
-  // shortcut: matches any slot on PAY_ADDRESS with the exact quoted amount; the micro-NOID "dust" makes accidental matches ~1 in 10,000 per open quote.
+  // A slot on PAY_ADDRESS pays the open order whose dust matches its last 4 digits. Credits scale with the
+  // amount actually received (send more, get more at the quoted rate), never below 1.
+  // shortcut: a random slot has a 1-in-10,000 chance per open order of matching by accident; acceptable at this volume.
   async function settleNoid() {
     const NOID = noid();
     if (!NOID) return;
     q.expireTopups.run(Date.now() - 24 * 3600_000);
     for (const slot of await rpc('getSlotsByOwner', [NOID.address])) {
-      const t = q.openByAmount.get(Number(slot.value));
+      const value = Number(slot.value);
+      const t = q.openByDust.get(value % 10000);
       if (!t) continue;
       const ref = `noid:${slot.creation_id}`;
       // A slot already used for an earlier top-up must never pay a second one.
       try { q.markTopup.run(ref, t.id); } catch { continue; }
-      credit(t.account, t.credits, `NOID top-up (${(Number(slot.value) / 1e6).toFixed(6)} NOID)`, ref);
+      const credits = Math.max(1, Math.round((t.credits * value) / t.amount));
+      credit(t.account, credits, `NOID top-up (${(value / 1e6).toFixed(6)} NOID)`, ref);
     }
   }
 
@@ -164,7 +173,7 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
 
   const pricing = () => ({
     credits_per_usd: CREDITS_PER_USD, packs_usd: PACKS_USD, chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY,
-    requests_per_credit: REQUESTS_PER_CREDIT,
+    requests_per_credit: REQUESTS_PER_CREDIT, support: process.env.SUPPORT_EMAIL || null,
     card: !!STRIPE && cardActive, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: !Number(process.env.USD_PER_NOID) },
   });
 
@@ -202,7 +211,8 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
       const base = Math.round((usd / NOID.usdPerNoid) * 1e6);
       for (let i = 0; i < 5; i++) {
         const id = randomBytes(6).toString('hex');
-        try { q.newTopup.run(id, acct.id, base + randomInt(1, 10_000), usd * CREDITS_PER_USD, Date.now()); } catch { continue; } // amount taken by another open quote
+        const amount = base + randomInt(1, 10_000);
+        try { q.newTopup.run(id, acct.id, amount, usd * CREDITS_PER_USD, Date.now(), amount); } catch { continue; } // dust taken by another open quote
         return routes['GET topup'](acct, null, id);
       }
       throw bad('could not allocate a payment amount, try again', 503);
@@ -210,7 +220,14 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
     'GET topup': (acct, _, id) => {
       const t = q.topup.get(id);
       if (!t || !acct || t.account !== acct.id) return null;
-      return { id: t.id, address: noid()?.address ?? process.env.PAY_ADDRESS, amount_noid: (t.amount / 1e6).toFixed(6), credits: t.credits, paid: !!t.paid_ref, expires: t.created + 24 * 3600_000 };
+      const usd = t.credits / CREDITS_PER_USD;
+      return {
+        id: t.id, address: noid()?.address ?? process.env.PAY_ADDRESS, amount_noid: (t.amount / 1e6).toFixed(6), credits: t.credits, usd,
+        rate_usd_per_noid: +(usd / (t.amount / 1e6)).toFixed(6), created: t.created, expires: t.created + 24 * 3600_000,
+        paid: !!t.paid_ref, paid_at: t.paid_ref ? q.paidAt.get(t.paid_ref)?.at ?? null : null, paid_ref: t.paid_ref?.replace(/^noid:/, '') ?? null,
+        credits_added: t.paid_ref ? db.prepare('select delta from ledger where ref = ?').get(t.paid_ref)?.delta ?? null : null,
+        balance: q.byId.get(t.account)?.credits ?? null,
+      };
     },
   };
 

@@ -94,6 +94,22 @@
   /* Price */
   .price-head { display:flex; gap:24px; flex-wrap:wrap; align-items:baseline }
   .price-head .big { font:700 30px var(--mono); color:var(--fg) }
+  /* Checkout */
+  .checkout { border:1px solid var(--accent); border-radius:6px; padding:0; overflow:hidden; margin-top:14px; box-shadow:var(--glow) }
+  .checkout .head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 16px; background:var(--head); border-bottom:1px solid var(--line) }
+  .checkout .head b { font:700 13px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--accent) }
+  .steps { display:flex; gap:0; font:11px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--muted) }
+  .steps span { padding:4px 10px; border:1px solid var(--line); border-right:0 } .steps span:last-child { border-right:1px solid var(--line) }
+  .steps span.on { color:var(--bg); background:var(--accent); border-color:var(--accent) } .steps span.done { color:var(--accent) }
+  .checkout .body { display:grid; grid-template-columns:200px 1fr; gap:20px; padding:16px }
+  @media (max-width:640px) { .checkout .body { grid-template-columns:1fr } }
+  .qr { background:#fff; padding:10px; border-radius:6px; width:200px; height:200px; display:grid; place-items:center } .qr svg { width:100%; height:100% }
+  .kvl { display:grid; grid-template-columns:auto 1fr; gap:8px 16px; align-items:baseline; font-size:14px } .kvl small { color:var(--muted); font:11px var(--mono); letter-spacing:.08em; text-transform:uppercase }
+  .amt { font:700 26px var(--mono); color:var(--gold); user-select:all }
+  .status { display:flex; gap:10px; align-items:center; padding:12px 16px; border-top:1px solid var(--line); font:13px var(--mono) }
+  .spin { width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite } @keyframes spin { to { transform:rotate(360deg) } }
+  .ok { color:#3ddc97 } :root[data-theme="light"] .ok { color:#0d8a54 }
+  .trust { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-top:12px; font-size:13px; color:var(--muted) } .trust b { color:var(--fg); display:block; font-size:13px }
   .up { color:#3ddc97 } .down { color:#ff6b6b }
   :root[data-theme="light"] .up { color:#0d8a54 } :root[data-theme="light"] .down { color:#c62828 }
   .tabs { display:flex; gap:6px; flex-wrap:wrap }
@@ -661,15 +677,53 @@ const pages = {
     }
     $('copyk').onclick = () => navigator.clipboard?.writeText(key).then(() => ($('copyk').textContent = 'Copied'));
     $('logout').onclick = () => { saveKey(''); pages.account(); };
-    const watch = async (id) => {
+    const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+    const qrSvg = (text) => { try { const q = qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ scalable: true, margin: 0 }); } catch { return ''; } };
+    let cdTimer = null;
+    const checkout = async (id) => {
       const t = await api('topup/' + id);
-      $('payout').innerHTML = t.paid
-        ? `<p><b>Payment received.</b> ${n(t.credits)} credits added.</p>`
-        : `<p>Send <b>exactly</b> this amount from your NOID wallet. Credits appear automatically about a minute after the payment confirms. This quote is valid for 24 hours.</p>
-           <p class="big">${esc(t.amount_noid)} NOID</p><p class="addr">${esc(t.address)}</p><p class="muted">Waiting for payment… (payment ${esc(t.id)})</p>`;
-      if (t.paid) return setTimeout(() => location.pathname === '/account' && pages.account(), 2500);
-      if (location.pathname === '/account') setTimeout(() => watch(id).catch(() => {}), 10_000);
+      if (!window.qrcode) await loadScript(QR_JS).catch(() => {});
+      const left = Math.max(0, t.expires - Date.now());
+      const mmss = (ms) => `${Math.floor(ms / 3600000)}h ${String(Math.floor(ms / 60000) % 60).padStart(2, '0')}m ${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}s`;
+      const steps = (k) => `<div class="steps">${['Send NOID', 'Confirming', 'Credits added'].map((l, i) => `<span class="${i < k ? 'done' : i === k ? 'on' : ''}">${i < k ? '✓ ' : ''}${l}</span>`).join('')}</div>`;
+      const support = P.support ? ` · Help: <a href="mailto:${esc(P.support)}">${esc(P.support)}</a>` : '';
+      if (t.paid) {
+        clearInterval(cdTimer);
+        $('payout').innerHTML = `<div class="checkout"><div class="head"><b>Receipt · order ${esc(t.id)}</b>${steps(3)}</div>
+          <div class="body" style="grid-template-columns:1fr"><div class="kvl">
+            <small>Status</small><span class="ok">✓ Paid and credited</span>
+            <small>Paid</small><span>${esc(when(t.paid_at / 1000))}</span>
+            <small>Amount</small><span class="mono">${esc(t.amount_noid)} NOID <small class="muted">(≈ $${esc(t.usd.toFixed(2))} at $${esc(t.rate_usd_per_noid)} / NOID)</small></span>
+            <small>Credits added</small><span><b>${n0(t.credits_added ?? t.credits)}</b>${t.credits_added > t.credits ? ` <span class="muted">(${n0(t.credits)} for the pack + ${n0(t.credits_added - t.credits)} for the extra NOID sent)</span>` : ''}</span>
+            <small>Your balance</small><span><b>${n0(t.balance)}</b> credits · ${esc(Math.floor(t.balance / P.chat_cost).toLocaleString())} AI questions or ${n0(t.balance * P.requests_per_credit)} API requests</span>
+            <small>Chain reference</small><span class="mono" style="word-break:break-all">${esc(t.paid_ref)}</span></div>
+          <p style="margin:14px 0 0">Your key is active on the paid tier now: 3,000 requests/min and the AI assistant. Try it:</p>
+          <p><code>curl -H "x-api-key: YOUR_KEY" ${esc(location.origin)}/api/stats</code></p></div>
+          <div class="status"><span class="ok">●</span> Verified on the NOID blockchain by this explorer's own node.${support}</div></div>`;
+        return;
+      }
+      $('payout').innerHTML = `<div class="checkout"><div class="head"><b>Checkout · order ${esc(t.id)}</b>${steps(0)}</div>
+        <div class="body">
+          <div><div class="qr">${qrSvg(t.address) || '<small class="muted">QR unavailable</small>'}</div><p class="muted" style="font-size:12px;margin:8px 0 0">Scan the address with your NOID wallet, then enter the exact amount.</p></div>
+          <div class="kvl">
+            <small>You get</small><span><b>${n0(t.credits)} credits</b> <span class="muted">($${esc(t.usd.toFixed(2))} pack · never expire)</span></span>
+            <small>Send exactly</small><span><span class="amt" id="amt">${esc(t.amount_noid)} NOID</span>${copyBtn(t.amount_noid)}<br><small class="muted" style="text-transform:none;letter-spacing:0">The last digits identify your payment. Sending more is fine: the extra is credited at the same rate.</small></span>
+            <small>To address</small><span class="addr">${esc(t.address)}${copyBtn(t.address)}</span>
+            <small>Rate</small><span>$${esc(t.rate_usd_per_noid)} per NOID, locked for this order</span>
+            <small>Quote valid</small><span id="cd">${mmss(left)}</span>
+          </div></div>
+        <div class="status"><span class="spin"></span><span>Waiting for your payment… this page updates itself. Credits are added about a minute after the transaction confirms.</span></div>
+        <div class="status" style="border-top:0;padding-top:0;color:var(--muted)">Verified directly on the NOID blockchain by this explorer's node · no third party holds your funds${support}</div></div>
+        <div class="trust">
+          <div><b>Prepaid, no subscription</b>Credits never expire and there is nothing to cancel.</div>
+          <div><b>Refund policy</b>Unused credits are refunded in NOID on request; AI questions that fail are refunded automatically.</div>
+          <div><b>Sent a different amount?</b>If the last digits match, it is credited in proportion. Otherwise contact support with the order number and your transaction; it is credited by hand.</div>
+        </div>`;
+      clearInterval(cdTimer);
+      cdTimer = setInterval(() => { const l = t.expires - Date.now(); if ($('cd')) $('cd').textContent = l > 0 ? mmss(l) : 'expired: start a new order'; else clearInterval(cdTimer); }, 1000);
+      if (location.pathname === '/account') setTimeout(() => checkout(id).catch(() => {}), 10_000);
     };
+    const watch = checkout;
     for (const b of document.querySelectorAll('[data-pay]')) b.onclick = async () => {
       b.disabled = true;
       try {
