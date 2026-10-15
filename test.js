@@ -151,13 +151,23 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('stats', { bare: true }))[0], 200);
 
   // Stripe webhook: only correctly signed events credit, and replays are ignored.
-  const evt = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_1', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, metadata: { credits: '20000' } } } });
+  const evt = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_1', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, currency: 'usd', metadata: { credits: '999999' } } } });
   const sign = (body, ts = Math.floor(Date.now() / 1000)) => `t=${ts},v1=${require('node:crypto').createHmac('sha256', WHSEC).update(`${ts}.${body}`).digest('hex')}`;
   assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': 't=1,v1=00' }))[0], 400);
   assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt, 1000) }))[0], 400, 'old timestamp rejected');
   assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) }))[0], 200);
   await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) });
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 25000, 'webhook replay credits once');
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 25000, 'webhook replay credits once; credits follow amount paid, not metadata');
+  const eur = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_2', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, currency: 'eur' } } });
+  await post('stripe-webhook', eur, { 'stripe-signature': sign(eur) });
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 25000, 'non-USD session ignored');
+
+  // Professional API behaviour: wrong key fails loudly, rate-limit and credit headers on every keyed call.
+  const [badStatus, badBody] = await get('blocks', { bare: true, headers: { 'x-api-key': 'nk_' + 'f'.repeat(40) } });
+  assert.strictEqual(badStatus, 401); assert.match(badBody.error, /unknown API key/);
+  const [, , hdr] = await get('blocks', { bare: true, headers: K });
+  assert.strictEqual(hdr.get('x-tier'), 'paid'); assert.strictEqual(hdr.get('x-ratelimit-limit'), '3000'); assert.strictEqual(hdr.get('x-credits-remaining'), '25000');
+  assert.strictEqual((await get('me', { headers: K }))[1].tier, 'paid');
 
   // Chatbot: answers via tools from real routes; 3 free a day, then paid at 5 credits; refunded on model errors.
   const ask = (h = {}) => post('chat', { messages: [{ role: 'user', content: 'what is the height?' }] }, h);

@@ -401,13 +401,21 @@ async function handle(req, res) {
 
     // Behind Cloudflare the real client IP is in cf-connecting-ip; lock the droplet firewall to Cloudflare IPs so it cannot be spoofed.
     const ip = process.env.TRUST_PROXY ? req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
-    const acct = bill.account(req.headers['x-api-key'] || url.searchParams.get('key'));
+    const givenKey = req.headers['x-api-key'] || url.searchParams.get('key');
+    const acct = bill.account(givenKey);
+    const ownPage = req.headers['sec-fetch-site'] === 'same-origin' || /^https?:\/\/([^/]+)/.exec(req.headers.referer || '')?.[1] === req.headers.host;
+    // A wrong key must fail loudly for scripts; our own pages just drop a stale saved key.
+    if (givenKey && !acct && !ownPage) return send(401, { error: 'unknown API key. Check the x-api-key header; create a key free at /account.' });
     const paid = acct?.credits > 0;
     const who = paid ? acct.id : ip;
     const n = (hits.get(who) || 0) + 1;
     hits.set(who, n);
-    if (n > (paid ? PAID_RATE_LIMIT : RATE_LIMIT)) return send(429, { error: 'rate limited' });
+    const limit = paid ? PAID_RATE_LIMIT : RATE_LIMIT;
     res.setHeader('x-tier', paid ? 'paid' : 'free');
+    res.setHeader('x-ratelimit-limit', limit);
+    res.setHeader('x-ratelimit-remaining', Math.max(limit - n, 0));
+    if (acct) res.setHeader('x-credits-remaining', acct.credits);
+    if (n > limit) return send(429, { error: `rate limited: ${limit} requests per minute on the ${paid ? 'paid' : 'free'} tier` }, { 'retry-after': 60 });
 
     const [, , name, id = ''] = url.pathname.split('/');
     // Account, payment and chat routes: never cached, may take a JSON body.
@@ -431,7 +439,6 @@ async function handle(req, res) {
 
     // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
-    const ownPage = req.headers['sec-fetch-site'] === 'same-origin' || /^https?:\/\/([^/]+)/.exec(req.headers.referer || '')?.[1] === req.headers.host;
     if (!acct && !ownPage && name !== 'stats') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
     if (url.pathname === '/api/live') return live(req, res);
     if (acct) bill.countRequest(acct);

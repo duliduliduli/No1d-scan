@@ -128,21 +128,26 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
       headers: { authorization: `Bearer ${STRIPE.key}`, 'content-type': 'application/x-www-form-urlencoded' },
     });
     const s = await r.json();
-    if (!r.ok) throw bad(`card payment unavailable: ${s.error?.message || r.status}`, 502);
+    if (!r.ok) throw bad(/payment method types/i.test(s.error?.message || '') ? 'Card payments are not available yet (the card processor is still approving this site). Please pay with NOID for now.' : `card payment unavailable: ${s.error?.message || r.status}`, 502);
     return { url: s.url };
   }
 
   // Stripe signs every webhook: header `t=<unix>,v1=<hex hmac of "t.body">`. Never trust the browser redirect.
   function stripeWebhook(raw, sigHeader) {
     if (!STRIPE) throw bad('stripe not configured', 404);
-    const parts = Object.fromEntries(String(sigHeader || '').split(',').map((p) => p.split('=')));
-    const want = createHmac('sha256', STRIPE.whsec).update(`${parts.t}.${raw}`).digest();
-    const got = Buffer.from(parts.v1 || '', 'hex');
-    if (got.length !== want.length || !timingSafeEqual(got, want) || Math.abs(Date.now() / 1000 - Number(parts.t)) > 300) throw bad('bad signature', 400);
+    const parts = String(sigHeader || '').split(',').map((p) => p.split('='));
+    const t = Number(parts.find(([k]) => k === 't')?.[1]);
+    const want = createHmac('sha256', STRIPE.whsec).update(`${t}.${raw}`).digest();
+    // Stripe may send several v1 signatures while a secret is being rotated; any valid one is enough.
+    const ok = Number.isFinite(t) && Math.abs(Date.now() / 1000 - t) <= 300
+      && parts.some(([k, v]) => k === 'v1' && Buffer.from(v || '', 'hex').length === want.length && timingSafeEqual(Buffer.from(v, 'hex'), want));
+    if (!ok) throw bad('bad signature', 400);
     const evt = JSON.parse(raw);
     const s = evt.data?.object;
-    if (evt.type === 'checkout.session.completed' && s?.payment_status === 'paid' && q.byId.get(s.client_reference_id)) {
-      credit(s.client_reference_id, Number(s.metadata?.credits), `Card top-up ($${(s.amount_total / 100).toFixed(2)})`, `stripe:${s.id}`);
+    // Credits come from what Stripe says was paid, never from anything the buyer could have touched.
+    const credits = s?.currency === 'usd' ? Math.round((Number(s.amount_total) / 100) * CREDITS_PER_USD) : 0;
+    if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s?.payment_status === 'paid' && credits > 0 && q.byId.get(s.client_reference_id)) {
+      credit(s.client_reference_id, credits, `Card top-up ($${(s.amount_total / 100).toFixed(2)})`, `stripe:${s.id}`);
     }
     return { received: true };
   }
@@ -170,7 +175,7 @@ module.exports = function billing(db, rpc, livePrice = () => null) {
     },
     'GET me': (acct) => {
       if (!acct) throw bad('missing or unknown API key', 401);
-      return { ...acct, usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
+      return { ...acct, tier: acct.credits > 0 ? 'paid' : 'free', rate_limit_per_min: acct.credits > 0 ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
     },
     'GET pricing': () => pricing(),
     'POST topup': async (acct, body) => {

@@ -639,7 +639,7 @@ const pages = {
         <div class="stat"><small>API requests made</small><b>${n(me.requests)}</b></div>
         <div class="stat"><small>Tier</small><b>${me.credits > 0 ? 'Paid' : 'Free'}</b></div>
       </div>
-      ${new URLSearchParams(location.search).get('paid') === 'card' ? '<p>Thanks! Card payments show up here within a few seconds of Stripe confirming them. Refresh if your balance has not changed yet.</p>' : ''}
+      ${new URLSearchParams(location.search).get('paid') === 'card' ? '<p id="cardwait">Thanks! Waiting for Stripe to confirm your card payment… this page updates itself.</p>' : ''}
       <h2 style="margin-top:14px">Add credits</h2>
       ${P.card ? `<p class="row"><span class="muted">Card:</span> ${pay('card')}</p>` : ''}
       ${P.noid ? `<p class="row"><span class="muted">NOID:</span> ${pay('noid')}</p>` : ''}
@@ -648,6 +648,17 @@ const pages = {
       <h2 style="margin-top:14px">Usage (last 30 days)</h2>${rows(me.usage, ['day', 'requests', 'chats'])}
       <h2 style="margin-top:14px">History</h2>${rows(me.history.map((h) => ({ when: new Date(h.at).toLocaleString(), credits: (h.delta > 0 ? '+' : '') + n(h.delta), what: h.reason })), ['when', 'credits', 'what'])}
       <p class="row"><button id="copyk">Copy my key</button><button id="logout">Log out on this device</button></p>`;
+    if ($('cardwait')) {
+      const start = me.credits, t0 = Date.now();
+      const poll = async () => {
+        if (location.pathname !== '/account') return;
+        const now = await api('me').catch(() => null);
+        if (now && now.credits > start) { history.replaceState(null, '', '/account'); return pages.account(); }
+        if (Date.now() - t0 < 120_000) setTimeout(poll, 3000);
+        else $('cardwait').textContent = 'Stripe has not confirmed the payment yet. It can take a minute; refresh this page shortly. If credits never arrive, contact support with your card receipt.';
+      };
+      setTimeout(poll, 3000);
+    }
     $('copyk').onclick = () => navigator.clipboard?.writeText(key).then(() => ($('copyk').textContent = 'Copied'));
     $('logout').onclick = () => { saveKey(''); pages.account(); };
     const watch = async (id) => {
