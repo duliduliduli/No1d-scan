@@ -560,7 +560,7 @@ const pages = {
         <div class="card stat"><small>NOID price</small><b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small></div>
         <div class="card stat" title="Price × circulating supply from this node"><small>Market cap</small><b>${esc(money(supplyNoid * p.usd, 0))}</b></div>
         <div class="card stat"><small>24h volume</small><b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small></div>
-        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small><b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'swept ' + ago(ho.latest.ts) : 'first sweep in progress'}</small></div>
+        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small><b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'swept ' + ago(ho.latest.ts) : ho.sweep.running ? 'first sweep ' + Math.round(100 * (ho.sweep.progress || 0)) + '% done' : 'first sweep pending'}</small></div>
         <div class="card stat"><small>All-time high</small><b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small></div>
         <div class="card stat"><small>Circulating supply</small><b>${esc(noid(s.chain.circulating_supply_micronoid))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small></div>
       </div>

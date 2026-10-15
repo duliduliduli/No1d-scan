@@ -83,12 +83,12 @@ async function rpc(method, params = []) {
 }
 
 // JSON-RPC batch: [[method, params], ...] -> results in order. The node accepts batches up to ~2 MB.
-async function rpcBatch(calls) {
+async function rpcBatch(calls, timeoutMs = 30_000) {
   const res = await fetch(RPC_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(RPC_TOKEN && { authorization: `Bearer ${RPC_TOKEN}` }) },
     body: JSON.stringify(calls.map(([m, params], id) => ({ jsonrpc: '2.0', id, method: `paranoid_${m}`, params }))),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const body = parseRpc(await res.text());
   if (!Array.isArray(body)) throw new Error(`batch: ${body?.error?.message || 'not supported'}`);
@@ -277,8 +277,8 @@ async function pollNetwork() {
 
 // Live State sweep: every funded slot via batched getSlot (~2 min for 2^24 slots on the node), aggregated by owner.
 // Yields the holders count, concentration and the rich list. Runs in the background; pauses briefly between batches.
-const HOLDERS_EVERY_MS = Number(process.env.HOLDERS_EVERY_MS || 1800_000);
-const sweep = { running: false, at: null, ms: null };
+const HOLDERS_EVERY_MS = Number(process.env.HOLDERS_EVERY_MS || 7200_000);
+const sweep = { running: false, at: null, ms: null, progress: null, error: null };
 async function sweepHolders() {
   if (sweep.running) return;
   sweep.running = true;
@@ -287,16 +287,17 @@ async function sweepHolders() {
     const { log_slots } = await rpc('getStateInfo');
     const capacity = 2 ** Number(log_slots);
     const owners = new Map();
-    const BATCH = 2000;
+    const BATCH = Number(process.env.SWEEP_BATCH || 5000);
     for (let i = 0; i < capacity; i += BATCH) {
-      const rows = await rpcBatch(Array.from({ length: Math.min(BATCH, capacity - i) }, (_, k) => ['getSlot', [i + k]]));
+      const rows = await rpcBatch(Array.from({ length: Math.min(BATCH, capacity - i) }, (_, k) => ['getSlot', [i + k]]), 120_000);
       for (const s of rows) {
         if (!s || s.empty || !s.owner) continue;
         const o = owners.get(s.owner) || { balance: 0, slots: 0 };
         o.balance += Number(s.value); o.slots += 1;
         owners.set(s.owner, o);
       }
-      await new Promise((r) => setTimeout(r, 5)); // leave the node breathing room
+      sweep.progress = (i + BATCH) / capacity;
+      await new Promise((r) => setTimeout(r, 2)); // let queued web requests through
     }
     const list = [...owners].map(([address, o]) => ({ address, ...o })).sort((a, b) => b.balance - a.balance);
     const supply = list.reduce((s, r) => s + r.balance, 0);
@@ -309,8 +310,9 @@ async function sweepHolders() {
       q.addHolders.run(Math.floor(Date.now() / 1000), list.length, supply, sum(10), sum(100), list.reduce((s, r) => s + r.slots, 0));
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
-    Object.assign(sweep, { at: Date.now(), ms: Date.now() - t0 });
-  } finally { sweep.running = false; }
+    Object.assign(sweep, { at: Date.now(), ms: Date.now() - t0, progress: 1, error: null });
+    console.log(`holders sweep: ${list.length} holders in ${((Date.now() - t0) / 60000).toFixed(1)} min`);
+  } catch (e) { sweep.error = e.message; throw e; } finally { sweep.running = false; }
 }
 
 const bill = require('./billing.js')(db, rpc, () => price.now?.usd);
@@ -427,7 +429,7 @@ const routes = {
   async holders(_, params) {
     const w = params.get('window') || '30d';
     const since = Math.floor(Date.now() / 1000) - (WINDOWS[w] ?? WINDOWS['30d']);
-    return { window: w, latest: q.lastHolders.get() ?? null, points: q.holdersSeries.all(since), sweep: { at: sweep.at, took_ms: sweep.ms, running: sweep.running, every_ms: HOLDERS_EVERY_MS } };
+    return { window: w, latest: q.lastHolders.get() ?? null, points: q.holdersSeries.all(since), sweep: { at: sweep.at, took_ms: sweep.ms, running: sweep.running, progress: sweep.progress, error: sweep.error, every_ms: HOLDERS_EVERY_MS } };
   },
 
   async richlist(_, params) {
