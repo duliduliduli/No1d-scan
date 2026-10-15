@@ -367,6 +367,11 @@ const cache = new Map();
 setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
 
 const INDEX = path.join(__dirname, 'public', 'index.html');
+// Icons and the link-preview image; a fixed list, so no request path ever reaches the filesystem.
+const STATIC = {
+  '/favicon.ico': 'image/x-icon', '/favicon-32.png': 'image/png', '/apple-touch-icon.png': 'image/png',
+  '/icon-192.png': 'image/png', '/icon-512.png': 'image/png', '/og.png': 'image/png', '/site.webmanifest': 'application/manifest+json',
+};
 
 function readBody(req) {
   return new Promise((ok, fail) => {
@@ -387,6 +392,10 @@ async function handle(req, res) {
   };
   try {
     const url = new URL(req.url, 'http://x');
+    if (STATIC[url.pathname]) {
+      res.writeHead(200, { 'content-type': STATIC[url.pathname], 'cache-control': 'public, max-age=86400' });
+      return res.end(fs.readFileSync(path.join(__dirname, 'public', url.pathname)));
+    }
     if (!url.pathname.startsWith('/api/')) return req.method === 'GET' ? send(200, fs.readFileSync(INDEX)) : send(405, { error: 'GET only' });
     if (req.method === 'OPTIONS') return send(204, '', { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-api-key' });
 

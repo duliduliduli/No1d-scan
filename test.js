@@ -207,6 +207,14 @@ test('indexer + api', async (t) => {
   const [, bl] = await get('blocks?limit=3');
   assert.strictEqual(bl.blocks[0].txs, 1, 'tx count from captured body');
 
+  // Icons and link-preview image are served as files; anything else falls back to the app page.
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const [p, type] of [['/favicon.ico', 'image/x-icon'], ['/og.png', 'image/png'], ['/apple-touch-icon.png', 'image/png'], ['/site.webmanifest', 'application/manifest+json']]) {
+    const r = await fetch(base + p);
+    assert.strictEqual(r.status, 200, p); assert.strictEqual(r.headers.get('content-type'), type, p); assert.ok((await r.arrayBuffer()).byteLength > 100, p);
+  }
+  assert.match(await (await fetch(base + '/../server.js')).text(), /<title>NOID Scan/, 'no path escapes into the filesystem');
+
   // Peer map: only established connections on the P2P port with public IPs count.
   const { peerIps } = require('./server.js');
   const procNet = [
