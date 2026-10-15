@@ -1,0 +1,21 @@
+# Parano1d node. Install: cp parano1d parano1d-cli /usr/local/bin/ && useradd -r -s /usr/sbin/nologin parano1d
+[Unit]
+Description=Parano1d (NOID) node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=parano1d
+StateDirectory=parano1d
+Environment=HOME=/var/lib/parano1d
+# P2P listens on 0.0.0.0:9600 and RPC on 127.0.0.1:9601 by default; the config file is created on first start.
+ExecStart=/usr/local/bin/parano1d -c /var/lib/parano1d/parano1d.toml --data-dir /var/lib/parano1d/data
+ExecStop=/usr/local/bin/parano1d-cli stop
+TimeoutStopSec=120
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
