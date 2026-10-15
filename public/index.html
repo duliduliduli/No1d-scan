@@ -213,11 +213,12 @@ function val0(k, v) {
   if (typeof v === 'boolean') return v ? 'yes' : '–';
   if (/^(tx_hash|txid)$/.test(k)) return link('tx', v);
   if (k === 'height' || k === 'block_height') return link('block', v);
+  if (Array.isArray(v) && v.length && typeof v[0] === 'object') return rows(v, Object.keys(v[0]).filter((k) => !['page', 'lane'].includes(k)));
   if (typeof v === 'object') return `<pre class="mono">${esc(JSON.stringify(v, null, 2))}</pre>`;
   return `<span class="mono">${esc(v)}</span>`;
 }
 // Human labels for node field names; unknown fields fall back to their name without underscores.
-const LABELS = { txs: 'Txs', reward_micronoid: 'Miner reward',  height: 'Height', hash: 'Block hash', prev_hash: 'Previous block', state_root: 'State root', tx_root: 'Transactions root', timestamp: 'Time', miner: 'Miner', nonce_hex: 'Nonce', difficulty_target: 'Difficulty target', log_slots: 'State size (log₂ slots)', active_slot_count: 'Active slots', alloc_counter: 'Slots ever allocated', tx_hash: 'Transaction', txid: 'Transaction', block_hash: 'Block hash', tx_position: 'Position in block', slot_index: 'Slot #', value: 'Amount', creation_id: 'Created by', reward_micronoid: 'Block reward', total_fees_micronoid: 'Total fees', fee_micronoid: 'Fee', block_bytes: 'Block size (bytes)', proof_class: 'Proof class', indexed: 'Body saved here', total: 'Total', total_pages: 'Pages', tip_height: 'Chain height', retained_from_height: 'Bodies kept from block', address_spent_micronoid: 'Total sent', address_received_micronoid: 'Total received', position: 'Position in block', live_inputs: 'Inputs', live_outputs: 'Outputs', coinbase: 'Mining reward', development_payout: 'Dev payout', input_owner: 'From', input_sum_micronoid: 'Inputs total', output_sum_micronoid: 'Amount moved', page_count: 'Pages' };
+const LABELS = { txs: 'Txs', reward_micronoid: 'Miner reward', owner: 'To address', amount_micronoid: 'Amount', inputs: 'Inputs (spent)', outputs: 'Outputs (created)', page_hashes: 'Page hashes', epoch_anchor: 'Epoch anchor',  height: 'Height', hash: 'Block hash', prev_hash: 'Previous block', state_root: 'State root', tx_root: 'Transactions root', timestamp: 'Time', miner: 'Miner', nonce_hex: 'Nonce', difficulty_target: 'Difficulty target', log_slots: 'State size (log₂ slots)', active_slot_count: 'Active slots', alloc_counter: 'Slots ever allocated', tx_hash: 'Transaction', txid: 'Transaction', block_hash: 'Block hash', tx_position: 'Position in block', slot_index: 'Slot #', value: 'Amount', creation_id: 'Created by', reward_micronoid: 'Block reward', total_fees_micronoid: 'Total fees', fee_micronoid: 'Fee', block_bytes: 'Block size (bytes)', proof_class: 'Proof class', indexed: 'Body saved here', total: 'Total', total_pages: 'Pages', tip_height: 'Chain height', retained_from_height: 'Bodies kept from block', address_spent_micronoid: 'Total sent', address_received_micronoid: 'Total received', position: 'Position in block', live_inputs: 'Inputs', live_outputs: 'Outputs', coinbase: 'Mining reward', development_payout: 'Dev payout', input_owner: 'From', input_sum_micronoid: 'Inputs total', output_sum_micronoid: 'Amount moved', page_count: 'Pages' };
 const TX_COLS = ['height', 'txid', 'output_sum_micronoid', 'fee_micronoid', 'input_owner', 'coinbase'];
 const label = (k) => LABELS[k] ?? k.replace(/_micronoid$/, '').replace(/_/g, ' ');
 const kv = (o) => `<table>${Object.entries(o || {}).map(([k, v]) => `<tr><th>${esc(label(k))}</th><td>${val(k, v)}</td></tr>`).join('')}</table>`;
@@ -546,7 +547,14 @@ const pages = {
   async tx(id) {
     const t = await api('tx/' + encodeURIComponent(id));
     const { details, ...ptr } = t;
-    app.innerHTML = `<div class="card"><h2>Transaction</h2>${kv(ptr)}</div>
+    const outs = Array.isArray(details?.outputs) ? details.outputs : [];
+    const to = [...new Map(outs.filter((o) => o.owner).map((o) => [o.owner, (outs.filter((x) => x.owner === o.owner)).reduce((s, x) => s + Number(x.amount_micronoid), 0)])).entries()];
+    const flow = details ? `<div class="card"><h2>${details.coinbase ? 'Mining reward' : 'Transfer'} <small class="muted">${esc(noid(details.output_sum_micronoid))}${details.fee_micronoid ? ' · fee ' + esc(noid(details.fee_micronoid)) : ''}</small></h2>
+      <div class="kvl">
+        <small>From</small><span>${details.coinbase ? '<span class="muted">New coins (block reward)</span>' : details.input_owner ? link('address', details.input_owner) + copyBtn(details.input_owner) : '<span class="muted">–</span>'}</span>
+        ${to.map(([a, amt]) => `<small>To</small><span>${link('address', a)}${copyBtn(a)} <span class="muted">${esc(noid(amt))}</span></span>`).join('')}
+      </div></div>` : '';
+    app.innerHTML = `${flow}<div class="card"><h2>Transaction</h2>${kv(ptr)}</div>
       <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
   },
   'api-access': () => go('/account'),
