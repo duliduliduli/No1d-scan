@@ -13,8 +13,12 @@ const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const today = () => new Date().toISOString().slice(0, 10);
 const hashKey = (key) => createHash('sha256').update(key).digest('hex');
 
-module.exports = function billing(db, rpc) {
-  const NOID = process.env.PAY_ADDRESS && Number(process.env.USD_PER_NOID) > 0 && { address: process.env.PAY_ADDRESS, usdPerNoid: Number(process.env.USD_PER_NOID) };
+module.exports = function billing(db, rpc, livePrice = () => null) {
+  // USD_PER_NOID pins the price; otherwise quotes use the live market price, and NOID top-ups pause if the feed is down.
+  const noid = () => {
+    const usdPerNoid = Number(process.env.USD_PER_NOID) || livePrice();
+    return process.env.PAY_ADDRESS && usdPerNoid > 0 ? { address: process.env.PAY_ADDRESS, usdPerNoid } : null;
+  };
   const STRIPE = process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET && { key: process.env.STRIPE_SECRET_KEY, whsec: process.env.STRIPE_WEBHOOK_SECRET };
   const SITE = process.env.SITE_URL || 'https://parano1d-scan.com';
 
@@ -93,6 +97,7 @@ module.exports = function billing(db, rpc) {
 
   // shortcut: matches any slot on PAY_ADDRESS with the exact quoted amount; the micro-NOID "dust" makes accidental matches ~1 in 10,000 per open quote.
   async function settleNoid() {
+    const NOID = noid();
     if (!NOID) return;
     q.expireTopups.run(Date.now() - 24 * 3600_000);
     for (const slot of await rpc('getSlotsByOwner', [NOID.address])) {
@@ -145,7 +150,7 @@ module.exports = function billing(db, rpc) {
   const pricing = () => ({
     credits_per_usd: CREDITS_PER_USD, packs_usd: PACKS_USD, chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY,
     requests_per_credit: REQUESTS_PER_CREDIT,
-    card: !!STRIPE, noid: NOID ? { address: NOID.address, usd_per_noid: NOID.usdPerNoid } : null,
+    card: !!STRIPE, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: !Number(process.env.USD_PER_NOID) },
   });
 
   // shortcut: in-memory, per process; enough to stop casual account spam.
@@ -176,7 +181,8 @@ module.exports = function billing(db, rpc) {
         if (!STRIPE) throw bad('card payments are not enabled', 404);
         return stripeCheckout(acct, usd);
       }
-      if (body.method !== 'noid' || !NOID) throw bad('NOID payments are not enabled', 404);
+      const NOID = noid();
+      if (body.method !== 'noid' || !NOID) throw bad('NOID payments are not enabled right now', 404);
       if (q.openTopups.get().n >= 1000) throw bad('too many open payments, try again later', 503);
       const base = Math.round((usd / NOID.usdPerNoid) * 1e6);
       for (let i = 0; i < 5; i++) {
@@ -189,7 +195,7 @@ module.exports = function billing(db, rpc) {
     'GET topup': (acct, _, id) => {
       const t = q.topup.get(id);
       if (!t || !acct || t.account !== acct.id) return null;
-      return { id: t.id, address: NOID?.address, amount_noid: (t.amount / 1e6).toFixed(6), credits: t.credits, paid: !!t.paid_ref, expires: t.created + 24 * 3600_000 };
+      return { id: t.id, address: noid()?.address ?? process.env.PAY_ADDRESS, amount_noid: (t.amount / 1e6).toFixed(6), credits: t.credits, paid: !!t.paid_ref, expires: t.created + 24 * 3600_000 };
     },
   };
 

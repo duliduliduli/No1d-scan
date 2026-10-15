@@ -72,13 +72,14 @@ STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 OPENROUTER_API_KEY=sk-or-...
 PAY_ADDRESS=o1...
-USD_PER_NOID=0.20
 SITE_URL=https://parano1d-scan.com
 ```
 
 | Env | Default | |
 |---|---|---|
-| `PAY_ADDRESS` + `USD_PER_NOID` | – | Enable NOID top-ups. The address is watch-only: the server never holds a wallet secret. Update the price as the market moves |
+| `PAY_ADDRESS` | – | Enables NOID top-ups. Watch-only: the server never holds a wallet secret. Quotes use the live NOID price |
+| `USD_PER_NOID` | live price | Pin a fixed NOID price for top-up quotes instead of the live one |
+| `PRICE_ID` | `noid-parano1d` | CoinPaprika coin id for the price panel (free API, no key; ticker every 3 min, history hourly) |
 | `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | – | Enable card top-ups. In Stripe: Developers → Webhooks → endpoint `https://<site>/api/stripe-webhook`, event `checkout.session.completed` |
 | `OPENROUTER_API_KEY` | – | Enables the AI assistant. Set a monthly spending limit on the key in OpenRouter as a hard cap |
 | `OPENROUTER_MODEL` | `qwen/qwen3.5-flash-02-23` | Any OpenRouter model with tool calling |

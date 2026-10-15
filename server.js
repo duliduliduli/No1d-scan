@@ -97,14 +97,41 @@ async function blockByHeight(h) {
   return { header: live.header, retained, archived: !live.retained && !!retained };
 }
 
-const bill = require('./billing.js')(db, rpc);
+// NOID/USD from CoinPaprika (free, no key; aggregates SafeTrade and Cexius). Ticker every 3 min plus
+// history hourly is ~16k calls/month, under the free plan's 20k. Market cap is computed from our own supply.
+const PRICE_ID = process.env.PRICE_ID || 'noid-parano1d';
+const price = { now: null, hourly: [], daily: [] };
+const paprika = async (p) => {
+  const r = await fetch(`https://api.coinpaprika.com/v1${p}`, { signal: AbortSignal.timeout(10_000) });
+  if (!r.ok) throw new Error(`price feed ${r.status}`);
+  return r.json();
+};
+async function pollPrice() {
+  const t = await paprika(`/tickers/${PRICE_ID}`);
+  const u = t.quotes.USD;
+  price.now = { usd: u.price, change_24h_pct: u.percent_change_24h, volume_24h_usd: u.volume_24h, updated: t.last_updated, source: 'CoinPaprika (SafeTrade, Cexius)' };
+}
+async function pollPriceHistory() {
+  const iso = (ms) => new Date(Date.now() - ms).toISOString().replace(/\.\d+Z$/, 'Z');
+  const pts = (rows) => rows.map((r) => ({ t: Date.parse(r.timestamp) / 1000, usd: r.price }));
+  // Free plan limits: hourly only for the last 24 h, daily up to ~180 days back (covers NOID's whole trading history).
+  const [h, d] = await Promise.allSettled([
+    paprika(`/tickers/${PRICE_ID}/historical?start=${iso(23 * 3600_000)}&interval=1h`),
+    paprika(`/tickers/${PRICE_ID}/historical?start=${iso(180 * 86400_000).slice(0, 10)}&interval=1d`),
+  ]);
+  if (h.status === 'fulfilled') price.hourly = pts(h.value);
+  if (d.status === 'fulfilled') price.daily = pts(d.value);
+  if (h.status === 'rejected' && d.status === 'rejected') throw h.reason;
+}
+
+const bill = require('./billing.js')(db, rpc, () => price.now?.usd);
 
 const routes = {
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
       rpc('getChainInfo'), rpc('getStateInfo'), rpc('getNodeStatus'), rpc('getPeerCount'), rpc('getMiningInfo'),
     ]);
-    return { chain, state, node, peers, mining, indexer, donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled };
+    return { chain, state, node, peers, mining, indexer, price: price.now, donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled };
   },
 
   async blocks(_, params) {
@@ -146,6 +173,10 @@ const routes = {
 
   async txs(_, params) {
     return rpc('getRecentTransactions', [Math.max(Number(params.get('page')) || 1, 1), 25, null]);
+  },
+
+  async price() {
+    return price.now && price;
   },
 
   async charts() {
@@ -259,7 +290,7 @@ async function livePoll() {
       rpc('getChainInfo'), rpc('getPeerCount'), rpc('getMiningInfo'), rpc('getStateInfo'), rpc('getNodeStatus'),
     ]);
     const header = lastLive?.chain.height === chain.height ? lastLive.header : await rpc('getBlockHeader', [chain.height]);
-    lastLive = { chain, peers, mining, state, node: { synced: node.synced, sync_stage: node.sync_stage }, header, at: Date.now() };
+    lastLive = { chain, peers, mining, state, node: { synced: node.synced, sync_stage: node.sync_stage }, header, price: price.now, at: Date.now() };
     for (const res of listeners) res.write(`data: ${JSON.stringify(lastLive)}\n\n`);
   } catch (e) {
     for (const res of listeners) res.write(`event: down\ndata: ${JSON.stringify(e.message)}\n\n`);
@@ -283,8 +314,11 @@ const server = http.createServer(handle);
 if (require.main === module) {
   const loop = () => tick().catch((e) => console.error('indexer:', e.message)).finally(() => setTimeout(loop, 10_000));
   loop();
+  const every = (fn, ms) => { const run = () => fn().catch((e) => console.error('price:', e.message)); run(); setInterval(run, ms); };
+  every(pollPrice, 180_000);
+  every(pollPriceHistory, 3600_000);
   server.listen(Number(process.env.PORT || 8080), process.env.HOST || '127.0.0.1', () =>
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db };
+module.exports = { server, tick, db, price };

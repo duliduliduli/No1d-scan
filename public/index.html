@@ -4,9 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NOID Scan</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem('theme') || 'dark'; } catch {}</script>
 <style>
   /* Retro control-panel look: teal terminal panels on a circuit-board background. */
   :root { color-scheme:dark; --bg:#020607; --fg:#f3f8f8; --muted:#a9c0c1; --card:#071113; --head:#0b1b1e; --line:#152a2d; --accent:#a8f5e9; --gold:#f7b733; --glow:0 0 10px rgba(168,245,233,.35); --mono:ui-monospace, 'IBM Plex Mono', Menlo, monospace }
+  :root[data-theme="light"] { color-scheme:light; --bg:#eef4f4; --fg:#0c1b1d; --muted:#4b6365; --card:#ffffff; --head:#e3eeee; --line:#c9d9d9; --accent:#0a7a6e; --gold:#a8650b; --glow:0 0 8px rgba(10,122,110,.25) }
+  :root[data-theme="light"] body { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%230a7a6e' stroke-opacity='.08'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3C/svg%3E") }
   * { box-sizing:border-box }
   body { margin:0; color:var(--fg); font:15px/1.55 system-ui, sans-serif; min-height:100vh;
     background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%23a8f5e9' stroke-opacity='.09'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%23a8f5e9' fill-opacity='.18' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
@@ -59,13 +62,42 @@
   tr.new td { animation:rowin 2.5s ease-out }
   @keyframes rowin { from { background:rgba(168,245,233,.18) } }
   .stat[title] { cursor:help }
+  /* Menu */
+  .menu { position:relative; margin-left:auto }
+  @media (max-width:640px) { #search { order:3; flex-basis:100% } }
+  .menu > button { padding:7px 11px; font-size:16px; line-height:1 }
+  .menu nav { display:none; position:absolute; right:0; top:calc(100% + 8px); z-index:10; min-width:220px; flex-direction:column; gap:0; background:var(--card); border:1px solid var(--line); border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,.35) }
+  .menu.open nav { display:flex }
+  .menu nav a, .menu nav button { display:block; width:100%; text-align:left; padding:12px 16px; border:0; border-bottom:1px solid var(--line); border-radius:0; background:none; color:var(--accent) }
+  .menu nav a:last-child, .menu nav button:last-child { border-bottom:0 }
+  .menu nav a.here { background:var(--head) }
+  /* Copy */
+  button.copy { padding:1px 6px; margin-left:6px; font:12px var(--mono); letter-spacing:0; border-color:var(--line); color:var(--muted); vertical-align:1px }
+  button.copy:hover { color:var(--accent); border-color:var(--accent) }
+  button.copy.ok { color:var(--gold); border-color:var(--gold) }
+  /* Price */
+  .price-head { display:flex; gap:24px; flex-wrap:wrap; align-items:baseline }
+  .price-head .big { font:700 30px var(--mono); color:var(--fg) }
+  .up { color:#3ddc97 } .down { color:#ff6b6b }
+  :root[data-theme="light"] .up { color:#0d8a54 } :root[data-theme="light"] .down { color:#c62828 }
+  .tabs { display:flex; gap:6px } .tabs button.on { background:var(--accent); color:var(--bg) }
+  svg.pchart { height:160px } svg.pchart circle { fill:transparent } svg.pchart circle:hover { fill:var(--accent) }
 </style>
 </head>
 <body>
 <header>
   <h1><a href="/" data-link>NOID Scan</a></h1>
-  <nav><a href="/account" data-link>API &amp; Credits</a> <a href="/chat" data-link>Ask AI</a></nav>
   <form id="search"><input name="q" placeholder="Height, block hash, txid or o1… address" aria-label="Search" autocomplete="off"></form>
+  <div class="menu" id="menu">
+    <button id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="menunav">☰</button>
+    <nav id="menunav">
+      <a href="/" data-link>Overview &amp; live stats</a>
+      <a href="/blocks/latest" data-link>All blocks</a>
+      <a href="/account" data-link>API &amp; Credits</a>
+      <a href="/chat" data-link>Ask AI</a>
+      <button id="theme"></button>
+    </nav>
+  </div>
 </header>
 <main id="app" aria-live="polite"></main>
 <footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them.</footer>
@@ -98,7 +130,12 @@ const short = (h) => h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '–';
 const link = (type, id, text) => `<a href="/${type}/${encodeURIComponent(id)}" data-link class="mono">${esc(text ?? id)}</a>`;
 
 // Generic renderer so unknown/new node fields still show up.
+const copyBtn = (v) => `<button class="copy" data-copy="${esc(v)}" title="Copy" aria-label="Copy ${esc(v)}">⧉</button>`;
 function val(k, v) {
+  const out = val0(k, v);
+  return typeof v === 'string' && (/^o1[0-9a-z]{6,}$/.test(v) || /^[0-9a-f]{64}$/.test(v)) ? out + copyBtn(v) : out;
+}
+function val0(k, v) {
   if (v == null) return '<span class="muted">–</span>';
   if (k.endsWith('_micronoid') || k === 'value') return esc(noid(v));
   if (k === 'timestamp') return esc(when(v));
@@ -125,7 +162,7 @@ function spark(title, pts) {
   const lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
   const line = ys.map((y, i) => `${(i / (ys.length - 1)) * 300},${88 - ((y - lo) / span) * 84}`).join(' ');
   return `<div class="card"><h2>${esc(title)} <small class="muted">${esc(lo.toLocaleString())} – ${esc(hi.toLocaleString())}</small></h2>
-    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a8f5e9" stop-opacity=".25"/><stop offset="1" stop-color="#a8f5e9" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
+    <svg viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="${esc(title)} chart"><defs><linearGradient id="glow-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".25"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs><polygon points="0,90 ${line} 300,90"/><polyline points="${line}"/></svg></div>`;
 }
 
 // ---- live helpers
@@ -144,7 +181,32 @@ function setNum(id, n) {
   const step = (t) => { const k = Math.min((t - t0) / 700, 1); el.textContent = Math.round(from + (to - from) * k).toLocaleString(); if (k < 1) requestAnimationFrame(step); };
   requestAnimationFrame(step);
 }
-const ago = (ts) => { const s = Math.max(0, Math.round(Date.now() / 1000 - (ts > 1e12 ? ts / 1000 : ts))); return s < 120 ? `${s}s ago` : `${Math.round(s / 60)}m ago`; };
+const ago = (ts) => { const s = Math.max(0, Math.round(Date.now() / 1000 - (ts > 1e12 ? ts / 1000 : ts))); return s < 120 ? `${s}s ago` : s < 7200 ? `${Math.round(s / 60)}m ago` : s < 172800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`; };
+const money = (x, d = 2) => x == null ? '–' : '$' + Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const usd4 = (x) => money(x, x < 1 ? 4 : 2);
+function priceChart(pts, daily) {
+  if (!pts?.length) return '<p class="muted">Price history unavailable right now.</p>';
+  const ys = pts.map((p) => p.usd), lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
+  const xy = pts.map((p, i) => [(i / Math.max(pts.length - 1, 1)) * 600, 150 - ((p.usd - lo) / span) * 140]);
+  const line = xy.map((p) => p.join(',')).join(' ');
+  const fmt = (t) => new Date(t * 1000).toLocaleString([], daily ? { month: 'short', day: 'numeric' } : { hour: 'numeric', minute: '2-digit' });
+  return `<svg class="pchart" viewBox="0 0 600 160" preserveAspectRatio="none" role="img" aria-label="NOID price chart">
+      <defs><linearGradient id="pfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".3"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs>
+      <polygon points="0,160 ${line} 600,160" style="fill:url(#pfill)"/><polyline points="${line}"/>
+      ${xy.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="6"><title>${esc(fmt(pts[i].t))}: ${esc(usd4(pts[i].usd))}</title></circle>`).join('')}</svg>
+    <div class="row muted" style="justify-content:space-between;font:12px var(--mono)"><span>${esc(fmt(pts[0].t))}</span><span>low ${esc(usd4(lo))} · high ${esc(usd4(hi))}</span><span>${esc(fmt(pts.at(-1).t))}</span></div>`;
+}
+function priceHead(p, supplyMicro) {
+  if (!p) return '<p class="muted">Price feed unavailable right now.</p>';
+  const ch = p.change_24h_pct, cap = supplyMicro ? (Number(supplyMicro) / 1e6) * p.usd : null;
+  return `<div class="price-head">
+      <div><small class="muted">NOID / USD</small><br><b class="big" id="px">${esc(usd4(p.usd))}</b>
+        <b id="pxch" class="${ch >= 0 ? 'up' : 'down'}">${ch >= 0 ? '▲' : '▼'} ${esc(Math.abs(ch).toFixed(2))}% <small class="muted">24h</small></b></div>
+      <div class="stat"><small>24h volume</small><b id="pxvol">${esc(money(p.volume_24h_usd, 0))}</b></div>
+      <div class="stat" title="Price × circulating supply from this node"><small>Market cap</small><b id="pxcap">${esc(money(cap, 0))}</b></div>
+    </div>`;
+}
+
 function charts(c) {
   const gaps = c.slice(1).map((p, i) => p.ts && c[i].ts ? p.ts - c[i].ts : NaN);
   return `${spark('Block time (seconds)', gaps)}${spark('Difficulty (bits)', c.map((p) => p.difficulty_bits))}
@@ -161,6 +223,10 @@ const pages = {
     const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, TX_COLS)}` : '';
     app.innerHTML = `
       <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
+      <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
+        <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
+        <div class="tabs" style="margin:12px 0"><button data-range="hourly" class="on">24 hours</button><button data-range="daily">Since listing</button></div>
+        <div id="pchart"><p class="muted">Loading chart…</p></div></div>
       <div class="grid">
         ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
         ${stat('Last block', 'ago', esc(ago(b.blocks[0]?.timestamp)), 'Time since the newest block was mined.')}
@@ -178,6 +244,12 @@ const pages = {
       <div class="card" id="txs">${txsCard(t)}</div>`;
     for (const id of ['h', 'slots', 'peers']) $(id).dataset.v = { h: s.chain.height, slots: s.state.active_slots, peers: s.peers }[id];
 
+    let range = 'hourly', hist = null;
+    const drawPrice = () => { $('pchart').innerHTML = priceChart(hist?.[range], range === 'daily'); };
+    api('price').then((h) => { hist = h; drawPrice(); }).catch(() => { $('pchart').innerHTML = '<p class="muted">Price history unavailable right now.</p>'; });
+    for (const b of document.querySelectorAll('[data-range]')) b.onclick = () => {
+      range = b.dataset.range; document.querySelectorAll('[data-range]').forEach((x) => x.classList.toggle('on', x === b)); drawPrice();
+    };
     let tip = Number(s.chain.height), tipTs = b.blocks[0]?.timestamp;
     ticker = setInterval(() => tipTs && ($('ago').textContent = ago(tipTs)), 1000);
     feed = new EventSource('/api/live');
@@ -185,6 +257,12 @@ const pages = {
       const d = JSON.parse(e.data);
       $('dot').classList.remove('off'); $('livemsg').textContent = `LIVE · updates every 2 s · checked ${new Date(d.at).toLocaleTimeString()}`;
       setText('supply', noid(d.chain.circulating_supply_micronoid));
+      if (d.price) {
+        setText('px', usd4(d.price.usd)); setText('pxvol', money(d.price.volume_24h_usd, 0));
+        setText('pxcap', money((Number(d.chain.circulating_supply_micronoid) / 1e6) * d.price.usd, 0));
+        const ch = d.price.change_24h_pct; $('pxch').className = ch >= 0 ? 'up' : 'down';
+        $('pxch').innerHTML = `${ch >= 0 ? '▲' : '▼'} ${esc(Math.abs(ch).toFixed(2))}% <small class="muted">24h</small>`;
+      }
       setText('reward', noid(d.mining.block_reward_micronoid));
       setNum('slots', d.state.active_slots); setText('fill', d.state.fill_pct + '%');
       setText('diff', d.mining.difficulty_bits); setNum('peers', d.peers);
@@ -354,7 +432,7 @@ const pages = {
   async address(id, page = 1) {
     const a = await api(`address/${encodeURIComponent(id)}?page=${page}`);
     const { transactions, ...summary } = a.activity || {};
-    app.innerHTML = `<div class="card"><h2>Address</h2><p class="mono">${esc(a.address)}</p>
+    app.innerHTML = `<div class="card"><h2>Address</h2><p class="mono">${esc(a.address)}${copyBtn(a.address)}</p>
         <div class="grid"><div class="stat"><small>Balance (Live State)</small><b>${esc(noid(a.balance_micronoid))}</b></div>
         <div class="stat"><small>Live slots</small><b>${a.slots.length}</b></div></div></div>
       <div class="card"><h2>Live slots</h2>${rows(a.slots, ['slot_index', 'value', 'creation_id'])}</div>
@@ -365,6 +443,7 @@ const pages = {
 async function render() {
   const [, type, id] = location.pathname.split('/');
   feed?.close(); feed = null; clearInterval(ticker);
+  for (const a of document.querySelectorAll('#menu nav a')) a.classList.toggle('here', a.getAttribute('href') === location.pathname);
   app.innerHTML = '<p class="muted">Loading…</p>';
   try {
     await (pages[type] && (id || ['api-access', 'account', 'chat'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
@@ -374,7 +453,29 @@ async function render() {
 }
 const go = (href) => { history.pushState(null, '', href); render(); };
 
+// Theme: dark by default, remembered per browser.
+const setTheme = (t) => {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('theme', t); } catch {}
+  $('theme').textContent = t === 'light' ? '☾  Dark mode' : '☀  Light mode';
+};
+setTheme((() => { try { return localStorage.getItem('theme'); } catch {} })() || 'dark');
+$('theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+const menu = (open) => { $('menu').classList.toggle('open', open); $('menubtn').setAttribute('aria-expanded', open); };
+$('menubtn').onclick = (e) => { e.stopPropagation(); menu(!$('menu').classList.contains('open')); };
+addEventListener('keydown', (e) => e.key === 'Escape' && menu(false));
+
+async function copy(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = document.createElement('textarea'); t.value = text; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); }
+  btn.textContent = '✓'; btn.classList.add('ok');
+  setTimeout(() => { btn.textContent = '⧉'; btn.classList.remove('ok'); }, 1500);
+}
+
 document.addEventListener('click', (e) => {
+  const c = e.target.closest('button.copy');
+  if (c) { e.preventDefault(); return copy(c.dataset.copy, c); }
+  if (!e.target.closest('#menu nav button')) menu(false);
   const a = e.target.closest('a[data-link]');
   if (a && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(a.getAttribute('href')); }
 });
