@@ -5,7 +5,8 @@ const MAX_ROUNDS = 5; // tool-call rounds per question, bounds cost per question
 
 const SYSTEM = `You are the assistant on NOID Scan, a block explorer for the Parano1d (NOID) proof-of-work blockchain.
 Answer with real data only: call the tools, never guess or invent numbers. If a tool has no data, say so.
-Amount fields ending in _micronoid are in μNOID (1 NOID = 1,000,000 μNOID); show NOID to the user.
+Numbers in tool results are already converted and formatted: fields ending in _noid are NOID amounts, and numbers given as strings with commas are exact.
+Copy numbers exactly as written, digits and separators included. Never convert units, rescale, round differently or re-add separators yourself.
 Timestamps are unix seconds. Block bodies (transactions) are kept only for about the last 42 blocks; headers are permanent.
 Be concise: short sentences, numbers formatted with separators, bullet points for lists.`;
 
@@ -25,6 +26,30 @@ const TOOLS = [
   fn('holders', 'Number of addresses holding NOID, concentration (top 10/100 share) and how the holder count changed over time.'),
   fn('rich_list', 'Top addresses by balance with share of supply.', { limit: { type: 'integer', description: '1-100, default 20' } }),
 ];
+
+// The model only copies numbers, it never converts them: every μNOID amount becomes an exact NOID string (BigInt, no
+// float loss) and large counts get their separators here. Keys that are identifiers or times stay raw.
+const RAW = /height|hash|time|^ts$|^t$|_at$|^at$|index|id$|bits|created|updated|expires|first|since|bucket/i;
+const MICRO = /^(value|balance|supply|top10|top100)$/;
+function noidStr(v) {
+  const m = BigInt(String(v).split('.')[0]), neg = m < 0n, a = neg ? -m : m;
+  const frac = String(a % 1000000n).padStart(6, '0').replace(/0+$/, '');
+  return `${neg ? '-' : ''}${(a / 1000000n).toLocaleString('en-US')}${frac ? '.' + frac : ''}`;
+}
+function forModel(x, key = '') {
+  if (Array.isArray(x)) return x.map((v) => forModel(v, key));
+  if (x && typeof x === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(x)) {
+      // Holders, rich list and slots carry μNOID under plain names (balance, supply, value, top10, top100).
+      if ((/_micronoid$/.test(k) || MICRO.test(k)) && v != null && /^-?\d+(\.\d+)?$/.test(String(v))) out[k.replace(/_micronoid$/, '') + '_noid'] = noidStr(v);
+      else out[k] = forModel(v, k);
+    }
+    return out;
+  }
+  if (typeof x === 'number' && Number.isInteger(x) && Math.abs(x) >= 10000 && !RAW.test(key)) return x.toLocaleString('en-US');
+  return x;
+}
 
 // Some models (Qwen) put their private reasoning in the reply, ending with </think>; only show what comes after.
 const clean = (text) => String(text ?? '').replace(/^[\s\S]*<\/think>/, '').replace(/<think>[\s\S]*$/, '').trim();
@@ -77,7 +102,7 @@ module.exports = function chat(routes) {
         let out;
         try {
           const f = run[tc.function?.name];
-          out = f ? await f(JSON.parse(tc.function.arguments || '{}')) : { error: 'unknown tool' };
+          out = f ? forModel(await f(JSON.parse(tc.function.arguments || '{}'))) : { error: 'unknown tool' };
         } catch (e) {
           out = { error: e.message };
         }
@@ -89,3 +114,4 @@ module.exports = function chat(routes) {
 
   return { ask, enabled: !!KEY, model: MODEL };
 };
+module.exports.forModel = forModel;

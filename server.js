@@ -29,13 +29,15 @@ db.exec(`
   create index if not exists headers_hash on headers(hash);
   create index if not exists headers_ts on headers(ts);
 `);
+try { db.exec('alter table stats add column hash text'); } catch {} // which block the snapshot was taken at
 const q = {
   hashAt: db.prepare('select hash from blocks where height = ?'),
   byHeight: db.prepare('select details from blocks where height = ?'),
   heightOf: db.prepare('select height from blocks where hash = ?'),
   upsert: db.prepare('insert or replace into blocks (height, hash, details) values (?, ?, ?)'),
-  hasStat: db.prepare('select 1 from stats where height = ?'),
-  addStat: db.prepare('insert or replace into stats (height, ts, data) values (?, ?, ?)'),
+  hasStat: db.prepare('select 1 from stats where height = ? and hash is ?'),
+  addStat: db.prepare('insert or replace into stats (height, ts, data, hash) values (?, ?, ?, ?)'),
+  topBlock: db.prepare('select max(height) h from blocks'),
   charts: db.prepare('select height, ts, data from stats order by height desc limit 500'),
   headerTop: db.prepare('select max(height) h, count(*) n from headers'),
   addTick: db.prepare('insert or replace into price_ticks (ts, usd, volume_24h, supply) values (?, ?, ?, ?)'),
@@ -61,7 +63,7 @@ const q = {
       case when count(*) > 1 then (max(ts) - min(ts)) * 1.0 / (count(*) - 1) end block_time
     from headers where ts >= :since group by ts / cast(:b as integer) order by t`),
   minersSince: db.prepare('select miner, count(*) blocks, max(height) last from headers where ts >= ? group by miner order by blocks desc'),
-  bodyStats: db.prepare(`select height, json_extract(details, '$.retained.reward_micronoid') reward, json_extract(details, '$.retained.total_fees_micronoid') fees,
+  bodyStats: db.prepare(`select height, hash, json_extract(details, '$.retained.reward_micronoid') reward, json_extract(details, '$.retained.total_fees_micronoid') fees,
       json_array_length(details, '$.retained.transactions') txs from blocks where height between ? and ?`),
   txs24h: db.prepare(`select sum(json_array_length(details, '$.retained.transactions')) n, count(*) blocks from blocks where json_extract(details, '$.header.timestamp') >= ?`),
 };
@@ -135,16 +137,30 @@ function networkStats() {
 
 // One indexer pass. Re-checking the whole retained window by hash also handles reorgs:
 // a replaced block has a new hash at the same height and gets overwritten.
-const indexer = { tip: null, at: null, supply: null }; // last successful pass, exposed in /api/stats for uptime monitors
+const indexer = { tip: null, at: null, supply: null, error: null }; // last successful pass, exposed in /api/stats for uptime monitors
+const MAX_REORG = 17; // Parano1d never reorganizes deeper than this
 async function tick() {
   const tip = await rpc('blockCount');
+  // The node's tip went down: a short reorg drops the blocks above the new tip, which are no longer canonical.
+  // Anything deeper is not a normal reorg (a node reset or resync): stop and keep every archived body until a person looks.
+  const top = q.topBlock.get().h;
+  if (top != null && tip < top) {
+    if (top - tip > MAX_REORG) {
+      indexer.error = `node tip ${tip} is ${top - tip} blocks below the indexed tip ${top}; indexing paused, nothing deleted. Check the node.`;
+      throw new Error(indexer.error);
+    }
+    db.exec('begin');
+    try { for (const t of ['blocks', 'stats', 'headers']) db.prepare(`delete from ${t} where height > ?`).run(tip); db.exec('commit'); } catch (e) { db.exec('rollback'); throw e; }
+    cache.clear();
+  }
   for (let h = Math.max(0, tip - RETAINED + 1); h <= tip; h++) {
     const hash = await rpc('getBlockHash', [h]);
     if (!hash || q.hashAt.get(h)?.hash === hash) continue;
     const details = await rpc('getBlockDetails', [h]);
-    if (details) q.upsert.run(h, hash, JSON.stringify(details));
+    if (details) { q.upsert.run(h, hash, JSON.stringify(details)); cache.clear(); }
   }
-  if (!q.hasStat.get(tip)) {
+  const tipHash = q.hashAt.get(tip)?.hash ?? null;
+  if (!q.hasStat.get(tip, tipHash)) {
     const [chain, peers, mining, header] = await Promise.all([
       rpc('getChainInfo'), rpc('getPeerCount'), rpc('getMiningInfo'), rpc('getBlockHeader', [tip]),
     ]);
@@ -154,12 +170,12 @@ async function tick() {
       difficulty_bits: mining.difficulty_bits,
       peers,
     };
-    q.addStat.run(tip, header?.timestamp ?? null, JSON.stringify(data));
+    q.addStat.run(tip, header?.timestamp ?? null, JSON.stringify(data), tipHash);
     indexer.supply = chain.circulating_supply_micronoid;
   }
   await syncHeaders(tip);
-  await bill.settleNoid();
-  Object.assign(indexer, { tip, at: Date.now() });
+  await bill.settleNoid(tip);
+  Object.assign(indexer, { tip, at: Date.now(), error: null });
 }
 
 
@@ -205,7 +221,7 @@ async function pollPrice() {
   price.now = {
     usd: u.price, change_24h_pct: u.percent_change_24h, volume_24h_usd: u.volume_24h, updated: t.last_updated, source: 'CoinPaprika (SafeTrade, Cexius)',
     change: { '15m': u.percent_change_15m, '1h': u.percent_change_1h, '6h': u.percent_change_6h, '24h': u.percent_change_24h, '7d': u.percent_change_7d, '30d': u.percent_change_30d },
-    volume_change_24h_pct: u.volume_24h_change_24h, ath_usd: u.ath_price, ath_date: u.ath_date, from_ath_pct: u.percent_from_price_ath, rank: t.rank,
+    fetched_at: Date.now(), volume_change_24h_pct: u.volume_24h_change_24h, ath_usd: u.ath_price, ath_date: u.ath_date, from_ath_pct: u.percent_from_price_ath, rank: t.rank,
   };
   q.addTick.run(Math.floor(Date.now() / 1000), u.price, u.volume_24h, Number(lastLive?.chain.circulating_supply_micronoid ?? indexer.supply ?? 0) || null);
 }
@@ -315,7 +331,7 @@ async function sweepHolders() {
   } catch (e) { sweep.error = e.message; throw e; } finally { sweep.running = false; }
 }
 
-const bill = require('./billing.js')(db, rpc, () => price.now?.usd);
+const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip);
 
 const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
 
@@ -324,7 +340,8 @@ const routes = {
     const [chain, state, node, peers, mining] = await Promise.all([
       rpc('getChainInfo'), rpc('getStateInfo'), rpc('getNodeStatus'), rpc('getPeerCount'), rpc('getMiningInfo'),
     ]);
-    return { chain, state, node, peers, mining, indexer, network: networkStats(), txs_24h: q.txs24h.get(Math.floor(Date.now() / 1000) - 86400), price: price.now, donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled };
+    const bodies = db.prepare('select min(height) lo, max(height) hi from blocks').get();
+    return { chain, state, node, peers, mining, indexer, coverage: { bodies_from: bodies.lo, bodies_to: bodies.hi, headers_to: history.synced_to }, network: networkStats(), txs_24h: q.txs24h.get(Math.floor(Date.now() / 1000) - 86400), price: price.now, donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled };
   },
 
   async blocks(_, params) {
@@ -333,11 +350,11 @@ const routes = {
     const limit = Math.min(Math.max(Number(params.get('limit')) || 20, 1), 50);
     const heights = [];
     for (let h = before; h >= 0 && heights.length < limit; h--) heights.push(h);
-    const headers = await Promise.all(heights.map((h) => rpc('getBlockHeader', [h])));
+    const headers = heights.length ? await rpcBatch(heights.map((h) => ['getBlockHeader', [h]])) : [];
     // Tx count, reward and fees exist only for bodies this explorer captured.
     const body = new Map(q.bodyStats.all(heights.at(-1) ?? 0, heights[0] ?? 0).map((r) => [r.height, r]));
     return { tip, blocks: headers.filter(Boolean).map((b) => {
-      const x = body.get(b.height);
+      const x = body.get(b.height)?.hash === b.hash ? body.get(b.height) : null; // never another block's body
       return { ...b, txs: x?.txs ?? null, reward_micronoid: x?.reward ?? null, total_fees_micronoid: x?.fees ?? null, indexed: !!x };
     }) };
   },
@@ -432,13 +449,14 @@ const routes = {
   async holders(_, params) {
     const w = params.get('window') || '30d';
     const since = Math.floor(Date.now() / 1000) - (WINDOWS[w] ?? WINDOWS['30d']);
-    return { window: w, latest: q.lastHolders.get() ?? null, points: q.holdersSeries.all(since), sweep: { at: sweep.at, took_ms: sweep.ms, running: sweep.running, progress: sweep.progress, error: sweep.error, every_ms: HOLDERS_EVERY_MS } };
+    // A sweep reads the Live State in batches over ~20 minutes while blocks keep arriving, so figures are approximate as of `at`.
+    return { window: w, latest: q.lastHolders.get() ?? null, points: q.holdersSeries.all(since), first: db.prepare('select min(ts) t from holders').get().t, approximate: true, sweep: { at: sweep.at, took_ms: sweep.ms, running: sweep.running, progress: sweep.progress, error: sweep.error, every_ms: HOLDERS_EVERY_MS } };
   },
 
   async richlist(_, params) {
     const n = Math.min(Math.max(Number(params.get('limit')) || 50, 1), 500);
     const latest = q.lastHolders.get();
-    return { updated: latest?.ts ?? null, supply: latest?.supply ?? null, holders: latest?.holders ?? null, rows: q.richList.all(n).map((r) => ({ ...r, share: latest?.supply ? r.balance / latest.supply : null })) };
+    return { updated: latest?.ts ?? null, approximate: true, supply: latest?.supply ?? null, holders: latest?.holders ?? null, rows: q.richList.all(n).map((r) => ({ ...r, share: latest?.supply ? r.balance / latest.supply : null })) };
   },
 
   async supply(_, params) {
@@ -470,8 +488,12 @@ const ai = require('./chat.js')(routes);
 const hits = new Map();
 setInterval(() => hits.clear(), 60_000).unref();
 
-// Short-lived response cache keyed by URL. Bounded by request rate x CACHE_MS; expired entries are swept.
+// Short-lived response cache keyed by path + the query parameters routes actually read (so ?key= or junk parameters
+// don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
+const inflight = new Map();
+const PARAMS = ['before', 'limit', 'page', 'window', 'q'];
+const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
 setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
 
 const INDEX = path.join(__dirname, 'public', 'index.html');
@@ -548,17 +570,24 @@ async function handle(req, res) {
     // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
     if (!acct && !ownPage && name !== 'stats') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
-    if (url.pathname === '/api/live') return live(req, res);
-    if (acct) bill.countRequest(acct);
-    const hit = cache.get(req.url);
-    if (hit && hit.until > Date.now()) return send(200, hit.body, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': 'HIT' });
+    if (url.pathname === '/api/live') return live(req, res, ip);
+    // Billing: a keyed request counts only when it returns data (200, cached or not); errors, 404s and the live feed are free.
+    const ok = (body, xcache) => { if (acct) bill.countRequest(acct); send(200, body, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': xcache }); };
+    const key = cacheKey(url);
+    const hit = cache.get(key);
+    if (hit && hit.until > Date.now()) return ok(hit.body, 'HIT');
 
     const route = Object.hasOwn(routes, name) && routes[name];
     if (!route) return send(404, { error: 'unknown endpoint' });
-    const out = await route(decodeURIComponent(id), url.searchParams);
+    let p = inflight.get(key);
+    if (!p) {
+      p = route(decodeURIComponent(id), url.searchParams).finally(() => inflight.delete(key));
+      inflight.set(key, p);
+    }
+    const out = await p;
     if (out == null) return send(404, { error: 'not found' });
-    if (CACHE_MS > 0) cache.set(req.url, { until: Date.now() + CACHE_MS, body: out });
-    send(200, out, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': 'MISS' });
+    if (CACHE_MS > 0) cache.set(key, { until: Date.now() + CACHE_MS, body: out });
+    ok(out, 'MISS');
   } catch (e) {
     send(e.status || (e instanceof URIError ? 400 : 502), { error: e.message });
   }
@@ -578,20 +607,39 @@ async function livePoll() {
     const mp = await rpc('getMempoolInfo').catch(() => null);
     const mempool = mp && { size: mp.size ?? mp.txs?.length ?? 0, fee_floor: mp.fee_floor ?? null, total_fees_micronoid: (mp.txs ?? []).reduce((s, t) => s + Number(t.fee_micronoid || 0), 0) };
     lastLive = { chain, peers, mining, state, node: { synced: node.synced, sync_stage: node.sync_stage }, header, mempool, network: networkStats(), price: price.now, at: Date.now() };
-    for (const res of listeners) res.write(`data: ${JSON.stringify(lastLive)}\n\n`);
+    push(`data: ${JSON.stringify(lastLive)}\n\n`);
   } catch (e) {
-    for (const res of listeners) res.write(`event: down\ndata: ${JSON.stringify(e.message)}\n\n`);
+    push(`event: down\ndata: ${JSON.stringify(e.message)}\n\n`);
   }
   if (listeners.size) setTimeout(livePoll, LIVE_MS); else liveOn = false;
 }
-function live(req, res) {
+// A viewer that stops reading (stalled tab, slow link) is dropped once 256 KB is queued for it; the browser reconnects.
+const SSE_MAX_QUEUED = 256 * 1024, SSE_PER_IP = 10;
+function push(msg) {
+  for (const res of listeners) {
+    if (res.writableLength > SSE_MAX_QUEUED) { listeners.delete(res); res.destroy(); continue; }
+    res.write(msg);
+  }
+}
+const liveIps = new Map();
+function live(req, res, ip) {
   if (listeners.size >= 1000) return res.writeHead(503).end();
+  if ((liveIps.get(ip) || 0) >= SSE_PER_IP) return res.writeHead(429, { 'retry-after': 60 }).end();
+  liveIps.set(ip, (liveIps.get(ip) || 0) + 1);
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', 'x-accel-buffering': 'no', 'access-control-allow-origin': '*' });
   res.write('retry: 3000\n\n');
   if (lastLive) res.write(`data: ${JSON.stringify(lastLive)}\n\n`);
   listeners.add(res);
-  const drop = () => listeners.delete(res);
+  let dropped = false;
+  const drop = () => {
+    listeners.delete(res);
+    if (dropped) return;
+    dropped = true;
+    const n = liveIps.get(ip) - 1;
+    n > 0 ? liveIps.set(ip, n) : liveIps.delete(ip);
+  };
   req.on('close', drop);
+  res.on('close', drop);
   res.on('error', drop);
   if (!liveOn) { liveOn = true; livePoll(); }
 }
@@ -611,4 +659,4 @@ if (require.main === module) {
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice() };
+module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice() };

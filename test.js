@@ -134,23 +134,44 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('me'))[0], 401);
   assert.strictEqual((await get('me', { headers: { 'x-api-key': 'nk_' + '0'.repeat(40) } }))[0], 401);
 
-  // NOID top-up: unique amount -> matching slot appears -> credits added once.
+  // NOID top-up: unique amount -> matching slot appears -> credited once, after 17 confirmations.
+  const credits = async () => (await get('me', { headers: K }))[1].credits;
+  const mine = async (n) => { tip += n; await tick(); };
+  // An output already on the address before the order was quoted can never pay it, even with matching digits.
+  paySlots = [{ slot_index: 8, value: '25001234', creation_id: 'c0' }];
+  await tick();
   const [, quote] = await post('topup', { method: 'noid', usd: 5 }, K);
   const micro = Math.round(Number(quote.amount_noid) * 1e6);
-  assert.ok(micro > 25e6 && micro < 25.01e6 && quote.paid === false && quote.address === PAY_ADDR);
+  assert.ok(micro > 25e6 && micro < 25.01e6 && quote.paid === false && quote.address === PAY_ADDR && quote.status === 'waiting');
   assert.strictEqual((await post('topup', { method: 'noid', usd: 7 }, K))[0], 400, 'only fixed packs');
+  db.prepare('update noid_topups set amount = 25001234, dust = 1234 where id = ?').run(quote.id);
+  await mine(20);
+  assert.strictEqual(await credits(), 0, 'pre-existing output did not pay the newer order');
+  db.prepare('update noid_topups set amount = ?, dust = ? where id = ?').run(micro, micro % 10000, quote.id);
   paySlots = [{ slot_index: 9, value: String(micro), creation_id: 'c1' }];
-  await tick(); await tick();
+  await tick();
+  const [, conf] = await get(`topup/${quote.id}`, { headers: K });
+  assert.deepStrictEqual([conf.status, conf.confirmations], ['confirming', { have: 0, need: 17 }]);
+  await mine(16);
+  assert.strictEqual(await credits(), 0, 'not credited at 16 confirmations');
+  await mine(1);
   assert.strictEqual((await get(`topup/${quote.id}`, { headers: K }))[1].paid, true);
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000, 'credited exactly once');
+  await tick();
+  assert.strictEqual(await credits(), 5000, 'credited exactly once at 17 confirmations');
+  // A payment that disappears (reorged out) before it is final never credits.
   const [, q2] = await post('topup', { method: 'noid', usd: 5 }, K);
-  paySlots = [{ slot_index: 9, value: String(Math.round(Number(q2.amount_noid) * 1e6)), creation_id: 'c1' }];
-  await tick();
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000, 'an already-used slot cannot pay a second quote');
-  // Overpayment with the same last digits is credited at the quoted rate: +1 NOID on a 25 NOID pack = +200 credits.
   const micro2 = Math.round(Number(q2.amount_noid) * 1e6);
-  paySlots = [{ slot_index: 11, value: String(micro2 + 1_000_000), creation_id: 'c3' }];
+  paySlots = [{ slot_index: 10, value: String(micro2), creation_id: 'c2' }];
   await tick();
+  paySlots = [];
+  await mine(17);
+  assert.strictEqual(await credits(), 5000, 'reorged-out payment not credited');
+  paySlots = [{ slot_index: 9, value: String(micro2), creation_id: 'c1' }];
+  await mine(17);
+  assert.strictEqual(await credits(), 5000, 'an already-used slot cannot pay a second quote');
+  // Overpayment with the same last digits is credited at the quoted rate: +1 NOID on a 25 NOID pack = +200 credits.
+  paySlots = [{ slot_index: 11, value: String(micro2 + 1_000_000), creation_id: 'c3' }];
+  await tick(); await mine(17);
   assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000 + 5000 + 200, 'overpayment credited proportionally');
   assert.strictEqual((await get(`topup/${q2.id}`, { headers: K }))[1].credits_added, 5200);
   assert.strictEqual((await get(`stats?key=${acct.key}`))[2].get('x-tier'), 'paid');
@@ -195,6 +216,80 @@ test('indexer + api', async (t) => {
   aiDown = false;
   const hist = (await get('me', { headers: K }))[1].history.map((h) => h.reason);
   assert.ok(hist.includes('AI question') && hist.some((r) => r.startsWith('Card top-up')) && hist.some((r) => r.startsWith('NOID top-up')));
+
+  // Late payment: an expired order keeps its digits reserved, and a payment for it still goes to the same account.
+  const [, q3] = await post('topup', { method: 'noid', usd: 5 }, K);
+  const micro3 = Math.round(Number(q3.amount_noid) * 1e6);
+  db.prepare('update noid_topups set created = ? where id = ?').run(Date.now() - 25 * 3600_000, q3.id);
+  await tick();
+  assert.strictEqual((await get(`topup/${q3.id}`, { headers: K }))[1].status, 'expired', 'expired orders are kept, not deleted');
+  assert.throws(() => db.prepare('insert into noid_topups (id, account, amount, credits, created, dust) values (?, ?, ?, ?, ?, ?)').run('x', acct.id, micro3, 5000, Date.now(), micro3 % 10000), /UNIQUE/, 'a newer order cannot take the held digits');
+  const before = await credits();
+  paySlots = [{ slot_index: 12, value: String(micro3), creation_id: 'c4' }];
+  await tick(); await mine(17);
+  assert.strictEqual(await credits(), before + 5000, 'late payment credited to the account that ordered it');
+  // Fault injection: if crediting fails, the order is not marked paid and no ledger row is written.
+  const [, other] = await post('account', {});
+  const [, q4] = await post('topup', { method: 'noid', usd: 5 }, { 'x-api-key': other.key });
+  db.prepare('update accounts set id = ? where id = ?').run('gone', other.id); // the order's account no longer exists
+  paySlots = [{ slot_index: 13, value: String(Math.round(Number(q4.amount_noid) * 1e6)), creation_id: 'c5' }];
+  await tick(); await mine(17);
+  assert.strictEqual(db.prepare('select paid_ref from noid_topups where id = ?').get(q4.id).paid_ref, null, 'order not claimed');
+  assert.strictEqual(db.prepare("select count(*) n from ledger where ref = 'noid:c5'").get().n, 0, 'no ledger entry');
+  assert.strictEqual(db.prepare("select status from noid_seen where ref = 'noid:c5'").get().status, 'review', 'flagged for a manual look');
+  paySlots = [];
+
+  // Stale live price pauses new NOID quotes; a fixed price does not.
+  const { price: px } = require('./server.js');
+  delete process.env.USD_PER_NOID;
+  px.now = { usd: 0.2, fetched_at: Date.now() - 16 * 60_000 };
+  assert.strictEqual((await post('topup', { method: 'noid', usd: 5 }, K))[0], 503, 'stale price: no new quotes');
+  assert.match((await get('pricing'))[1].noid_paused, /out of date/);
+  px.now.fetched_at = Date.now();
+  const [okStatus, fresh] = await post('topup', { method: 'noid', usd: 5 }, K);
+  assert.strictEqual(okStatus, 200); assert.ok(Math.abs(fresh.rate_usd_per_noid - 0.2) < 0.0001);
+  process.env.USD_PER_NOID = '0.20';
+
+  // Billing counts only requests that return data; cache keys ignore the key and unknown parameters.
+  const reqs = async () => (await get('me', { headers: K }))[1].requests;
+  const r0 = await reqs();
+  await get('nosuchroute', { bare: true, headers: K }); await get('block/99999999', { bare: true, headers: K });
+  assert.strictEqual(await reqs(), r0, 'errors are free');
+  await get('txs?page=2&junk=1', { bare: true, headers: K });
+  const [, , h2] = await get('txs?page=2&other=x', { bare: true, headers: K });
+  assert.strictEqual(h2.get('x-cache'), 'HIT', 'irrelevant parameters share the cache');
+  assert.strictEqual((await get('txs?page=3', { bare: true, headers: K }))[2].get('x-cache'), 'MISS', 'different page is a different answer');
+  assert.strictEqual(await reqs(), r0 + 3, 'each data response counts once');
+
+  // AI tools: amounts reach the model already converted, exactly; it never does unit math.
+  const { forModel } = require('./chat.js');
+  assert.deepStrictEqual(forModel({ chain: { height: 221000, circulating_supply_micronoid: '10718701000001', active_slot_count: 91214 }, latest: { supply: 5000, holders: 2141 }, fee_micronoid: 0 }),
+    { chain: { height: 221000, circulating_supply_noid: '10,718,701.000001', active_slot_count: '91,214' }, latest: { supply_noid: '0.005', holders: 2141 }, fee_noid: '0' });
+
+  // Header shown with another block's body stats: never. A changed hash at the same height hides the old body.
+  fork = 'c';
+  const [, mixed] = await get('blocks?limit=4');
+  assert.ok(mixed.blocks.every((b) => b.indexed === false || b.height < 98), 'old bodies not attached to new headers');
+  await tick();
+  // Tip goes down by a few blocks: rows above it are dropped. A deep drop is an incident: nothing is deleted.
+  const top = tip;
+  tip -= 3; await tick();
+  assert.strictEqual(db.prepare('select max(height) h from blocks').get().h, tip);
+  assert.strictEqual(db.prepare('select max(height) h from headers').get().h, tip);
+  const kept = db.prepare('select count(*) n from blocks').get().n;
+  tip -= 18;
+  await assert.rejects(tick(), /indexing paused, nothing deleted/);
+  assert.strictEqual(db.prepare('select count(*) n from blocks').get().n, kept);
+  tip = top; await tick();
+  const { indexer: ix } = require('./server.js');
+  assert.strictEqual(ix.error, null, 'recovers once the node is back');
+  fork = 'b'; await tick(); // back to the chain the older checks below expect
+
+  // Live feed: at most 10 open streams per IP.
+  const streams = [];
+  for (let i = 0; i < 10; i++) { const c = new AbortController(); streams.push(c); await fetch(`http://127.0.0.1:${server.address().port}/api/live`, { signal: c.signal, headers: { 'sec-fetch-site': 'same-origin' } }); }
+  assert.strictEqual((await fetch(`http://127.0.0.1:${server.address().port}/api/live`, { headers: { 'sec-fetch-site': 'same-origin' } })).status, 429);
+  streams.forEach((c) => c.abort());
 
   // Live feed pushes the node's current numbers.
   const ac = new AbortController();
