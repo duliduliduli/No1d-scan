@@ -415,14 +415,17 @@ const routes = {
     const now = Math.floor(Date.now() / 1000);
     const bucket = { '24h': 180, '7d': 900, '30d': 3600, all: 21600 }[w] ?? 180;
     const since = now - (WINDOWS[w] ?? WINDOWS['24h']);
-    let points = q.ticks.all({ b: bucket, since }).map((p) => ({ t: p.t, usd: p.usd, hi: p.hi, lo: p.lo, volume_24h_usd: p.volume_24h, market_cap_usd: p.supply ? (p.supply / 1e6) * p.usd : null }));
+    const ticks = q.ticks.all({ b: bucket, since }).map((p) => ({ t: p.t, usd: p.usd, hi: p.hi, lo: p.lo, volume_24h_usd: p.volume_24h, market_cap_usd: p.supply ? (p.supply / 1e6) * p.usd : null }));
     const first = q.firstTick.get().t ?? now;
-    if (w === 'all' || w === '30d') {
-      const older = price.daily.filter((p) => p.t < first - 86400 && p.t >= since).map((p) => ({ t: p.t, usd: p.usd, hi: null, lo: null, volume_24h_usd: null, market_cap_usd: null }));
-      points = [...older, ...points];
-    } else if (w === '24h' && points.length < 8) {
-      points = [...price.hourly.filter((p) => p.t < first - 3600).map((p) => ({ t: p.t, usd: p.usd })), ...points];
-    }
+    // Before our own 3-minute samples exist, fill the window with CoinPaprika's hourly (last 24 h) and daily history,
+    // so a 7-day chart is a week long from day one rather than two points stretched across the width.
+    const hourlyStart = price.hourly[0]?.t ?? Infinity;
+    const fill = (rows) => rows.map((p) => ({ t: p.t, usd: p.usd, hi: null, lo: null, volume_24h_usd: null, market_cap_usd: null }));
+    const points = [
+      ...fill(price.daily.filter((p) => p.t >= since && p.t < Math.min(hourlyStart, first))),
+      ...fill(price.hourly.filter((p) => p.t >= since && p.t < first)),
+      ...ticks,
+    ].sort((a, b) => a.t - b.t);
     return { window: w, bucket, points, now: price.now, markets: price.markets, ticks_since: first };
   },
 
