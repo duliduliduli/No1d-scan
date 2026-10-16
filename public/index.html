@@ -112,6 +112,9 @@
   .ok { color:#3ddc97 } :root[data-theme="light"] .ok { color:#0d8a54 }
   .trust { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-top:12px; font-size:13px; color:var(--muted) } .trust b { color:var(--fg); display:block; font-size:13px }
   .up { color:#3ddc97 } .down { color:#ff6b6b }
+  .candles .cd { color:#3ddc97 } .candles .cd.dn { color:#ff6b6b } .candles .cd.ax { opacity:.45 }
+  :root[data-theme="light"] .candles .cd { color:#0d8a54 } :root[data-theme="light"] .candles .cd.dn { color:#c62828 }
+  .ichart .tip .o { font-weight:400; color:var(--muted) }
   :root[data-theme="light"] .up { color:#0d8a54 } :root[data-theme="light"] .down { color:#c62828 }
   .tabs { display:flex; gap:6px; flex-wrap:wrap }
   select { padding:9px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono) } .tabs button.on { background:var(--accent); color:var(--bg) }
@@ -292,14 +295,17 @@ function chartHover(e) {
   for (const x of document.querySelectorAll('.ichart.hover')) if (x !== c) x.classList.remove('hover');
   if (!c) return;
   const r = c.querySelector('svg').getBoundingClientRect(), pts = (c._pts ??= JSON.parse(c.dataset.pts));
-  const i = Math.round(Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * (pts.length - 1));
+  const ohlc = c.dataset.ohlc && (c._ohlc ??= JSON.parse(c.dataset.ohlc)), f = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1);
+  const i = ohlc ? Math.min(Math.floor(f * pts.length), pts.length - 1) : Math.round(f * (pts.length - 1));
   const [x, y] = pts[i], lo = +c.dataset.lo, hi = +c.dataset.hi, h = +c.dataset.h;
-  const px = (i / (pts.length - 1)) * r.width, py = h - 6 - ((y - lo) / (hi - lo || 1)) * (h - 12);
+  const px = ohlc ? ((i + 0.5) / pts.length) * r.width : (i / (pts.length - 1)) * r.width, py = h - 6 - ((y - lo) / (hi - lo || 1)) * (h - 12);
   c.querySelector('.xh').style.left = `${px}px`;
   Object.assign(c.querySelector('.pt').style, { left: `${px}px`, top: `${py}px` });
   const tip = c.querySelector('.tip');
   Object.assign(tip.style, { left: `${Math.min(Math.max(px, 70), r.width - 70)}px`, top: `${py}px` });
-  tip.innerHTML = `<b>${esc(FMT[c.dataset.fy](y))}</b> · ${esc(FMT[c.dataset.fx](x))}`;
+  tip.innerHTML = ohlc
+    ? `${esc(FMT[c.dataset.fx](x))}<br><span class="o">O</span> ${esc(usd4(ohlc[i][0]))} <span class="o">H</span> ${esc(usd4(ohlc[i][1]))}<br><span class="o">L</span> ${esc(usd4(ohlc[i][2]))} <span class="o">C</span> <b>${esc(usd4(ohlc[i][3]))}</b>${ohlc[i][4] ? '<br><span class="o">daily/hourly close only</span>' : ''}`
+    : `<b>${esc(FMT[c.dataset.fy](y))}</b> · ${esc(FMT[c.dataset.fx](x))}`;
   c.classList.add('hover');
 }
 addEventListener('pointermove', chartHover);
@@ -311,6 +317,45 @@ function priceSeries(h, key, height = 170) {
   if (pts.length < 2) return '<p class="muted">Not enough data yet: this chart fills in as the explorer records prices every 3 minutes.</p>';
   const fx = { '24h': 'hour', '7d': 'dayhour', '30d': 'day', all: 'day' }[h.window] || 'hour';
   return ichart(pts, fx, key === 'usd' ? 'usd' : 'money', height);
+}
+// OHLC candles from /api/candles, drawn in the same hoverable frame as ichart. Faded candles are close-only history.
+const CANDLE_TABS = [['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']];
+const CANDLE_FMT = { '15m': 'hour', '1h': 'dayhour', '4h': 'dayhour', '1d': 'day', '1w': 'day' };
+function candleChart(r, h = 220) {
+  const cs = r?.candles ?? [];
+  if (cs.length < 2) return '<p class="muted">Not enough price samples for this interval yet: candles fill in as the explorer records the price every 3 minutes.</p>';
+  const lo = Math.min(...cs.map((c) => c.l)), hi = Math.max(...cs.map((c) => c.h)), span = hi - lo || 1, w = 600 / cs.length;
+  const y = (v) => (h - 6 - ((v - lo) / span) * (h - 12)).toFixed(1);
+  const body = cs.map((c, i) => {
+    const x = (i + 0.5) * w, top = y(Math.max(c.o, c.c)), bh = Math.max(Math.abs(y(c.o) - y(c.c)), 1);
+    return `<g class="cd${c.c < c.o ? ' dn' : ''}${c.approx ? ' ax' : ''}"><line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${y(c.h)}" y2="${y(c.l)}" stroke="currentColor" vector-effect="non-scaling-stroke"/>`
+      + `<rect x="${(x - w * 0.35).toFixed(1)}" width="${(w * 0.7).toFixed(1)}" y="${top}" height="${bh.toFixed(1)}" fill="currentColor"/></g>`;
+  }).join('');
+  const fx = CANDLE_FMT[r.interval] || 'dayhour', last = cs.at(-1), first = cs[0];
+  const chg = ((last.c - first.o) / first.o) * 100;
+  return `<div class="ichart candles" data-pts="${esc(JSON.stringify(cs.map((c) => [c.t, c.c])))}" data-ohlc="${esc(JSON.stringify(cs.map((c) => [c.o, c.h, c.l, c.c, c.approx ? 1 : 0])))}" data-fx="${fx}" data-fy="usd" data-lo="${lo}" data-hi="${hi}" data-h="${h}">
+    <svg viewBox="0 0 600 ${h}" preserveAspectRatio="none" style="height:${h}px" aria-label="NOID/USD candles">${body}</svg>
+    <div class="xh" style="height:${h}px"></div><div class="pt"></div><div class="tip"></div>
+    <div class="axis"><span>${esc(FMT[fx](first.t))}</span><span>low ${esc(usd4(lo))} · high ${esc(usd4(hi))} · <b class="${chg >= 0 ? 'up' : 'down'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</b></span><span>${esc(FMT[fx](last.t))}</span></div></div>
+    <p class="muted" style="font-size:12px;margin:6px 0 0">${n0(cs.length)} candles · built from the SafeTrade price sampled every 3 minutes${cs.some((c) => c.approx) ? '; faded candles are older daily/hourly closes (no intra-candle range)' : ''}. No per-candle volume is published.</p>`;
+}
+// Price chart with a Line / Candles switch. Line uses time windows; candles use intervals.
+const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h')}</span></div>
+  <div id="${name}c" style="margin-top:10px"><p class="muted">Loading chart…</p></div>`;
+function wirePriceBox(name, height = 200) {
+  let mode = 'line';
+  const show = (v) => (mode === 'line' ? api(`price?window=${v}`).then((h) => priceSeries(h, 'usd', height)) : api(`candles?interval=${v}`).then((r) => candleChart(r, height + 20)))
+    .then((html) => { if ($(name + 'c')) $(name + 'c').innerHTML = html; })
+    .catch((e) => { if ($(name + 'c')) $(name + 'c').innerHTML = `<p class="msg err">Could not load the chart: ${esc(e.message)}</p>`; });
+  onTabs(name + 'm', (m) => {
+    mode = m;
+    const first = m === 'line' ? '24h' : '1h';
+    $(name + 't').innerHTML = tabs(name, m === 'line' ? WINDOW_TABS : CANDLE_TABS, first);
+    onTabs(name, show);
+    show(first);
+  });
+  onTabs(name, show);
+  show('24h');
 }
 function pct(v) { return v == null ? '<span class="muted">–</span>' : `<b class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2)}%</b>`; }
 
@@ -473,8 +518,8 @@ const pages = {
         <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
       <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
-        <div class="row" style="margin:12px 0;justify-content:space-between">${tabs('pwin', WINDOW_TABS, '24h')}<a href="/market" data-link>Full market analytics →</a></div>
-        <div id="pchart"><p class="muted">Loading chart…</p></div></div>
+        <div style="margin:12px 0 0">${priceBox('pwin')}</div>
+        <p style="margin:8px 0 0;text-align:right"><a href="/market" data-link>Full market analytics →</a></p></div>
       <div class="grid">
         ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
         ${stat('Last block', 'ago', esc(ago(b.blocks[0]?.timestamp)), 'Time since the newest block was mined.')}
@@ -504,9 +549,7 @@ const pages = {
     onTabs('mwin', (v) => { minerWin = v; loadMiners(); });
     mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
-    const drawPrice = (w) => api(`price?window=${w}`).then((h) => { $('pchart').innerHTML = priceSeries(h, 'usd', 170); }).catch(() => { $('pchart').innerHTML = '<p class="muted">Price history unavailable right now.</p>'; });
-    drawPrice('24h');
-    onTabs('pwin', drawPrice);
+    wirePriceBox('pwin', 170);
     let tip = Number(s.chain.height), tipTs = b.blocks[0]?.timestamp;
     ticker = setInterval(() => { if (tipTs) { $('ago').textContent = ago(tipTs); $('gago').textContent = ago(tipTs); } }, 1000);
     feed = new EventSource('/api/live');
@@ -587,7 +630,7 @@ const pages = {
         <div class="card stat"><small>Circulating supply</small><b>${esc(noid(s.chain.circulating_supply_micronoid))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small></div>
       </div>
       ${card('Price change', `<div class="delta">${['15m', '1h', '6h', '24h', '7d', '30d'].map((k) => `<div><small>${k}</small>${pct(p.change[k])}</div>`).join('')}</div>`)}
-      ${chartCard('NOID / USD', 'px', 'usd', pr, `<small class="muted">${pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`)}
+      ${card(`NOID / USD <small class="muted">${pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`, priceBox('px'))}
       <div class="grid">
         ${chartCard('Market cap', 'mc', 'cap', pr)}
         ${chartCard('24h volume', 'vo', 'vol', pr)}
@@ -596,7 +639,7 @@ const pages = {
         ${card(`Holders over time${ho.first ? ` <small class="muted">tracked since ${esc(new Date(ho.first * 1000).toLocaleDateString())}; longer windows show the same data until then</small>` : ''}`, `${tabs('hw', WINDOW_TABS, '30d')}<div id="hwc" style="margin-top:10px">${ho.points.length > 1 ? ichart(ho.points.map((x) => [x.t, x.holders]), 'day', 'count', 130) : '<p class="muted">Collecting: one point per sweep, every ' + Math.round(ho.sweep.every_ms / 60000) + ' minutes.</p>'}</div>`)}
         ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d')}<div id="swc" style="margin-top:10px">${su.points.length > 1 ? ichart(su.points.map((x) => [x.t, x.supply / 1e6]), 'day', 'num', 130) : '<p class="muted">Collecting…</p>'}</div>`)}
       </div>
-      ${card('Concentration', ho.latest ? `<div class="delta">
+      ${card('Concentration', ho.latest?.holders ? `<div class="delta">
           <div><small>Top 10 hold</small><b>${(100 * ho.latest.top10 / ho.latest.supply).toFixed(1)}%</b></div>
           <div><small>Top 100 hold</small><b>${(100 * ho.latest.top100 / ho.latest.supply).toFixed(1)}%</b></div>
           <div><small>Live slots</small><b>${n0(ho.latest.slots)}</b></div>
@@ -609,7 +652,7 @@ const pages = {
         + '<p class="muted">Order books and individual trades are not published by these exchanges in a form this explorer can read; prices and volumes come from CoinPaprika.</p>' : '<p class="muted">Market list unavailable right now.</p>')}`;
     growBars();
     const reload = (name, key) => (w) => api(`price?window=${w}`).then((h) => { $(name + 'c').innerHTML = priceSeries(h, key); });
-    onTabs('px', reload('px', 'usd')); onTabs('mc', reload('mc', 'cap')); onTabs('vo', reload('vo', 'vol'));
+    wirePriceBox('px', 200); onTabs('mc', reload('mc', 'cap')); onTabs('vo', reload('vo', 'vol'));
     onTabs('hw', (w) => api(`holders?window=${w}`).then((h) => { $('hwc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.holders]), BUCKET_FMT[w], 'count', 130) : '<p class="muted">Not enough sweeps in this window yet.</p>'; }));
     onTabs('sw', (w) => api(`supply?window=${w}`).then((h) => { $('swc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.supply / 1e6]), BUCKET_FMT[w], 'num', 130) : '<p class="muted">Collecting…</p>'; }));
   },

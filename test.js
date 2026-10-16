@@ -366,6 +366,19 @@ test('indexer + api', async (t) => {
   assert.ok(p7.points.length > 25, `7d window is filled from external history before our ticks: ${p7.points.length} points`);
   assert.ok(p7.points[0].t <= nowS - 6 * 86400 && p7.points.at(-1).usd >= 0.5, 'spans the week and ends on our newest ticks');
   assert.ok(p7.points.every((p, i) => i === 0 || p.t >= p7.points[i - 1].t), 'sorted by time');
+  // Candles: open = first sample, close = last, high/low = extremes; older closes fill in as faded candles.
+  const T = Math.floor(nowS / 900) * 900 - 3600;
+  for (const [dt, usd] of [[0, 0.5], [180, 0.7], [360, 0.4], [540, 0.55]]) db.prepare('insert into price_ticks (ts, usd) values (?, ?)').run(T + dt, usd);
+  const [, c15] = await get('candles?interval=15m');
+  assert.deepStrictEqual(c15.candles.find((c) => c.t === T), { t: T, o: 0.5, h: 0.7, l: 0.4, c: 0.55, n: 4, approx: false });
+  assert.ok(c15.candles.every((c) => c.t % 900 === 0 && !c.approx), '15m: own samples only, aligned');
+  const [, c1d] = await get('candles?interval=1d');
+  assert.strictEqual(c1d.interval, '1d', 'interval is part of the cache key');
+  const filled = c1d.candles.filter((c) => c.approx);
+  assert.ok(filled.length >= 8 && filled.every((c, i) => i === 0 || c.o === filled[i - 1].c), 'daily closes chain open-to-previous-close');
+  const [, c1w] = await get('candles?interval=1w');
+  assert.ok(c1w.candles.every((c) => new Date(c.t * 1000).getUTCDay() === 1), 'weekly candles start on Monday');
+  assert.strictEqual((await get('candles?interval=bogus'))[1].interval, '1h');
   const [, ps] = await get('price?window=24h');
   assert.ok(ps.points.length >= 2 && ps.points.at(-1).usd === 0.6 && Math.abs(ps.points.at(-1).market_cap_usd - 1.2) < 1e-9);
 

@@ -26,7 +26,7 @@ npm start     # http://127.0.0.1:8080
 
 ## API
 
-`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price?window=…` (3-minute ticks, market cap, volume, markets) · `/api/holders?window=…` · `/api/richlist?limit=N` · `/api/supply?window=…` · `/api/live` (server-sent events)
+`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price?window=…` (3-minute ticks, market cap, volume, markets) · `/api/holders?window=…` · `/api/richlist?limit=N` · `/api/supply?window=…` · `/api/candles?interval=15m|1h|4h|1d|1w` (OHLC built from the 3-minute price samples; `approx` candles are older daily/hourly closes) · `/api/live` (server-sent events)
 
 Errors are JSON `{"error": "…"}`: 400 bad input, 401 missing/unknown key, 402 out of credits (AI), 404 not found, 429 rate limited (`retry-after`), 502 node or upstream unavailable. `/api/stats` has `coverage` (which heights have captured bodies) and `indexer.error`. Holder counts and the rich list are approximate: a sweep reads the Live State over ~20 minutes while blocks keep arriving.
 

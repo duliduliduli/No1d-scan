@@ -50,6 +50,7 @@ const q = {
   ticks: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, avg(usd) usd, max(usd) hi, min(usd) lo, avg(volume_24h) volume_24h, avg(supply) supply
     from price_ticks where ts >= :since group by ts / cast(:b as integer) order by t`),
   firstTick: db.prepare('select min(ts) t from price_ticks'),
+  tickRange: db.prepare('select ts, usd from price_ticks where ts >= ? order by ts'),
   supplySeries: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, max(cast(json_extract(data, '$.circulating_supply_micronoid') as real)) supply
     from stats where ts >= :since group by ts / cast(:b as integer) order by t`),
   addHolders: db.prepare('insert or replace into holders (ts, holders, supply, top10, top100, slots) values (?, ?, ?, ?, ?, ?)'),
@@ -218,7 +219,7 @@ async function blockByHeight(h) {
   return { header: live.header, retained, archived: !live.retained && !!retained };
 }
 
-// NOID/USD from CoinPaprika (free, no key; aggregates SafeTrade and Cexius). Ticker every 3 min plus
+// NOID/USD from CoinPaprika (free, no key; NOID trades on SafeTrade). Ticker every 3 min plus
 // history hourly is ~16k calls/month, under the free plan's 20k. Market cap is computed from our own supply.
 const PRICE_ID = process.env.PRICE_ID || 'noid-parano1d';
 const price = { now: null, hourly: [], daily: [], markets: [] };
@@ -231,7 +232,7 @@ async function pollPrice() {
   const t = await paprika(`/tickers/${PRICE_ID}`);
   const u = t.quotes.USD;
   price.now = {
-    usd: u.price, change_24h_pct: u.percent_change_24h, volume_24h_usd: u.volume_24h, updated: t.last_updated, source: 'CoinPaprika (SafeTrade, Cexius)',
+    usd: u.price, change_24h_pct: u.percent_change_24h, volume_24h_usd: u.volume_24h, updated: t.last_updated, source: 'CoinPaprika (SafeTrade)',
     change: { '15m': u.percent_change_15m, '1h': u.percent_change_1h, '6h': u.percent_change_6h, '24h': u.percent_change_24h, '7d': u.percent_change_7d, '30d': u.percent_change_30d },
     fetched_at: Date.now(), volume_change_24h_pct: u.volume_24h_change_24h, ath_usd: u.ath_price, ath_date: u.ath_date, from_ath_pct: u.percent_from_price_ath, rank: t.rank,
   };
@@ -345,6 +346,8 @@ async function sweepHolders() {
 
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip);
 
+// Candle interval -> [seconds per candle, how far back to show].
+const CANDLES = { '15m': [900, 86400], '1h': [3600, 4 * 86400], '4h': [14400, 16 * 86400], '1d': [86400, 120 * 86400], '1w': [604800, 3 * 365 * 86400] }; // ~100 candles each
 const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
 
 const routes = {
@@ -458,6 +461,34 @@ const routes = {
     return { window: w, bucket, points, now: price.now, markets: price.markets, ticks_since: first };
   },
 
+  // OHLC candles. NOID trades only on SafeTrade, whose candle API isn't reachable for us, so candles are built from
+  // our own price samples (CoinPaprika's SafeTrade price every 3 min): open = first sample in the candle, close = last,
+  // high/low = extremes of the samples, so a spike between two samples is missed. Before our samples begin, daily
+  // (1d/1w) or hourly (1h/4h) closes fill in as `approx` candles that open at the previous close. No per-candle volume exists.
+  async candles(_, params) {
+    if (!price.now) return null;
+    const iv = Object.hasOwn(CANDLES, params.get('interval')) ? params.get('interval') : '1h';
+    const [b, span] = CANDLES[iv];
+    const now = Math.floor(Date.now() / 1000);
+    const first = q.firstTick.get().t ?? now;
+    const MON = 4 * 86400; // weeks start on Monday (1970-01-05), not on the epoch's Thursday
+    const start = (t) => (b === 604800 ? Math.floor((t - MON) / b) * b + MON : Math.floor(t / b) * b);
+    const since = start(now - span);
+    const filler = b >= 86400 ? price.daily : b >= 3600 ? price.hourly : [];
+    const pts = [
+      ...filler.filter((p) => p.t >= since && p.t < first).map((p) => ({ t: p.t, usd: p.usd, approx: true })),
+      ...q.tickRange.all(since).map((r) => ({ t: r.ts, usd: r.usd, approx: false })),
+    ].sort((x, y) => x.t - y.t);
+    const candles = [];
+    for (const p of pts) {
+      const t = start(p.t), c = candles.at(-1);
+      if (c?.t === t) { c.h = Math.max(c.h, p.usd); c.l = Math.min(c.l, p.usd); c.c = p.usd; c.n++; c.approx &&= p.approx; continue; }
+      const o = p.approx && c ? c.c : p.usd; // a lone close has no open of its own: continue from the previous candle
+      candles.push({ t, o, h: Math.max(o, p.usd), l: Math.min(o, p.usd), c: p.usd, n: 1, approx: p.approx });
+    }
+    return { interval: iv, bucket: b, candles, samples_since: first, source: 'CoinPaprika price of SafeTrade NOID/USDT, sampled every 3 minutes' };
+  },
+
   async holders(_, params) {
     const w = params.get('window') || '30d';
     const since = Math.floor(Date.now() / 1000) - (WINDOWS[w] ?? WINDOWS['30d']);
@@ -504,7 +535,7 @@ setInterval(() => hits.clear(), 60_000).unref();
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
 const inflight = new Map();
-const PARAMS = ['before', 'limit', 'page', 'window', 'q'];
+const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
 setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
 
