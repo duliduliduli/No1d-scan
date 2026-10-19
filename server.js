@@ -79,12 +79,12 @@ const q = {
 // slots look identical, so quote those numbers into strings before parsing.
 const parseRpc = (text) => JSON.parse(text.replace(/"creation_id":\s*(\d{16,})/g, '"creation_id":"$1"'));
 
-async function rpc(method, params = []) {
+async function rpc(method, params = [], timeoutMs = 10_000) {
   const res = await fetch(RPC_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(RPC_TOKEN && { authorization: `Bearer ${RPC_TOKEN}` }) },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: `paranoid_${method}`, params }),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const body = parseRpc(await res.text());
   if (body.error) throw new Error(`${method}: ${body.error.message}`);
@@ -163,7 +163,7 @@ async function tick() {
       throw new Error(indexer.error);
     }
     db.exec('begin');
-    try { for (const t of ['blocks', 'stats', 'headers']) db.prepare(`delete from ${t} where height > ?`).run(tip); db.exec('commit'); } catch (e) { db.exec('rollback'); throw e; }
+    try { for (const t of ['blocks', 'stats', 'headers', 'token_trades']) db.prepare(`delete from ${t} where height > ?`).run(tip); db.exec('commit'); } catch (e) { db.exec('rollback'); throw e; }
     cache.clear();
   }
   for (let h = Math.max(0, tip - RETAINED + 1); h <= tip; h++) {
@@ -188,6 +188,8 @@ async function tick() {
   }
   await syncHeaders(tip);
   await bill.settleNoid(tip);
+  // Token indexing must not pause block indexing: a missing v2.1 method is normal until the node ships it.
+  if (await assets.sync()) cache.clear();
   Object.assign(indexer, { tip, at: Date.now(), error: null });
 }
 
@@ -345,6 +347,7 @@ async function sweepHolders() {
 }
 
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip);
+const assets = require('./assets.js')(db, rpc, () => price.now);
 
 // Candle interval -> [seconds per candle, how far back to show].
 const CANDLES = { '15m': [900, 86400], '1h': [3600, 4 * 86400], '4h': [14400, 16 * 86400], '1d': [86400, 120 * 86400], '1w': [604800, 3 * 365 * 86400] }; // ~100 candles each
@@ -513,6 +516,13 @@ const routes = {
     return q.charts.all().reverse().map((r) => ({ height: r.height, ts: r.ts, ...JSON.parse(r.data) }));
   },
 
+  // Routes must return a promise: the handler shares in-flight calls with .finally.
+  tokens: async (...a) => assets.tokens(...a),
+  token: async (...a) => assets.token(...a),
+  collections: async (...a) => assets.collections(...a),
+  collection: async (...a) => assets.collection(...a),
+  swap: async (...a) => assets.swap(...a),
+
   async search(_, params) {
     const s = (params.get('q') || '').trim().toLowerCase();
     if (RE.height.test(s)) return { type: 'block', id: s };
@@ -535,7 +545,9 @@ setInterval(() => hits.clear(), 60_000).unref();
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
 const inflight = new Map();
-const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval'];
+const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender',
+  'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
+  'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
 setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
 

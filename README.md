@@ -26,7 +26,13 @@ npm start     # http://127.0.0.1:8080
 
 ## API
 
-`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price?window=…` (3-minute ticks, market cap, volume, markets) · `/api/holders?window=…` · `/api/richlist?limit=N` · `/api/supply?window=…` · `/api/candles?interval=15m|1h|4h|1d|1w` (OHLC built from the 3-minute price samples; `approx` candles are older daily/hourly closes) · `/api/live` (server-sent events)
+`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price?window=…` (3-minute ticks, market cap, volume, markets) · `/api/holders?window=…` · `/api/richlist?limit=N` · `/api/supply?window=…` · `/api/candles?interval=15m|1h|4h|1d|1w` (OHLC built from the 3-minute price samples; `approx` candles are older daily/hourly closes) · `/api/tokens` · `/api/token/:id` · `/api/collections` · `/api/collection/:id` · `/api/swap/quote` · `/api/swap/build` · `/api/live` (server-sent events)
+
+**Explore (tokens and NFTs).** Parano1d v2.1 has not published token, pool or NFT RPC yet, so these routes are empty and the page says “Native tokens activate with Parano1d v2.1”. `?demo=1` (or `TOKENS_DEMO=1`) returns an in-memory sample labeled `demo: true` and does not write it to the database. List filters are query params: `q`, `sort` (`liquidity|volume|age|mcap|txns|buys|sells|change`), `dir`, `preset` (`trending|new|gainers|graduating`), `window` (`5m|1h|6h|24h`), and `min_`/`max_` on `liq`, `vol`, `age` (hours), `mcap`, `txns`, `buys`, `sells`. Amounts in those filters are NOID, not μNOID. Collection filters use `sort=volume|floor|items|owners|age` and `min_`/`max_` on `vol`, `floor`, `items`, `owners`, `age`. Responses keep the same μNOID strings as the rest of the API. USD fields use the CoinPaprika NOID price.
+
+The indexer calls `paranoid_getAssetSnapshot` and, once that exists, `paranoid_quoteSwap` / `paranoid_buildSwap`. Until then it logs nothing and leaves the tables empty. Snapshot shape and the wallet provider the page expects (`window.parano1d.request`) are documented at the top of `assets.js`.
+
+**Swaps are non-custodial and off by default.** The server never holds a key and never signs. `/api/swap/quote` returns `{enabled:false}` unless `SWAP_ENABLED=true`, `SWAP_FEE_ADDRESS` is a valid `o1…` address, and the node exposes both swap methods. The fee (`SWAP_FEE_BPS`, default 50 = 0.50%, maximum 1000) is sent as its own output when `buildSwap` sets `fee_in_tx`; otherwise the quote only itemizes it. `/api/swap/build` returns an unsigned payload for the wallet, and refuses anything that already has a signature. `?demo=1` returns a preview quote from sample reserves and `/api/swap/build` rejects it. The panel is hidden on the token page unless swaps are live and `window.parano1d` is present; `?demo=1` shows the panel with signing disabled.
 
 Errors are JSON `{"error": "…"}`: 400 bad input, 401 missing/unknown key, 402 out of credits (AI), 404 not found, 429 rate limited (`retry-after`), 502 node or upstream unavailable. `/api/stats` has `coverage` (which heights have captured bodies) and `indexer.error`. Holder counts and the rich list are approximate: a sweep reads the Live State over ~20 minutes while blocks keep arriving.
 
@@ -99,6 +105,10 @@ SITE_URL=https://parano1d-scan.com
 | `DONATE_ADDRESS` | – | `o1…` address shown in the footer |
 | `P2P_PORT` | `9600` | Node P2P port, used to find peer connections for the globe |
 | `HOLDERS_EVERY_MS` | `7200000` | How often the Live State is swept (every slot via batched `getSlot`, `SWEEP_BATCH` per request) for the holders count, concentration and rich list. Takes ~20 min on a 2-vCPU droplet with the real state; `/api/holders` reports progress |
+| `TOKENS_DEMO` | – | `1` serves the sample token and NFT catalog on every Explore request, still labeled demo, still not written to the database |
+| `SWAP_ENABLED` | – | must be the string `true` or the swap panel stays hidden |
+| `SWAP_FEE_BPS` | `50` | Front-end fee in basis points (50 = 0.50%). Allowed range 0–1000. A non-integer disables swaps |
+| `SWAP_FEE_ADDRESS` | – | `o1…` address that receives the fee output. Swaps stay hidden until this is a valid address |
 
 **Network globe** (home page): countries of peers connected to this explorer's node, read from established TCP connections on `P2P_PORT` in `/proc/net` and resolved to a country with [country.is](https://country.is) (free, no key, cached per IP). Only country codes and counts leave the server. It is one node's view of the network at country level: not miner or user locations, which the chain does not reveal. Each new block draws arcs from the peer countries into the node. The globe is [globe.gl](https://globe.gl) 2.46.2, loaded from jsDelivr only on the home page.
 
