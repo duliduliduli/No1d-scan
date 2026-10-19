@@ -419,6 +419,14 @@ test('indexer + api', async (t) => {
   assert.strictEqual(demo.demo, true);
   assert.strictEqual(demo.tokens[0].id, 'gcat');
   assert.ok(demo.tokens.every((t) => t.backing_per_token_micronoid === '1000'));
+  assert.strictEqual(demo.page, 1);
+  assert.strictEqual(demo.count, 5);
+  assert.ok(demo.tokens[0].spark.length >= 2);
+  assert.strictEqual(demo.tokens[0].creator, 'o1acdefghjkmnpqr');
+  const p2 = (await get('tokens?demo=1&page=2'))[1];
+  assert.strictEqual(p2.tokens.length, 0);
+  assert.strictEqual(p2.count, 5);
+  assert.strictEqual((await get('tokens?demo=1&page=nope'))[0], 400);
   assert.strictEqual((await get('tokens?demo=1&preset=new'))[1].tokens[0].id, 'qsun');
   assert.strictEqual((await get('tokens?demo=1&preset=gainers'))[1].tokens[0].id, 'orbit');
   const grad = (await get('tokens?demo=1&preset=graduating'))[1];

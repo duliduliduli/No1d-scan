@@ -42,7 +42,8 @@
   .msg.user { align-self:flex-end; background:var(--head); border:1px solid var(--line) }
   .msg.bot { align-self:flex-start; background:rgba(168,245,233,.06); border:1px solid rgba(168,245,233,.25) }
   .msg.err { border-color:#ff6b6b; color:#ffb3b3 }
-  button:disabled { opacity:.5; cursor:wait }
+  button:disabled { opacity:.72; cursor:not-allowed }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px }
   form { flex:1; display:flex; min-width:240px }
   button { padding:9px 14px; border:1px solid var(--accent); border-radius:3px; background:transparent; color:var(--accent); font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; cursor:pointer } button:hover { box-shadow:var(--glow) }
   .big { font:700 22px var(--mono); color:var(--gold); user-select:all } .addr { font:14px var(--mono); user-select:all; word-break:break-all }
@@ -94,9 +95,26 @@
   .fgrid .pair { display:flex; gap:6px } .fgrid input { width:100%; min-width:0 }
   button.sort { border:0; background:none; padding:0; color:var(--muted); font:600 12px var(--mono); letter-spacing:.06em; box-shadow:none }
   button.sort.on, button.sort:hover { color:var(--accent); box-shadow:none }
-  .wide { display:none } @media (min-width:900px) { .wide { display:block; overflow-x:auto } .narrow { display:none } }
-  .tok { min-width:1320px } .tok td, .tok th { word-break:normal }
-  .tok td:first-child, .tok th:first-child { position:sticky; left:0; background:var(--card); z-index:1 }
+  body.widepage header, body.widepage main, body.widepage footer { max-width:1440px }
+  .wide { display:none } @media (min-width:900px) { .wide { display:block } .narrow { display:none } }
+  .scroller { overflow-x:auto; overflow-y:clip; max-width:100%; }
+  .tok { width:100% } .tok td, .tok th { word-break:normal; white-space:nowrap; padding:8px 6px }
+  .tok thead th { position:sticky; top:0; background:var(--head); z-index:2 }
+  .tok td:first-child, .tok th:first-child { position:sticky; left:0; z-index:1; background:var(--card) }
+  .tok thead th:first-child { z-index:3; background:var(--head) }
+  .tok tr:hover td:first-child { background:#0c1c1f }
+  :root[data-theme="light"] .tok tr:hover td:first-child { background:#f4fafa }
+  .tok .num { text-align:right; font-variant-numeric:tabular-nums }
+  svg.spark { width:64px; height:22px; display:block } svg.spark polyline { stroke-width:1.5; filter:none }
+  svg.spark.down polyline { stroke:#ff6b6b } :root[data-theme="light"] svg.spark.down polyline { stroke:#c62828 }
+  @media (max-width:1199px) { .tok .opt { display:none } }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 }
+  button.chipx, #exreset { padding:4px 8px; font-size:11px; letter-spacing:.04em; border-color:var(--line); color:var(--fg) }
+  .skel { height:12px; margin:12px 0; border-radius:3px; background:linear-gradient(90deg, var(--head), color-mix(in srgb, var(--accent) 22%, var(--head)), var(--head)); background-size:200% 100%; animation:sk 1.1s ease-in-out infinite }
+  .skel.short { width:42% } @keyframes sk { to { background-position:-200% 0 } }
+  .fee { margin:12px 0 0; padding:8px 10px; border:1px solid var(--gold); border-radius:3px; color:var(--gold); font:12px/1.45 var(--mono) }
+  .warn { color:var(--gold) }
+  .pager { display:flex; gap:8px; align-items:center; margin-top:10px } .pager button { padding:6px 10px }
   .who { display:flex; gap:8px; align-items:center; min-width:0 }
   .logo { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; flex:none; background:var(--head); border:1px solid var(--accent); color:var(--accent); font:700 11px var(--mono); overflow:hidden }
   .logo img { width:100%; height:100%; object-fit:cover }
@@ -212,12 +230,19 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(
 const myKey = () => { try { return localStorage.getItem('nk') || ''; } catch { return ''; } };
 const saveKey = (k) => { try { k ? localStorage.setItem('nk', k) : localStorage.removeItem('nk'); } catch {} };
 // Sends the account key (if any) so paid users get their tier everywhere.
+const apiCache = new Map();
 const api = async (p, body) => {
   const k = myKey();
+  const hit = body === undefined && apiCache.get(p);
+  if (hit && hit.until > Date.now()) return hit.body;
   const r = await fetch('/api/' + p, body === undefined ? { headers: k ? { 'x-api-key': k } : {} }
     : { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...(k && { 'x-api-key': k }) } });
-  const j = await r.json();
-  if (!r.ok) throw Object.assign(new Error(j.error), { status: r.status });
+  const j = await r.json().catch(() => ({ error: 'The explorer could not read that response.' }));
+  if (!r.ok) throw Object.assign(new Error(j.error || 'Request failed'), { status: r.status });
+  if (body === undefined) {
+    if (apiCache.size > 40) apiCache.delete(apiCache.keys().next().value);
+    apiCache.set(p, { until: Date.now() + 5000, body: j });
+  }
   return j;
 };
 const n0 = (x) => Number(x ?? 0).toLocaleString();
@@ -556,31 +581,66 @@ function fmtNoid(v) {
   return `${neg ? '-' : ''}${whole.toLocaleString('en-US')}${frac ? '.' + frac : ''} NOID`;
 }
 const chgHtml = (v) => v == null ? '<span class="muted">–</span>' : `<b class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${v.toFixed(1)}%</b>`;
-const logoHtml = (t) => t.logo ? `<span class="logo"><img alt="" src="${esc(t.logo)}"></span>` : `<span class="logo">${esc((t.ticker || '?').slice(0, 2))}</span>`;
-const curveHtml = (t) => !t.graduated && t.curve ? `<div class="curve" title="${esc(t.curve.progress)}% of graduation"><span style="width:${Math.max(0, Math.min(100, t.curve.progress))}%"></span></div><span class="muted">${esc(t.curve.progress)}% · ${esc(fmtNoid(t.curve.raised_micronoid))} / ${esc(fmtNoid(t.curve.target_micronoid))}</span>` : (t.graduated ? '<span class="pill">Pool</span>' : '<span class="muted">–</span>');
+const logoHtml = (t) => {
+  const fb = esc((t.ticker || t.name || '?').slice(0, 2));
+  if (!t.logo) return `<span class="logo" aria-hidden="true">${fb}</span>`;
+  return `<span class="logo"><img alt="" data-fb="${fb}" src="${esc(t.logo)}"></span>`;
+};
+const curveHtml = (t) => !t.graduated && t.curve ? `<div class="curve" title="${esc(t.curve.progress)}% of ${esc(fmtNoid(t.curve.target_micronoid))}"><span style="width:${Math.max(0, Math.min(100, t.curve.progress))}%"></span></div><span class="muted">${esc(t.curve.progress)}%</span>` : (t.graduated ? '<span class="pill">Pool</span>' : '<span class="muted">–</span>');
+function compactNoid(v) {
+  if (v == null || v === '') return '–';
+  const n = Number(v) / 1e6;
+  if (!Number.isFinite(n)) return '–';
+  const a = Math.abs(n);
+  if (a === 0) return '0';
+  if (a < 1) return n.toLocaleString('en-US', { maximumSignificantDigits: 3 });
+  if (a < 1000) return n.toLocaleString('en-US', { maximumFractionDigits: a < 10 ? 2 : 0 });
+  const k = Math.min(Math.floor(Math.log10(a) / 3), 3);
+  return (n / 1000 ** k).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ['', 'K', 'M', 'B'][k];
+}
+const numCell = (v) => `<td class="num" title="${esc(fmtNoid(v))}">${esc(compactNoid(v))}</td>`;
+function sparkSvg(pts) {
+  if (!pts || pts.length < 2) return '';
+  const min = Math.min(...pts), max = Math.max(...pts), w = 64, h = 22;
+  const d = pts.map((p, i) => {
+    const x = (i / (pts.length - 1)) * w;
+    const y = max === min ? h / 2 : h - ((p - min) / (max - min)) * (h - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg class="spark ${pts.at(-1) >= pts[0] ? 'up' : 'down'}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${d}"></polyline></svg>`;
+}
+const ageLabel = (t) => t.created_ts ? ago(t.created_ts) : (t.age_s == null ? '–' : `${ageShort(t.age_s)} ago`);
 const demoHref = (path) => {
   const demo = new URLSearchParams(location.search).get('demo') === '1';
   return demo ? `${path}${path.includes('?') ? '&' : '?'}demo=1` : path;
 };
 const TOKEN_SORTS = [['liquidity', 'Liquidity'], ['volume', 'Volume'], ['age', 'Age'], ['mcap', 'MCap'], ['txns', 'Txns'], ['buys', 'Buys'], ['sells', 'Sells'], ['change', 'Change'], ['progress', 'Curve']];
 const NFT_SORTS = [['volume', 'Volume'], ['floor', 'Floor'], ['items', 'Items'], ['owners', 'Owners'], ['age', 'Age']];
-function sortTh(key, label, on, dir) { return `<th><button type="button" class="sort${on === key ? ' on' : ''}" data-sort="${key}">${label}${on === key ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}</button></th>`; }
-function tokenTable(list, sort, dir) {
-  const head = `<tr><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('buys', 'Buys', sort, dir)}${sortTh('sells', 'Sells', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}<th>5m</th><th>1h</th><th>6h</th><th>24h</th><th>Backing</th><th>Curve</th></tr>`;
+function sortTh(key, label, on, dir, opt) {
+  const mark = on === key ? (dir === 'asc' ? ' ↑' : ' ↓') : '';
+  return `<th class="${opt ? 'opt' : ''}" aria-sort="${on === key ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}"><button type="button" class="sort${on === key ? ' on' : ''}" data-sort="${key}" aria-label="Sort by ${esc(label)}">${label}${mark}</button></th>`;
+}
+function chgTh(win, sort, dir, window) {
+  const on = sort === 'change' && (window || '24h') === win;
+  const opt = win === '5m' || win === '1h';
+  return `<th class="${opt ? 'opt' : ''}" aria-sort="${on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}"><button type="button" class="sort${on ? ' on' : ''}" data-sort="change" data-win="${win}" aria-label="Sort by ${win} change">${win}${on ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}</button></th>`;
+}
+function tokenTable(list, sort, dir, window) {
+  const head = `<tr><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('buys', 'Buys', sort, dir, true)}${sortTh('sells', 'Sells', sort, dir, true)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th class="opt">Backing</th><th class="opt">Curve</th></tr>`;
   const body = list.map((t) => `<tr>
-      <td><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b><small class="muted">${esc(t.ticker)}</small></span></a></td>
-      <td>${esc(fmtNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
-      <td>${esc(ageShort(t.age_s))}</td><td>${n0(t.txns)}</td><td>${n0(t.buys)}</td><td>${n0(t.sells)}</td>
-      <td>${esc(fmtNoid(t.volume_micronoid))}</td><td>${esc(fmtNoid(t.liquidity_micronoid))}</td><td>${esc(fmtNoid(t.mcap_micronoid))}</td>
-      <td>${chgHtml(t.change['5m'])}</td><td>${chgHtml(t.change['1h'])}</td><td>${chgHtml(t.change['6h'])}</td><td>${chgHtml(t.change['24h'])}</td>
-      <td>${esc(fmtNoid(t.backing_per_token_micronoid))}</td><td>${curveHtml(t)}</td></tr>`).join('');
-  return `<div class="wide"><table class="list tok">${head}${body}</table></div>`;
+      <td><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b><small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
+      <td>${sparkSvg(t.spark)}${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
+      <td>${esc(ageLabel(t))}</td><td class="num">${n0(t.txns)}</td><td class="num opt">${n0(t.buys)}</td><td class="num opt">${n0(t.sells)}</td>
+      ${numCell(t.volume_micronoid)}${numCell(t.liquidity_micronoid)}${numCell(t.mcap_micronoid)}
+      <td class="opt">${chgHtml(t.change['5m'])}</td><td class="opt">${chgHtml(t.change['1h'])}</td><td>${chgHtml(t.change['6h'])}</td><td>${chgHtml(t.change['24h'])}</td>
+      <td class="num opt" title="${esc(fmtNoid(t.backing_per_token_micronoid))} per token">${esc(compactNoid(t.backing_per_token_micronoid))}</td><td class="opt">${curveHtml(t)}</td></tr>`).join('');
+  return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function tokenCards(list) {
   return `<div class="narrow">${list.map((t) => `<a class="mcard" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>
-      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageShort(t.age_s))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
+      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
       <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</small></span>
-      <span class="chgs">5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</span>
+      <span class="chgs">${sparkSvg(t.spark)} 5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</span>
       <span class="meta">Liq ${esc(fmtNoid(t.liquidity_micronoid))} · Vol ${esc(fmtNoid(t.volume_micronoid))} · MCap ${esc(fmtNoid(t.mcap_micronoid))}</span>
       <span class="meta">${n0(t.txns)} txns · ${n0(t.buys)} buys · ${n0(t.sells)} sells · Backing ${esc(fmtNoid(t.backing_per_token_micronoid))}</span>
       ${!t.graduated && t.curve ? `<span class="chgs">${curveHtml(t)}</span>` : ''}</a>`).join('') || ''}</div>`;
@@ -589,9 +649,9 @@ function nftTable(list, sort, dir) {
   const head = `<tr><th>Collection</th>${sortTh('floor', 'Floor', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('items', 'Items', sort, dir)}${sortTh('owners', 'Owners', sort, dir)}${sortTh('age', 'Age', sort, dir)}</tr>`;
   const body = list.map((c) => `<tr>
       <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a></td>
-      <td>${esc(fmtNoid(c.floor_micronoid))}</td><td>${esc(fmtNoid(c.volume_micronoid))}</td>
-      <td>${n0(c.items)}</td><td>${n0(c.owners)}</td><td>${esc(ageShort(c.age_s))}</td></tr>`).join('');
-  return `<div class="wide"><table class="list tok">${head}${body}</table></div>`;
+      ${numCell(c.floor_micronoid)}${numCell(c.volume_micronoid)}
+      <td class="num">${n0(c.items)}</td><td class="num">${n0(c.owners)}</td><td>${esc(c.created_ts ? ago(c.created_ts) : ageShort(c.age_s))}</td></tr>`).join('');
+  return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function nftCards(list) {
   return `<div class="narrow">${list.map((c) => `<a class="mcard" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>
@@ -618,8 +678,22 @@ function exploreShell(tab, params) {
       </div>
       ${tab === 'tokens' ? tabs('preset', [['', 'All'], ['trending', 'Trending'], ['new', 'New'], ['gainers', 'Top gainers'], ['graduating', 'Graduating soon']], params.get('preset') || '') : ''}
       <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
+      <div id="exchips"></div>
     </div>
-    <div id="exbanner"></div><div id="exlist"><p class="muted">Loading…</p></div>`;
+    <div id="exbanner"></div><div id="exlist" aria-live="polite" aria-busy="true"><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>`;
+}
+function chipHtml(params) {
+  const bits = [];
+  const q = params.get('q');
+  if (q) bits.push(['q', `Search ${q}`]);
+  for (const [k, v] of params) if (k.startsWith('min_') || k.startsWith('max_')) bits.push([k, `${k.replace(/^(min|max)_/, '$1 ').replaceAll('_', ' ')} ${v}`]);
+  if (!bits.length) return '';
+  return `<div class="chips">${bits.map(([k, label]) => `<button type="button" class="chipx" data-clear="${esc(k)}" aria-label="Remove ${esc(label)}">${esc(label)} ×</button>`).join('')}<button type="button" id="exreset">Reset</button></div>`;
+}
+function pagerHtml(data) {
+  const from = data.count ? (data.page - 1) * data.page_size + 1 : 0;
+  const to = Math.min(data.page * data.page_size, data.count);
+  return `<nav class="pager" aria-label="Pages"><button type="button" data-page="${data.page - 1}" ${data.page <= 1 ? 'disabled' : ''}>Prev</button><span>${from}–${to} of ${n0(data.count)}</span><button type="button" data-page="${data.page + 1}" ${data.page >= data.pages ? 'disabled' : ''}>Next</button></nav>`;
 }
 function syncExploreUrl() {
   const cur = new URLSearchParams(location.search);
@@ -641,36 +715,42 @@ async function fillExplore() {
   $('exbanner').innerHTML = data.demo ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Native tokens activate with Parano1d v2.1.</p>` : '';
   if (!data.demo && !data.live && !rows.length && bare) {
     $('extools').hidden = true;
+    $('exlist').removeAttribute('aria-busy');
     $('exlist').innerHTML = `<div class="empty"><b>${esc(data.notice || 'Native tokens activate with Parano1d v2.1')}</b><p class="muted">Listings stay empty until a Parano1d node exposes native tokens, curves, pools and collections. Nothing on this page is sample data.</p></div>`;
     return;
   }
   $('extools').hidden = false;
+  if ($('exchips')) $('exchips').innerHTML = chipHtml(params);
   const opt = `${data.sort}:${data.dir}`;
   if ($('exsort')?.querySelector(`[value="${opt}"]`)) $('exsort').value = opt;
+  $('exlist').removeAttribute('aria-busy');
   if (!rows.length) {
     $('exlist').innerHTML = `<p class="muted">${esc(data.notice || 'No matches.')}</p>`;
     return;
   }
   const win = data.window || params.get('window') || '24h';
   const note = `<p class="muted" style="font-size:12px">${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'}${tab === 'tokens' ? ` · volume, txns, buys and sells are the last ${esc(win)}` : ''}</p>`;
-  $('exlist').innerHTML = note + (tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows) : tokenTable(rows, data.sort, data.dir) + tokenCards(rows));
+  const table = tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows) : tokenTable(rows, data.sort, data.dir, win) + tokenCards(rows);
+  $('exlist').innerHTML = note + table + pagerHtml(data);
 }
+const showExErr = (e) => { if ($('exlist')) { $('exlist').removeAttribute('aria-busy'); $('exlist').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; } };
 function wireExplore() {
   let timer;
-  const refill = () => { clearTimeout(timer); timer = setTimeout(() => { syncExploreUrl(); fillExplore().catch((e) => { if ($('exlist')) $('exlist').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); }, 250); };
+  const refill = () => { clearTimeout(timer); timer = setTimeout(() => { syncExploreUrl(); fillExplore().catch(showExErr); }, 250); };
   $('exq').addEventListener('input', refill);
   $('exsort').addEventListener('change', () => {
     const [sort, dir] = $('exsort').value.split(':');
     const u = new URL(location.href);
-    u.searchParams.set('sort', sort); u.searchParams.set('dir', dir); u.searchParams.delete('preset');
+    u.searchParams.set('sort', sort); u.searchParams.set('dir', dir); u.searchParams.delete('preset'); u.searchParams.delete('page');
     history.replaceState(null, '', u.pathname + u.search);
-    fillExplore().catch((e) => { if ($('exlist')) $('exlist').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; });
+    fillExplore().catch(showExErr);
   });
   $('exwin')?.addEventListener('change', () => {
     const u = new URL(location.href);
     if ($('exwin').value === '24h') u.searchParams.delete('window'); else u.searchParams.set('window', $('exwin').value);
+    u.searchParams.delete('page');
     history.replaceState(null, '', u.pathname + u.search);
-    fillExplore().catch((e) => { if ($('exlist')) $('exlist').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; });
+    fillExplore().catch(showExErr);
   });
   for (const input of document.querySelectorAll('#extools [data-f]')) input.addEventListener('input', refill);
   onTabs('extab', (v) => {
@@ -684,16 +764,42 @@ function wireExplore() {
   onTabs('preset', (v) => {
     const u = new URL(location.href);
     if (v) u.searchParams.set('preset', v); else u.searchParams.delete('preset');
-    u.searchParams.delete('sort'); u.searchParams.delete('dir');
-    go(u.pathname + u.search);
+    u.searchParams.delete('sort'); u.searchParams.delete('dir'); u.searchParams.delete('page');
+    history.replaceState(null, '', u.pathname + u.search);
+    fillExplore().catch(showExErr);
   });
   $('excard').addEventListener('click', (e) => {
     const b = e.target.closest('button.sort');
-    if (!b) return;
+    const pg = e.target.closest('button[data-page]');
+    const clr = e.target.closest('button[data-clear]');
+    const reset = e.target.id === 'exreset';
+    if (!b && !pg && !clr && !reset) return;
     const u = new URL(location.href);
-    const dir = u.searchParams.get('sort') === b.dataset.sort && u.searchParams.get('dir') !== 'asc' ? 'asc' : 'desc';
-    u.searchParams.set('sort', b.dataset.sort); u.searchParams.set('dir', dir); u.searchParams.delete('preset');
-    go(u.pathname + u.search);
+    if (b) {
+      const sameWin = !b.dataset.win || (u.searchParams.get('window') || '24h') === b.dataset.win;
+      const dir = u.searchParams.get('sort') === b.dataset.sort && sameWin && u.searchParams.get('dir') !== 'asc' ? 'asc' : 'desc';
+      u.searchParams.set('sort', b.dataset.sort); u.searchParams.set('dir', dir); u.searchParams.delete('preset');
+      if (b.dataset.win) { if (b.dataset.win === '24h') u.searchParams.delete('window'); else u.searchParams.set('window', b.dataset.win); }
+      const opt = `${b.dataset.sort}:${dir}`;
+      if ($('exsort')?.querySelector(`[value="${opt}"]`)) $('exsort').value = opt;
+      if (b.dataset.win && $('exwin')) $('exwin').value = b.dataset.win;
+    } else if (pg) {
+      u.searchParams.set('page', pg.dataset.page);
+    } else if (clr) {
+      u.searchParams.delete(clr.dataset.clear);
+      const input = document.querySelector(`#extools [data-f="${clr.dataset.clear}"]`);
+      if (input) input.value = '';
+      if (clr.dataset.clear === 'q' && $('exq')) $('exq').value = '';
+    } else {
+      for (const k of [...u.searchParams.keys()]) if (k === 'q' || k.startsWith('min_') || k.startsWith('max_') || k === 'preset') u.searchParams.delete(k);
+      if ($('exq')) $('exq').value = '';
+      for (const input of document.querySelectorAll('#extools [data-f]')) input.value = '';
+      document.querySelectorAll('[data-tabs="preset"] button').forEach((x) => x.classList.toggle('on', x.dataset.v === ''));
+    }
+    u.searchParams.delete('page');
+    if (pg) u.searchParams.set('page', pg.dataset.page);
+    history.replaceState(null, '', u.pathname + u.search);
+    fillExplore().catch(showExErr);
   });
 }
 async function mountSwap(d, id) {
@@ -703,41 +809,71 @@ async function mountSwap(d, id) {
       <div class="tabs" data-tabs="side"><button type="button" data-v="buy" class="on">Buy</button><button type="button" data-v="sell">Sell</button></div>
       <label class="muted" id="swlab" style="display:block;margin-top:12px;font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase">You pay (NOID)</label>
       <input id="swamt" inputmode="decimal" value="100" aria-label="Amount" autocomplete="off">
-      <div class="tabs" data-tabs="slip" style="margin-top:10px">${[['0.5', '0.5%'], ['1', '1%'], ['3', '3%']].map(([v, l]) => `<button type="button" data-v="${v}" class="${v === '1' ? 'on' : ''}">${l} slip</button>`).join('')}</div>
-      <div class="kvl" id="swquote"><small>Fee</small><span>${esc(feePct)}% of the NOID side, shown before you sign</span></div>
+      <div class="tabs" data-tabs="slip" style="margin-top:10px">${[['0.5', '0.5%'], ['1', '1%'], ['3', '3%']].map(([v, l]) => `<button type="button" data-v="${v}" class="${v === '1' ? 'on' : ''}" aria-label="${l} slippage">${l} slip</button>`).join('')}</div>
+      <label class="muted" for="swslip" style="display:block;margin-top:8px;font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase">Slippage %</label>
+      <input id="swslip" inputmode="decimal" value="1" aria-describedby="swsliperr" autocomplete="off">
+      <p id="swsliperr" class="down" style="min-height:1.2em;margin:4px 0 0;font:12px var(--mono)"></p>
+      <p class="fee" id="swfee">Fee ${esc(feePct)}% of the NOID side. The NOID amount is shown here before you sign.</p>
+      <div class="kvl" id="swquote"><small>Quote</small><span class="muted">Updating…</span></div>
       <button type="button" id="swsign" disabled style="margin-top:12px;width:100%">${d.demo ? 'Demo · cannot submit' : 'Sign in wallet'}</button>
       <p class="fine">Non-custodial: you sign with your own Parano1d wallet. NOID Scan never holds your funds or keys. The fee above (${esc(feePct)}%) is disclosed before signing${d.swap.fee_address ? ` and is paid to <span class="mono">${esc(d.swap.fee_address)}</span>` : ''}. Not investment advice. <a href="/terms" data-link>Terms</a></p></div>`;
-  let side = 'buy', slip = '1', q = null;
+  let side = 'buy', q = null;
+  const slipValue = () => {
+    const raw = $('swslip').value.trim();
+    if (!/^\d+(\.\d{1,2})?$/.test(raw)) return null;
+    const n = Number(raw);
+    return n >= 0 && n <= 50 ? raw : null;
+  };
   const refresh = async () => {
     const amount = $('swamt').value.trim();
     $('swlab').textContent = side === 'buy' ? 'You pay (NOID)' : `You sell (${d.token.ticker}, whole tokens)`;
-    if (!amount) return;
+    const slip = slipValue();
+    if (!slip) {
+      $('swsliperr').textContent = 'Slippage must be a number from 0 to 50.';
+      $('swsign').disabled = true;
+      return;
+    }
+    $('swsliperr').textContent = '';
+    if (!/^\d+(\.\d{1,6})?$/.test(amount) || Number(amount) <= 0) {
+      $('swquote').innerHTML = `<small>Amount</small><span class="down">Enter a positive amount.</span>`;
+      $('swsign').disabled = true;
+      return;
+    }
     try {
-      q = await api(`swap/quote?token=${encodeURIComponent(id)}&side=${side}&amount=${encodeURIComponent(amount)}&slippage=${slip}${d.demo ? '&demo=1' : ''}`);
+      q = await api(`swap/quote?token=${encodeURIComponent(id)}&side=${side}&amount=${encodeURIComponent(amount)}&slippage=${encodeURIComponent(slip)}${d.demo ? '&demo=1' : ''}`);
       if (!$('swquote')) return;
       if (!q.quotable) { $('swquote').innerHTML = `<small>Quote</small><span>${esc(q.note || 'No quote')}</span>`; $('swsign').disabled = true; return; }
       const out = side === 'buy' ? `${Number(q.expected_out.token).toLocaleString()} ${esc(d.token.ticker)}` : fmtNoid(q.expected_out.noid_micronoid);
       const min = side === 'buy' ? `${Number(q.min_out.token).toLocaleString()} ${esc(d.token.ticker)}` : fmtNoid(q.min_out.noid_micronoid);
       const feeLine = `${esc(fmtNoid(q.fee.micronoid))} (${Number(q.fee.pct).toFixed(2)}%)`;
-      $('swquote').innerHTML = `<small>Fee</small><span>${feeLine}${q.fee_in_tx ? '' : ' · itemized, not a chain output yet'}</span>
-        <small>Price impact</small><span>${q.price_impact_pct == null ? '–' : esc(q.price_impact_pct.toFixed(2)) + '%'}</span>
+      $('swfee').textContent = `Fee ${feeLine} of the NOID side, disclosed before you sign.`;
+      const impact = q.price_impact_pct;
+      const impactHtml = impact == null ? '–' : `${impact.toFixed(2)}%`;
+      const warn = impact >= 15 ? '<small>Warning</small><span class="down">Very high price impact. Reduce the amount before you sign.</span>'
+        : impact >= 5 ? '<small>Warning</small><span class="warn">High price impact. Check the amount before you sign.</span>' : '';
+      $('swquote').innerHTML = `<small>Fee</small><span>${feeLine}${q.fee_in_tx ? ' · separate output in the transaction you sign' : ' · itemized on this quote'}</span>
+        <small>Price impact</small><span>${esc(impactHtml)}</span>
+        ${warn}
         <small>Slippage</small><span>${esc(q.slippage_pct)}%</span>
         <small>Expected</small><span>${out}</span>
         <small>Min received</small><span>${min}</span>
         <small>Route</small><span>${esc(q.venue || '')} · NOID / ${esc(d.token.ticker)}</span>
         ${d.demo ? '<small>Mode</small><span>Demo quote. No transaction can be created or sent.</span>' : ''}`;
       $('swsign').disabled = d.demo || !q.signable || !WalletDex.ready();
-    } catch (e) { if ($('swquote')) $('swquote').innerHTML = `<small>Quote</small><span class="down">${esc(e.message)}</span>`; }
+    } catch (e) { if ($('swquote')) $('swquote').innerHTML = `<small>Quote</small><span class="down">${esc(e.message)}</span>`; $('swsign').disabled = true; }
   };
   onTabs('side', (v) => { side = v; refresh(); });
-  onTabs('slip', (v) => { slip = v; refresh(); });
+  onTabs('slip', (v) => { $('swslip').value = v; refresh(); });
   $('swamt').addEventListener('input', () => { clearTimeout($('swamt')._t); $('swamt')._t = setTimeout(refresh, 250); });
+  $('swslip').addEventListener('input', () => { clearTimeout($('swslip')._t); $('swslip')._t = setTimeout(refresh, 250); });
   $('swsign').onclick = async () => {
     if (d.demo || !q?.signable) return;
     $('swsign').disabled = true;
     try {
       const sender = await WalletDex.account();
-      const built = await api(`swap/build?token=${encodeURIComponent(id)}&side=${side}&amount=${encodeURIComponent($('swamt').value.trim())}&slippage=${slip}&sender=${encodeURIComponent(sender)}`);
+      const slip = slipValue();
+      if (!slip) return;
+      const built = await api(`swap/build?token=${encodeURIComponent(id)}&side=${side}&amount=${encodeURIComponent($('swamt').value.trim())}&slippage=${encodeURIComponent(slip)}&sender=${encodeURIComponent(sender)}`);
       const res = await WalletDex.signAndSubmit(built.unsigned, built.draft);
       $('swquote').insertAdjacentHTML('beforeend', `<small>Submitted</small><span>${esc(res?.txid || 'signed in your wallet')}</span>`);
     } catch (e) { $('swquote').insertAdjacentHTML('beforeend', `<small>Wallet</small><span class="down">${esc(e.message)}</span>`); $('swsign').disabled = false; }
@@ -745,9 +881,37 @@ async function mountSwap(d, id) {
   refresh();
 }
 
+function exploreCard(demo) {
+  const href = demo ? '/explore?demo=1' : '/explore';
+  return `<a class="card entry" href="${href}" data-link>
+        <h2>Explore tokens &amp; NFTs</h2>
+        <p>Native tokens, launchpad curves, liquidity pools and collections. Prices in NOID, and in USD from the same feed as the market panel.</p>
+        <span class="go">Open Explore →</span></a>`;
+}
+function homeStrip(list) {
+  if (!list?.length) return '';
+  return `<div class="card"><h2>Sample tokens <small>not on chain</small></h2>
+    <p class="demo-banner">Sample data for layout preview. These rows are not on chain. Native tokens activate with Parano1d v2.1.</p>
+    ${list.slice(0, 5).map((t) => `<a class="mcard" style="display:grid" href="/token/${encodeURIComponent(t.id)}?demo=1" data-link>
+      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
+      <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}
+    <p><a href="/explore?demo=1" data-link>All sample tokens →</a></p></div>`;
+}
 const pages = {
   async home() {
-    const [s, b, t, hi, net, mi] = await Promise.all([api('stats'), api('blocks?limit=15'), api('txs').catch(() => null), api('history?window=24h'), api('network').catch(() => null), api('miners?window=24h').catch(() => null)]);
+    const demo = new URLSearchParams(location.search).get('demo') === '1';
+    const soft = (p) => api(p).catch(() => null);
+    const [s, b, t, hi, net, mi, preview] = await Promise.all([
+      soft('stats'), soft('blocks?limit=15'), soft('txs'), soft('history?window=24h'), soft('network'), soft('miners?window=24h'),
+      demo ? soft('tokens?demo=1') : Promise.resolve(null),
+    ]);
+    const strip = homeStrip(preview?.tokens);
+    if (!s || !b?.blocks?.length) {
+      app.innerHTML = `<div class="livebar"><span class="dot off"></span><span>Node unavailable. Live blocks, price and the globe need the Parano1d node. Explore still opens.</span></div>
+        ${exploreCard(demo)}${strip}
+        <div class="card"><h2>Node unavailable</h2><p class="muted">This explorer could not reach its node, so chain stats are hidden until it answers. ${demo ? 'The token rows above are sample data and are not on chain.' : 'Add <span class="mono">?demo=1</span> to preview sample tokens without a node.'}</p></div>`;
+      return;
+    }
     let chartWin = '24h', minerWin = '24h';
     const stat = (k, id, v, tip) => `<div class="card stat" title="${esc(tip)}"><small>${k}</small><b id="${id}">${v}</b></div>`;
     const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, TX_COLS)}` : '';
@@ -763,10 +927,8 @@ const pages = {
         </div>
         <div class="event" id="gevent"></div>
         <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
-      <a class="card entry" href="/explore" data-link>
-        <h2>Explore tokens &amp; NFTs</h2>
-        <p>Native tokens, launchpad curves, liquidity pools and collections. Prices in NOID, and in USD from the same feed as the market panel.</p>
-        <span class="go">Open Explore →</span></a>
+      ${exploreCard(demo)}
+      ${strip}
       <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
         <div style="margin:12px 0 0">${priceBox('pwin')}</div>
@@ -787,7 +949,7 @@ const pages = {
         ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
       </div>
       <div class="card"><h2>Network history</h2>${tabs('cwin', WINDOW_TABS, '24h')}</div>
-      <div class="grid" id="charts">${charts(hi)}</div>
+      <div class="grid" id="charts">${hi ? charts(hi) : '<div class="card"><p class="muted">History is unavailable right now.</p></div>'}</div>
       <div class="card" id="miners">${minersCard(mi)}</div>
       <div class="card"><h2>Latest blocks</h2><div id="blocks">${rows(b.blocks, BLOCK_COLS)}</div>
         <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p></div>
@@ -1159,11 +1321,15 @@ const pages = {
     const span = d.chart.length > 1 ? d.chart.at(-1).t - d.chart[0].t : 0;
     const fx = span > 3 * 86400 ? 'day' : span > 86400 ? 'dayhour' : 'hour';
     const chart = d.chart.length > 1 ? ichart(d.chart.map((p) => [p.t, Number(p.price_micronoid)]), fx, 'tokpx', 180) : '<p class="muted">Not enough trades for a chart yet.</p>';
+    const share = location.origin + location.pathname + location.search;
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Native tokens activate with Parano1d v2.1.</p>' : ''}
-      <p><a href="${demoHref('/explore')}" data-link>← Explore</a></p>
+      <p><a href="${demoHref('/explore')}" data-link>← Explore</a>
+        <button type="button" class="copy" data-copy="${esc(share)}" aria-label="Copy link to this token">Copy link</button>
+        ${copyBtn(t.id)}</p>
       <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small></h2>
         <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
-        <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div></div></div></div>
+        <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div>
+        <div class="muted">${t.creator ? `Creator ${link('address', t.creator, short(t.creator))}` : 'Creator not published yet.'}</div></div></div></div>
       <div class="${show ? 'split' : ''}"><div>
         <div class="card"><h2>Price <small>NOID per token</small></h2>${chart}</div>
         <div class="grid">
@@ -1171,7 +1337,7 @@ const pages = {
           <div class="card stat"><small>24h volume</small><b>${esc(fmtNoid(t.volume_micronoid))}</b></div>
           <div class="card stat"><small>Market cap</small><b>${esc(fmtNoid(t.mcap_micronoid))}</b><small class="muted">${esc(t.mcap_usd == null ? '' : usd4(t.mcap_usd))}</small></div>
           <div class="card stat"><small>Txns 24h</small><b>${n0(t.txns)}</b><small class="muted">${n0(t.buys)} buys · ${n0(t.sells)} sells</small></div>
-          <div class="card stat" title="NOID locked as backing when the token was created"><small>Reserve backing</small><b>${esc(fmtNoid(t.backing_per_token_micronoid))}</b><small class="muted">per token · ${esc(fmtNoid(t.reserve_micronoid))} total</small></div>
+          <div class="card stat" title="Preview rate until v2.1 docs confirm 0.001 NOID per whole token"><small>NOID backing <span class="pill">preview</span></small><b>${esc(fmtNoid(t.backing_per_token_micronoid))}</b><small class="muted">per whole token · ${esc(fmtNoid(t.reserve_micronoid))} locked</small></div>
           <div class="card stat"><small>Pair age</small><b>${esc(ageShort(t.age_s))}</b></div>
           <div class="card stat"><small>Supply</small><b>${esc(Number(t.supply).toLocaleString())}</b></div>
         </div>
@@ -1179,6 +1345,7 @@ const pages = {
           ${t.graduated && t.pool ? `<p>Graduated. Pool reserves ${esc(fmtNoid(t.pool.reserve_noid_micronoid))} and ${esc(Number(t.pool.reserve_token).toLocaleString())} ${esc(t.ticker)}.</p>` : ''}
           ${!t.graduated && t.curve ? `<p>Launchpad curve, not graduated. ${curveHtml(t)}</p><p class="muted">Graduation target ${esc(fmtNoid(t.curve.target_micronoid))}.</p>` : ''}
           ${!t.pool && !t.curve ? '<p class="muted">No curve or pool published for this token yet.</p>' : ''}
+          <p class="muted">Backing is a preview of 0.001 NOID locked per whole token until Parano1d v2.1 docs confirm that rate. Total locked for this token: ${esc(fmtNoid(t.reserve_micronoid))}.</p>
         </div>
         <div class="card"><h2>Recent trades</h2>${d.trades.length ? `<table class="list"><tr><th>Time</th><th>Side</th><th>Tokens</th><th>NOID</th><th>Price</th><th>Trader</th></tr>
           ${d.trades.map((tr) => `<tr><td>${esc(ago(tr.ts))}</td><td class="${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td><td>${esc(Number(tr.token_amount).toLocaleString())}</td><td>${esc(fmtNoid(tr.noid_micronoid))}</td><td>${esc(fmtNoid(tr.price_micronoid))}</td><td>${tr.trader ? link('address', tr.trader, short(tr.trader)) : '<span class="muted">–</span>'}</td></tr>`).join('')}</table>` : '<p class="muted">No trades captured yet.</p>'}</div>
@@ -1231,7 +1398,10 @@ async function render() {
     const href = a.getAttribute('href');
     a.classList.toggle('here', href === location.pathname || (onEx && href === '/explore'));
   }
-  app.innerHTML = '<p class="muted">Loading…</p>';
+  document.body.classList.toggle('widepage', onEx);
+  const demoOn = new URLSearchParams(location.search).get('demo') === '1';
+  for (const a of document.querySelectorAll('header a.explore, #menunav a[href^="/explore"]')) a.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
+  app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
     await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
@@ -1256,10 +1426,18 @@ addEventListener('keydown', (e) => e.key === 'Escape' && menu(false));
 async function copy(text, btn) {
   try { await navigator.clipboard.writeText(text); }
   catch { const t = document.createElement('textarea'); t.value = text; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); }
+  const prev = btn.textContent;
   btn.textContent = '✓'; btn.classList.add('ok');
-  setTimeout(() => { btn.textContent = '⧉'; btn.classList.remove('ok'); }, 1500);
+  setTimeout(() => { btn.textContent = prev; btn.classList.remove('ok'); }, 1500);
 }
 
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (img?.tagName !== 'IMG' || !img.dataset.fb) return;
+  const s = document.createElement('span');
+  s.textContent = img.dataset.fb;
+  img.replaceWith(s);
+}, true);
 document.addEventListener('click', (e) => {
   const c = e.target.closest('button.copy');
   if (c) { e.preventDefault(); return copy(c.dataset.copy, c); }

@@ -189,7 +189,7 @@ module.exports = function assets(db, rpc, priceNow) {
         balance: (s.supply * pctShare / 100n).toString(),
       }));
       return {
-        id: s.id, name: s.name, ticker: s.ticker, creator: null, supply: s.supply, reserve_micronoid: s.supply * 1000n,
+        id: s.id, name: s.name, ticker: s.ticker, creator: 'o1acdefghjkmnpqr', supply: s.supply, reserve_micronoid: s.supply * 1000n,
         created_ts, created_height: null, logo: null, graduated: !!s.graduated, price_micronoid: s.price,
         curve, pool, trades, holders,
       };
@@ -255,6 +255,15 @@ module.exports = function assets(db, rpc, priceNow) {
       stats[k] = w;
     }
     const win = stats['24h'];
+    const prices = (trades || []).map((t) => t.price).filter((p) => p != null);
+    let spark = [];
+    if (prices.length >= 2) {
+      const step = Math.max(1, Math.ceil(prices.length / 16));
+      for (let i = 0; i < prices.length; i += step) spark.push(Number(prices[i]));
+      const last = Number(prices[prices.length - 1]);
+      if (spark[spark.length - 1] !== last) spark.push(last);
+      spark = spark.slice(-16);
+    }
     return {
       id: raw.id, name: raw.name, ticker: raw.ticker, logo: typeof raw.logo === 'string' && /^https:\/\//.test(raw.logo) ? raw.logo : null,
       creator: raw.creator || null, graduated: !!raw.graduated, created_ts: raw.created_ts ?? null,
@@ -271,7 +280,7 @@ module.exports = function assets(db, rpc, priceNow) {
       volume_micronoid: win.vol.toString(),
       volume_usd: usdOf(win.vol, usd),
       txns: win.txns, buys: win.buys, sells: win.sells,
-      change, stats,
+      change, spark, stats,
       curve: curve && target > 0n ? { progress, raised_micronoid: raised.toString(), target_micronoid: target.toString() } : null,
       venue: pool ? 'pool' : curve ? 'curve' : null,
       _pool: pool, _curve: curve, _last: last,
@@ -382,12 +391,12 @@ module.exports = function assets(db, rpc, priceNow) {
       && inRange(r.sells, ...filters.sells));
     sortRows(rows, sort, dir);
     for (const r of rows) delete r._change;
-    const limit = Math.min(Math.max(paramInt(params, 'limit') || 100, 1), 200);
+    const page = pageSlice(rows, params);
     return {
       demo, live: !!status.available, window, sort, dir, preset: preset || null,
       notice: demo || rows.length ? null : (status.available ? 'No native tokens yet.' : NOTICE),
-      count: rows.length,
-      tokens: rows.slice(0, limit),
+      count: rows.length, page: page.page, page_size: page.page_size, pages: page.pages,
+      tokens: page.slice,
       swap: swapInfo(demo),
     };
   }
@@ -471,11 +480,21 @@ module.exports = function assets(db, rpc, priceNow) {
     rows = rows.filter((r) => inRange(bi(r.volume_micronoid), minV, maxV) && inRange(bi(r.floor_micronoid), minF, maxF)
       && inRange(r.items, minI, maxI) && inRange(r.owners, minO, maxO) && inRange(r.age_s, minA, maxA));
     sortRows(rows, sort, dir);
+    const page = pageSlice(rows, params);
     return {
       demo, live: !!status.available, sort, dir,
       notice: demo || rows.length ? null : (status.available ? 'No collections yet.' : NOTICE),
-      count: rows.length, collections: rows.slice(0, 200),
+      count: rows.length, page: page.page, page_size: page.page_size, pages: page.pages,
+      collections: page.slice,
     };
+  }
+
+  function pageSlice(rows, params) {
+    const pageSize = 25;
+    const page = Math.min(Math.max(paramInt(params, 'page') || 1, 1), 1000);
+    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+    const start = (page - 1) * pageSize;
+    return { page, page_size: pageSize, pages, slice: rows.slice(start, start + pageSize) };
   }
 
   function collectionDetail(id, params) {
