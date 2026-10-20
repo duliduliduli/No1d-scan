@@ -1,2 +1,4 @@
 noid.db*
 node_modules/
+cold/
+backups/

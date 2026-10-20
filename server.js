@@ -5,6 +5,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+const { zstdCompressSync, zstdDecompressSync } = require('node:zlib');
 
 const RPC_URL = process.env.RPC_URL || 'http://127.0.0.1:9601';
 const RPC_TOKEN = process.env.RPC_TOKEN || '';
@@ -19,30 +20,123 @@ db.exec(`
   -- Sorting/grouping big queries (miners or history over 7d+) needs temp space. The service runs with
   -- ProtectSystem=strict, so /tmp is read-only and a temp file fails with "disk I/O error". Keep it in memory.
   pragma temp_store = memory;
-  create table if not exists blocks (height integer primary key, hash text not null, details text not null);
-  create index if not exists blocks_hash on blocks(hash);
   create table if not exists stats (height integer primary key, ts integer, data text not null);
-  -- Every header since genesis (headers are never pruned): powers all-time hashrate, block time and miner stats.
   -- Our own price samples every 3 minutes (CoinPaprika's free history is hourly for 24 h, daily beyond).
   create table if not exists price_ticks (ts integer primary key, usd real not null, volume_24h real, supply integer);
   -- Live State sweeps: holders over time, and the current rich list.
   create table if not exists holders (ts integer primary key, holders integer not null, supply integer not null, top10 integer not null, top100 integer not null, slots integer not null);
   create table if not exists rich_list (rank integer primary key, address text not null, balance integer not null, slots integer not null);
-  create table if not exists headers (height integer primary key, hash text not null, ts integer not null, miner text, work real not null, slots integer);
-  create index if not exists headers_hash on headers(hash);
-  create index if not exists headers_ts on headers(ts);
 `);
 try { db.exec('alter table stats add column hash text'); } catch {} // which block the snapshot was taken at
+
+const info = (database, table) => database.prepare(`select name, type from pragma_table_info('${table}')`).all();
+// Hashes are 32 raw bytes. Block JSON is zstd. Reward, fees, tx count and time are real columns so lists
+// never decompress a body. Orphans are written before a replace or a tip rollback. Gaps are heights whose
+// body the node has already pruned and we never stored.
+function createArchiveTables(database) {
+  database.exec(`
+    create table blocks (
+      height integer primary key, hash blob not null, blob blob, first_seen integer not null,
+      ts integer, reward text, fees text, txs integer, cold text);
+    create index blocks_hash on blocks(hash);
+    create table headers (
+      height integer primary key, hash blob not null, ts integer not null, miner text, work real not null, slots integer,
+      first_seen integer, prev_hash blob, state_root blob, tx_root blob, nonce blob, difficulty_target blob, log_slots integer);
+    create index headers_hash on headers(hash);
+    create index headers_ts on headers(ts);
+  `);
+}
+function ensureAux(database) {
+  database.exec(`
+    create table if not exists orphans (
+      id integer primary key, height integer not null, hash blob not null, kind text not null,
+      blob blob, first_seen integer, replaced_at integer not null, reason text not null, cold text);
+    create index if not exists orphans_height on orphans(height);
+    create index if not exists orphans_hash on orphans(hash);
+    create table if not exists gaps (
+      height integer not null, kind text not null, first_seen integer not null, tries integer not null default 0, last_error text,
+      primary key (height, kind));
+    create table if not exists reorgs (
+      id integer primary key, tip_before integer, tip_after integer, at integer not null, depth integer not null);
+    create table if not exists meta (k text primary key, v text not null);
+    create table if not exists tx_index (
+      txid blob primary key, height integer not null, position integer, fee text, burned text, coinbase integer);
+    create index if not exists tx_index_height on tx_index(height);
+    create table if not exists addr_tx (
+      address text not null, txid blob not null, height integer not null, dir text not null, amount text not null);
+    create index if not exists addr_tx_addr on addr_tx(address, height);
+    create table if not exists miner_payouts (
+      height integer not null, miner text, payout text not null, amount text, primary key (height, payout));
+  `);
+}
+function rebuildBlocks(database) {
+  const rows = database.prepare('select height, hash, details from blocks').all();
+  database.exec(`create table blocks_new (
+    height integer primary key, hash blob not null, blob blob, first_seen integer not null,
+    ts integer, reward text, fees text, txs integer, cold text)`);
+  const ins = database.prepare('insert into blocks_new (height, hash, blob, first_seen, ts, reward, fees, txs, cold) values (?, ?, ?, ?, ?, ?, ?, ?, null)');
+  const now = Date.now();
+  for (const r of rows) {
+    let details = {};
+    try { details = JSON.parse(r.details); } catch {}
+    const txs = Array.isArray(details.retained?.transactions) ? details.retained.transactions.length : (details.retained ? 0 : null);
+    ins.run(r.height, Buffer.from(String(r.hash), 'hex'), zstdCompressSync(Buffer.from(r.details)), now, details.header?.timestamp ?? null,
+      details.retained?.reward_micronoid ?? null, details.retained?.total_fees_micronoid ?? null, txs);
+  }
+  database.exec('drop index if exists blocks_hash; drop table blocks; alter table blocks_new rename to blocks; create index blocks_hash on blocks(hash)');
+}
+function rebuildHeaders(database) {
+  const rows = database.prepare('select height, hash, ts, miner, work, slots from headers').all();
+  database.exec(`create table headers_new (
+    height integer primary key, hash blob not null, ts integer not null, miner text, work real not null, slots integer,
+    first_seen integer, prev_hash blob, state_root blob, tx_root blob, nonce blob, difficulty_target blob, log_slots integer)`);
+  const ins = database.prepare(`insert into headers_new (height, hash, ts, miner, work, slots, first_seen) values (?, ?, ?, ?, ?, ?, ?)`);
+  for (const r of rows) ins.run(r.height, Buffer.from(String(r.hash), 'hex'), r.ts, r.miner, r.work, r.slots, r.ts ? r.ts * 1000 : Date.now());
+  database.exec('drop index if exists headers_hash; drop index if exists headers_ts; drop table headers; alter table headers_new rename to headers; create index headers_hash on headers(hash); create index headers_ts on headers(ts)');
+}
+function migrateDb(database) {
+  const blocks = info(database, 'blocks');
+  const headers = info(database, 'headers');
+  database.exec('begin');
+  try {
+    if (!blocks.length && !headers.length) createArchiveTables(database);
+    else {
+      if (blocks.some((c) => c.name === 'details') || (blocks.find((c) => c.name === 'hash')?.type || '').toUpperCase() === 'TEXT') rebuildBlocks(database);
+      const nowHeaders = info(database, 'headers');
+      if (!nowHeaders.length) database.exec(`create table headers (
+        height integer primary key, hash blob not null, ts integer not null, miner text, work real not null, slots integer,
+        first_seen integer, prev_hash blob, state_root blob, tx_root blob, nonce blob, difficulty_target blob, log_slots integer);
+        create index headers_hash on headers(hash); create index headers_ts on headers(ts)`);
+      else if ((nowHeaders.find((c) => c.name === 'hash')?.type || '').toUpperCase() === 'TEXT') rebuildHeaders(database);
+    }
+    ensureAux(database);
+    database.exec('commit');
+  } catch (e) { database.exec('rollback'); throw e; }
+}
+migrateDb(db);
+
+const hexOf = (v) => (v == null ? null : (typeof v === 'string' ? v.toLowerCase() : Buffer.from(v).toString('hex')));
+const hashBuf = (hex) => Buffer.from(String(hex).toLowerCase(), 'hex');
+const sameHash = (stored, hex) => stored != null && hexOf(stored) === String(hex).toLowerCase();
+const optBytes = (hex) => {
+  if (hex == null || hex === '') return null;
+  const s = String(hex).toLowerCase().replace(/^0x/, '');
+  return /^[0-9a-f]+$/.test(s) && s.length % 2 === 0 ? Buffer.from(s, 'hex') : null;
+};
+const compressJson = (text) => zstdCompressSync(Buffer.from(text));
+const numCol = (v) => (v == null ? null : String(v));
+
 const q = {
-  hashAt: db.prepare('select hash from blocks where height = ?'),
-  byHeight: db.prepare('select details from blocks where height = ?'),
+  hashAt: db.prepare('select hash, blob, cold, first_seen from blocks where height = ?'),
+  byHeight: db.prepare('select hash, blob, cold, first_seen from blocks where height = ?'),
   heightOf: db.prepare('select height from blocks where hash = ?'),
-  upsert: db.prepare('insert or replace into blocks (height, hash, details) values (?, ?, ?)'),
+  upsert: db.prepare('insert or replace into blocks (height, hash, blob, first_seen, ts, reward, fees, txs, cold) values (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   hasStat: db.prepare('select 1 from stats where height = ? and hash is ?'),
   addStat: db.prepare('insert or replace into stats (height, ts, data, hash) values (?, ?, ?, ?)'),
   topBlock: db.prepare('select max(height) h from blocks'),
   charts: db.prepare('select height, ts, data from stats order by height desc limit 500'),
   headerTop: db.prepare('select max(height) h, count(*) n from headers'),
+  headerAt: db.prepare('select height, hash, first_seen, ts, miner from headers where height = ?'),
   // Lowest height missing below the top (0 if genesis is missing), for refilling holes.
   firstGap: db.prepare(`select case when not exists (select 1 from headers where height = 0) then 0
     else (select min(a.height) + 1 from headers a where not exists (select 1 from headers b where b.height = a.height + 1)) end h`),
@@ -58,11 +152,16 @@ const q = {
   lastHolders: db.prepare('select ts, holders, supply, top10, top100, slots from holders order by ts desc limit 1'),
   richList: db.prepare('select rank, address, balance, slots from rich_list order by rank limit ?'),
   richRank: db.prepare('select rank, balance from rich_list where address = ?'),
-  putHeader: db.prepare('insert or replace into headers (height, hash, ts, miner, work, slots) values (?, ?, ?, ?, ?, ?)'),
+  putHeader: db.prepare(`insert or replace into headers
+    (height, hash, ts, miner, work, slots, first_seen, prev_hash, state_root, tx_root, nonce, difficulty_target, log_slots)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   headerByHash: db.prepare('select height from headers where hash = ?'),
   recentWork: db.prepare('select count(*) n, min(ts) t0, max(ts) t1, sum(work) w from (select ts, work from headers order by height desc limit ?)'),
   tipWork: db.prepare('select work from headers order by height desc limit 1'),
   blocksSince: db.prepare('select count(*) n from headers where ts >= ?'),
+  spanSince: db.prepare('select count(*) n, min(ts) t0, max(ts) t1 from headers where ts >= ?'),
+  spanLast: db.prepare('select count(*) n, min(ts) t0, max(ts) t1 from (select ts from headers order by height desc limit ?)'),
+  minHeaderTs: db.prepare('select min(ts) t from headers'),
   // One row per bucket: hashrate = work done / time it took; block time = time / blocks.
   // node:sqlite binds JS numbers as REAL, so the bucket is cast to integer for integer division.
   history: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, count(*) blocks, avg(work) work, max(slots) slots,
@@ -70,9 +169,45 @@ const q = {
       case when count(*) > 1 then (max(ts) - min(ts)) * 1.0 / (count(*) - 1) end block_time
     from headers where ts >= :since group by ts / cast(:b as integer) order by t`),
   minersSince: db.prepare('select miner, count(*) blocks, max(height) last from headers where ts >= ? group by miner order by blocks desc'),
-  bodyStats: db.prepare(`select height, hash, json_extract(details, '$.retained.reward_micronoid') reward, json_extract(details, '$.retained.total_fees_micronoid') fees,
-      json_array_length(details, '$.retained.transactions') txs from blocks where height between ? and ?`),
-  txs24h: db.prepare(`select sum(json_array_length(details, '$.retained.transactions')) n, count(*) blocks from blocks where json_extract(details, '$.header.timestamp') >= ?`),
+  bodyStats: db.prepare(`select height, lower(hex(hash)) hash, reward, fees, txs from blocks where height between ? and ?`),
+  txs24h: db.prepare('select sum(txs) n, count(*) blocks from blocks where ts >= ?'),
+  addOrphan: db.prepare('insert into orphans (height, hash, kind, blob, first_seen, replaced_at, reason, cold) values (?, ?, ?, ?, ?, ?, ?, ?)'),
+  orphansAt: db.prepare('select height, hash, kind, reason, first_seen, replaced_at from orphans where height = ? order by id'),
+  orphanByHash: db.prepare('select id, height, hash, kind, blob, cold, first_seen, replaced_at, reason from orphans where hash = ? order by id desc limit 1'),
+  blocksAbove: db.prepare('select height, hash, blob, cold, first_seen from blocks where height > ?'),
+  headersAbove: db.prepare('select height, hash, first_seen from headers where height > ?'),
+  recentOrphans: db.prepare('select height, hash, kind, reason, first_seen, replaced_at from orphans order by id desc limit ?'),
+  orphanCount: db.prepare('select count(*) n from orphans'),
+  addGap: db.prepare('insert or ignore into gaps (height, kind, first_seen, tries) values (?, ?, ?, 0)'),
+  clearGap: db.prepare('delete from gaps where height = ? and kind = ?'),
+  gapFail: db.prepare('update gaps set tries = tries + 1, last_error = ? where height = ? and kind = ?'),
+  nextGaps: db.prepare('select height, kind, tries from gaps order by tries, height limit ?'),
+  gapCount: db.prepare('select count(*) n from gaps'),
+  gapsAll: db.prepare('select height, kind, first_seen, tries, last_error from gaps order by height limit ?'),
+  gapsKind: db.prepare('select height, kind, first_seen, tries, last_error from gaps where kind = ? order by height limit ?'),
+  addReorg: db.prepare('insert into reorgs (tip_before, tip_after, at, depth) values (?, ?, ?, ?)'),
+  reorgCount: db.prepare('select count(*) n from reorgs'),
+  meta: db.prepare('select v from meta where k = ?'),
+  setMeta: db.prepare('insert or replace into meta (k, v) values (?, ?)'),
+  delTxHeight: db.prepare('delete from tx_index where height = ?'),
+  delAddrHeight: db.prepare('delete from addr_tx where height = ?'),
+  delPayout: db.prepare('delete from miner_payouts where height = ?'),
+  putTx: db.prepare('insert or replace into tx_index (txid, height, position, fee, burned, coinbase) values (?, ?, ?, ?, ?, ?)'),
+  putAddr: db.prepare('insert into addr_tx (address, txid, height, dir, amount) values (?, ?, ?, ?, ?)'),
+  putPayout: db.prepare('insert or replace into miner_payouts (height, miner, payout, amount) values (?, ?, ?, ?)'),
+  addrTotals: db.prepare(`select
+    coalesce(sum(case when dir = 'in' then cast(amount as integer) end), 0) sent,
+    coalesce(sum(case when dir in ('out', 'miner') then cast(amount as integer) end), 0) received,
+    count(*) n from addr_tx where address = ?`),
+  addrHourly: db.prepare(`select (h.ts / 3600) * 3600 t,
+    sum(case when a.dir = 'in' then -cast(a.amount as integer) else cast(a.amount as integer) end) net
+    from addr_tx a join headers h on h.height = a.height where a.address = ? group by t order by t`),
+  addrRecent: db.prepare(`select lower(hex(txid)) txid, height, dir, amount from addr_tx where address = ? order by height desc, rowid desc limit 25`),
+  minedCount: db.prepare('select count(*) n from headers where miner = ?'),
+  payoutsFor: db.prepare('select payout, count(*) blocks, sum(cast(amount as integer)) amount from miner_payouts where miner = ? group by payout order by amount desc'),
+  burnedSum: db.prepare('select sum(cast(burned as integer)) s, count(burned) n from tx_index'),
+  coldCandidates: db.prepare('select height, hash, blob from blocks where blob is not null and height <= ? order by height limit 25'),
+  markCold: db.prepare('update blocks set blob = null, cold = ? where height = ?'),
 };
 
 // The node emits creation_id as a 64-bit integer (~9.2e18). JSON.parse would round it, making different
@@ -125,28 +260,231 @@ async function syncHeaders(tip) {
     const rows = await rpcBatch(heights.map((x) => ['getBlockHeader', [x]]));
     db.exec('begin');
     try {
-      for (const r of rows) if (r?.difficulty_target) q.putHeader.run(r.height, r.hash, r.timestamp, r.miner ?? null, workOf(r.difficulty_target), r.active_slot_count ?? null);
+      for (const r of rows) if (r?.difficulty_target) saveHeader(r);
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
     h += heights.length;
   }
   if (gap != null && q.firstGap.get().h === gap) stuckGap = gap; // the node had nothing for it either: don't re-walk every pass
+  if (stuckGap != null) q.addGap.run(stuckGap, 'header', Date.now());
+  db.exec(`delete from gaps where kind = 'header' and height in (select height from headers)`);
   const after = q.headerTop.get();
   Object.assign(history, { synced_to: after.h ?? -1, tip, missing: after.h == null ? 0 : after.h + 1 - after.n });
 }
 
 // Current network numbers from the header history.
+function blockTime(seconds, blocks) {
+  const since = Math.floor(Date.now() / 1000) - seconds;
+  const wall = q.spanSince.get(since);
+  const r = wall.n > 1 && wall.t1 > wall.t0 ? wall : q.spanLast.get(blocks);
+  return r.n > 1 && r.t1 > r.t0 ? (r.t1 - r.t0) / (r.n - 1) : null;
+}
 function networkStats() {
   const r = q.recentWork.get(120); // ~1 hour at the 30 s target
   const span = r.t1 - r.t0;
   return {
     hashrate: span > 0 ? r.w / span : null, // hashes per second
     avg_block_time: r.n > 1 ? span / (r.n - 1) : null,
+    block_time_10m: blockTime(600, 20), // last 10 minutes, or the last 20 blocks (10 min at the 30 s target)
+    block_time_24h: blockTime(86400, 2880),
     difficulty_work: q.tipWork.get()?.work ?? null, // expected hashes per block
     blocks_24h: q.blocksSince.get(Math.floor(Date.now() / 1000) - 86400).n,
     history,
   };
 }
+
+// V2 issuance from height 210,537, stepping every 1,051,200 blocks, then 1 NOID forever. Before that the node reports the live reward.
+const ISSUANCE_START = 210537;
+const ISSUANCE_INTERVAL = 1_051_200;
+const ALLOCATION_END = 3_223_778;
+const SUBSIDY_NOID = ['16', '11.30', '8', '5.65', '4', '2.83', '2', '1.41', '1'];
+const SUBSIDY_AT = [210537, 1261737, 2312937, 3364137, 4415337, 5466537, 6517737, 7568937, 8620137];
+function issuance(height) {
+  const h = Number(height) || 0;
+  const miner_share = h < ALLOCATION_END ? 0.9 : 1;
+  if (h < ISSUANCE_START) return { tier: null, subsidy_noid: null, blocks_to_next_reward: ISSUANCE_START - h, next_reward_height: ISSUANCE_START, miner_share };
+  const tier = Math.min(Math.floor((h - ISSUANCE_START) / ISSUANCE_INTERVAL), SUBSIDY_NOID.length - 1);
+  const next = tier >= SUBSIDY_NOID.length - 1 ? null : ISSUANCE_START + (tier + 1) * ISSUANCE_INTERVAL;
+  return { tier, subsidy_noid: SUBSIDY_NOID[tier], blocks_to_next_reward: next == null ? null : next - h, next_reward_height: next, miner_share };
+}
+const FEE_RULE = {
+  base_micronoid: 5000, per_input_micronoid: 100, per_output_micronoid: 700, growth_base_micronoid: 2500,
+  pressure: [{ fill: '<50%', multiplier: 1 }, { fill: '50–75%', multiplier: 2 }, { fill: '75–90%', multiplier: 4 }, { fill: '≥90%', multiplier: 8 }],
+  relay: 'Relay floor is max(5000, 90% of the median of the last 50 mempool fees) when the mempool is at least 80% of 1024 txs or 384 MiB. It resets below 50% of both, or when the mempool is empty. The growth component is burned; base, inputs, outputs and tip are claimable by the miner.',
+};
+function feeParts(t) {
+  const inputs = t?.n_inputs ?? t?.inputs?.length;
+  const outputs = t?.n_outputs ?? t?.outputs?.length;
+  if (inputs == null || outputs == null) return null;
+  const base = FEE_RULE.base_micronoid;
+  const inputFee = FEE_RULE.per_input_micronoid * inputs;
+  const outputFee = FEE_RULE.per_output_micronoid * outputs;
+  const known = base + inputFee + outputFee;
+  const fee = Number(t.fee_micronoid);
+  return { base, inputs: inputFee, outputs: outputFee, claimable: known, growth_or_tip: Number.isFinite(fee) ? Math.max(0, fee - known) : null, n_inputs: inputs, n_outputs: outputs };
+}
+
+// A header or body that is about to be overwritten is copied here first, in the same transaction as the write.
+function saveHeader(r) {
+  const prev = q.headerAt.get(r.height);
+  const now = Date.now();
+  if (prev && !sameHash(prev.hash, r.hash)) q.addOrphan.run(prev.height, prev.hash, 'header', null, prev.first_seen, now, 'replace', null);
+  const first = prev && sameHash(prev.hash, r.hash) ? (prev.first_seen ?? now) : now;
+  q.putHeader.run(r.height, hashBuf(r.hash), r.timestamp, r.miner ?? null, workOf(r.difficulty_target), r.active_slot_count ?? null, first,
+    optBytes(r.prev_hash), optBytes(r.state_root), optBytes(r.tx_root || r.transactions_root), optBytes(r.nonce || r.nonce_hex), optBytes(r.difficulty_target), r.log_slots ?? null);
+}
+function indexBody(height, details) {
+  q.delTxHeight.run(height);
+  q.delAddrHeight.run(height);
+  q.delPayout.run(height);
+  const txs = details.retained?.transactions;
+  let coinbaseTo = null;
+  if (Array.isArray(txs)) {
+    txs.forEach((t, i) => {
+      const id = String(t.tx_hash || t.txid || t.hash || '').toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(id)) return;
+      const txid = hashBuf(id);
+      const burned = t.burned_micronoid ?? t.growth_burned_micronoid ?? null;
+      q.putTx.run(txid, height, i, numCol(t.fee_micronoid), numCol(burned), t.coinbase ? 1 : 0);
+      const inputs = t.inputs || [];
+      for (const inp of inputs) {
+        const owner = inp.owner || inp.address || inp.input_owner;
+        if (owner) q.putAddr.run(owner, txid, height, 'in', String(inp.amount_micronoid ?? inp.value ?? inp.amount ?? '0'));
+      }
+      if (t.input_owner && !inputs.length) q.putAddr.run(t.input_owner, txid, height, 'in', String(t.input_sum_micronoid ?? '0'));
+      for (const out of t.outputs || []) {
+        const owner = out.owner || out.address;
+        if (!owner) continue;
+        q.putAddr.run(owner, txid, height, 'out', String(out.amount_micronoid ?? out.value ?? out.amount ?? '0'));
+        if (t.coinbase) coinbaseTo = owner;
+      }
+    });
+  }
+  const miner = details.header?.miner;
+  const reward = details.retained?.reward_micronoid;
+  if (miner && reward != null) {
+    const to = coinbaseTo || miner;
+    q.putPayout.run(height, miner, to, String(reward));
+    // No coinbase output in the body: the header miner is the only payout destination we can record.
+    if (!coinbaseTo && details.header?.hash && /^[0-9a-f]{64}$/i.test(details.header.hash)) q.putAddr.run(miner, hashBuf(details.header.hash), height, 'miner', String(reward));
+  }
+}
+function saveBody(h, hashHex, details) {
+  const prev = q.hashAt.get(h);
+  const now = Date.now();
+  const raw = JSON.stringify(details);
+  const blob = compressJson(raw);
+  const txs = Array.isArray(details.retained?.transactions) ? details.retained.transactions.length : (details.retained ? 0 : null);
+  db.exec('begin');
+  try {
+    if (prev && !sameHash(prev.hash, hashHex)) q.addOrphan.run(prev.height ?? h, prev.hash, 'body', prev.blob, prev.first_seen, now, 'replace', prev.cold);
+    const first = prev && sameHash(prev.hash, hashHex) ? prev.first_seen : now;
+    q.upsert.run(h, hashBuf(hashHex), blob, first, details.header?.timestamp ?? null, numCol(details.retained?.reward_micronoid), numCol(details.retained?.total_fees_micronoid), txs, null);
+    q.clearGap.run(h, 'body');
+    indexBody(h, details);
+    db.exec('commit');
+  } catch (e) { db.exec('rollback'); throw e; }
+  packStats.raw = raw.length;
+  packStats.zstd = blob.length;
+}
+function orphanAbove(tip) {
+  const now = Date.now();
+  for (const row of q.blocksAbove.all(tip)) q.addOrphan.run(row.height, row.hash, 'body', row.blob, row.first_seen, now, 'reorg', row.cold);
+  for (const row of q.headersAbove.all(tip)) q.addOrphan.run(row.height, row.hash, 'header', null, row.first_seen, now, 'reorg', null);
+}
+function noteBodyGaps(tip) {
+  const end = tip - RETAINED;
+  let from = Number(q.meta.get('gap_from')?.v ?? 0);
+  if (end < from) return;
+  const now = Date.now();
+  const stop = Math.min(end, from + 4999);
+  db.exec('begin');
+  try {
+    for (let h = from; h <= stop; h++) if (!q.hashAt.get(h)) q.addGap.run(h, 'body', now);
+    q.setMeta.run('gap_from', String(stop + 1));
+    db.exec('commit');
+  } catch (e) { db.exec('rollback'); throw e; }
+}
+const peers = () => (process.env.ARCHIVE_PEERS || '').split(',').map((s) => s.trim()).filter(Boolean);
+async function fetchPeerBody(peer, height) {
+  const base = peer.replace(/\/$/, '');
+  try {
+    const res = await fetch(base, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'paranoid_getBlockDetails', params: [height] }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const body = parseRpc(await res.text());
+    if (body.result?.header && body.result.retained) return body.result;
+  } catch {}
+  try {
+    const res = await fetch(`${base}/api/block/${height}`, { signal: AbortSignal.timeout(8_000) });
+    if (!res.ok) return null;
+    const body = await res.json();
+    if (body?.retained && body?.header?.hash) return { header: body.header, retained: body.retained };
+  } catch {}
+  return null;
+}
+async function recoverGaps() {
+  for (const g of q.nextGaps.all(20)) {
+    if (g.kind !== 'body') { q.gapFail.run('header not served', g.height, g.kind); continue; }
+    let saved = false;
+    try {
+      const details = await rpc('getBlockDetails', [g.height]);
+      const hdr = q.headerAt.get(g.height);
+      if (details?.retained && details.header?.hash && (!hdr || sameHash(hdr.hash, details.header.hash))) {
+        saveBody(g.height, details.header.hash, details);
+        saved = true;
+      }
+    } catch (e) { q.gapFail.run(String(e.message || 'node').slice(0, 180), g.height, g.kind); continue; }
+    if (saved) continue;
+    for (const peer of peers()) {
+      try {
+        const details = await fetchPeerBody(peer, g.height);
+        if (!details?.header?.hash) continue;
+        const hdr = q.headerAt.get(g.height);
+        if (hdr && !sameHash(hdr.hash, details.header.hash)) continue;
+        saveBody(g.height, details.header.hash, details);
+        saved = true;
+        break;
+      } catch {}
+    }
+    if (!saved) q.gapFail.run('still pruned', g.height, g.kind);
+  }
+}
+function coldDir() {
+  if (process.env.COLD_DIR === 'off' || process.env.COLD_DIR === '') return null;
+  if ((process.env.DB_PATH || '').endsWith(':memory:') && !process.env.COLD_DIR) return null;
+  const dir = process.env.COLD_DIR || path.join(path.dirname(process.env.DB_PATH || path.join(__dirname, 'noid.db')), 'cold');
+  return dir;
+}
+function maybeCold(tip) {
+  const dir = coldDir();
+  if (!dir) return;
+  const after = Number(process.env.COLD_AFTER ?? 20000);
+  const limit = tip - Math.max(Number.isFinite(after) ? after : 20000, MAX_REORG);
+  if (!(limit >= 0)) return;
+  fs.mkdirSync(dir, { recursive: true });
+  for (const row of q.coldCandidates.all(limit)) {
+    const name = `${row.height}-${hexOf(row.hash)}.zst`;
+    if (!/^\d+-[0-9a-f]{64}\.zst$/.test(name)) continue;
+    fs.writeFileSync(path.join(dir, name), row.blob);
+    q.markCold.run(name, row.height);
+  }
+}
+function readCold(name) {
+  if (!/^\d+-[0-9a-f]{64}\.zst$/.test(name || '')) return null;
+  const dir = coldDir();
+  if (!dir) return null;
+  return fs.readFileSync(path.join(dir, name));
+}
+function unpackRow(row) {
+  if (!row) return null;
+  const buf = row.blob ?? (row.cold ? readCold(row.cold) : null);
+  if (!buf) return null;
+  return JSON.parse(zstdDecompressSync(buf).toString());
+}
+const packStats = { raw: null, zstd: null };
 
 // One indexer pass. Re-checking the whole retained window by hash also handles reorgs:
 // a replaced block has a new hash at the same height and gets overwritten.
@@ -163,16 +501,24 @@ async function tick() {
       throw new Error(indexer.error);
     }
     db.exec('begin');
-    try { for (const t of ['blocks', 'stats', 'headers', 'token_trades']) db.prepare(`delete from ${t} where height > ?`).run(tip); db.exec('commit'); } catch (e) { db.exec('rollback'); throw e; }
+    try {
+      orphanAbove(tip); // before the delete: these rows are the only copy once the node has moved on
+      for (const t of ['blocks', 'stats', 'headers', 'token_trades', 'tx_index', 'addr_tx', 'miner_payouts']) db.prepare(`delete from ${t} where height > ?`).run(tip);
+      q.addReorg.run(top, tip, Date.now(), top - tip);
+      db.exec('commit');
+    } catch (e) { db.exec('rollback'); throw e; }
     cache.clear();
   }
+  let replaced = 0;
   for (let h = Math.max(0, tip - RETAINED + 1); h <= tip; h++) {
     const hash = await rpc('getBlockHash', [h]);
-    if (!hash || q.hashAt.get(h)?.hash === hash) continue;
+    const row = q.hashAt.get(h);
+    if (!hash || sameHash(row?.hash, hash)) continue;
     const details = await rpc('getBlockDetails', [h]);
-    if (details) { q.upsert.run(h, hash, JSON.stringify(details)); cache.clear(); }
+    if (details) { if (row) replaced++; saveBody(h, hash, details); cache.clear(); }
   }
-  const tipHash = q.hashAt.get(tip)?.hash ?? null;
+  if (replaced && !(top != null && tip < top)) q.addReorg.run(top ?? tip, tip, Date.now(), replaced);
+  const tipHash = hexOf(q.hashAt.get(tip)?.hash);
   if (!q.hasStat.get(tip, tipHash)) {
     const [chain, peers, mining, header] = await Promise.all([
       rpc('getChainInfo'), rpc('getPeerCount'), rpc('getMiningInfo'), rpc('getBlockHeader', [tip]),
@@ -187,6 +533,9 @@ async function tick() {
     indexer.supply = chain.circulating_supply_micronoid;
   }
   await syncHeaders(tip);
+  noteBodyGaps(tip);
+  await recoverGaps().catch((e) => console.error('gaps:', e.message));
+  try { maybeCold(tip); } catch (e) { console.error('cold:', e.message); }
   await bill.settleNoid(tip);
   // Token indexing must not pause block indexing: a missing v2.1 method is normal until the node ships it.
   if (await assets.sync()) cache.clear();
@@ -212,13 +561,27 @@ function findTx(retained, txid) {
   return null;
 }
 
+function othersAt(h) {
+  return q.orphansAt.all(h).map((o) => ({ hash: hexOf(o.hash), kind: o.kind, reason: o.reason, first_seen: o.first_seen, replaced_at: o.replaced_at }));
+}
+function presentOrphan(row) {
+  const details = unpackRow(row);
+  const header = details?.header ?? { height: row.height, hash: hexOf(row.hash) };
+  return { header, retained: details?.retained ?? null, archived: !!details?.retained, first_seen: row.first_seen, canonical: false, orphan: { reason: row.reason, replaced_at: row.replaced_at }, others: othersAt(row.height) };
+}
 async function blockByHeight(h) {
   const live = await rpc('getBlockDetails', [h]);
   if (!live) return null;
-  const stored = q.byHeight.get(h);
-  const archived = stored && JSON.parse(stored.details);
-  const retained = live.retained ?? (archived?.header?.hash === live.header.hash ? archived.retained : null);
-  return { header: live.header, retained, archived: !live.retained && !!retained };
+  const row = q.byHeight.get(h);
+  const archivedBody = unpackRow(row);
+  const match = !!(archivedBody && archivedBody.header?.hash === live.header.hash);
+  const retained = live.retained ?? (match ? archivedBody.retained : null);
+  const headerRow = q.headerAt.get(h);
+  return {
+    header: live.header, retained, archived: !live.retained && !!retained,
+    first_seen: (match ? row.first_seen : null) ?? headerRow?.first_seen ?? null,
+    canonical: true, stored_canonical: !row || match, others: othersAt(h),
+  };
 }
 
 // NOID/USD from CoinPaprika (free, no key; NOID trades on SafeTrade). Ticker every 3 min plus
@@ -346,6 +709,19 @@ async function sweepHolders() {
   } catch (e) { sweep.error = e.message; throw e; } finally { sweep.running = false; }
 }
 
+let labels = { at: 0, map: {} };
+function labelFor(address) {
+  if (!labels.at || Date.now() - labels.at >= Number(process.env.LABELS_REFRESH_MS || 1_800_000)) {
+    labels.at = Date.now();
+    labels.map = {};
+    try {
+      const raw = JSON.parse(fs.readFileSync(process.env.LABELS_FILE || path.join(__dirname, 'labels.json'), 'utf8'));
+      for (const [k, v] of Object.entries(raw)) if (RE.address.test(k) && v && typeof v === 'object') labels.map[k] = v;
+    } catch {}
+  }
+  return address ? labels.map[address] || null : null;
+}
+
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip);
 const assets = require('./assets.js')(db, rpc, () => price.now);
 
@@ -359,7 +735,53 @@ const routes = {
       rpc('getChainInfo'), rpc('getStateInfo'), rpc('getNodeStatus'), rpc('getPeerCount'), rpc('getMiningInfo'),
     ]);
     const bodies = db.prepare('select min(height) lo, max(height) hi from blocks').get();
-    return { chain, state, node, peers, mining, indexer, coverage: { bodies_from: bodies.lo, bodies_to: bodies.hi, headers_to: history.synced_to }, network: networkStats(), txs_24h: q.txs24h.get(Math.floor(Date.now() / 1000) - 86400), price: price.now, donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled };
+    let feeFloor = null;
+    try { feeFloor = (await rpc('getMempoolInfo'))?.fee_floor ?? null; } catch {}
+    const burned = q.burnedSum.get();
+    const econ = issuance(chain.height);
+    return {
+      chain, state, node, peers, mining, indexer,
+      coverage: { bodies_from: bodies.lo, bodies_to: bodies.hi, headers_to: history.synced_to, gaps: q.gapCount.get().n, reorgs: q.reorgCount.get().n, orphans: q.orphanCount.get().n, since: q.minHeaderTs.get().t },
+      network: networkStats(), txs_24h: q.txs24h.get(Math.floor(Date.now() / 1000) - 86400), price: price.now,
+      economics: { ...econ, fee_floor: feeFloor, burned_micronoid: burned.n ? String(burned.s) : null, allocation_until: ALLOCATION_END },
+      donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled,
+    };
+  },
+
+  async gaps(_, params) {
+    const limit = Math.min(Math.max(Number(params.get('limit')) || 50, 1), 200);
+    const kind = params.get('kind');
+    const rows = kind === 'body' || kind === 'header' ? q.gapsKind.all(kind, limit) : q.gapsAll.all(limit);
+    return { count: q.gapCount.get().n, gaps: rows };
+  },
+
+  async orphans(_, params) {
+    const limit = Math.min(Math.max(Number(params.get('limit')) || 50, 1), 200);
+    return { count: q.orphanCount.get().n, orphans: q.recentOrphans.all(limit).map((r) => ({ height: r.height, hash: hexOf(r.hash), kind: r.kind, reason: r.reason, first_seen: r.first_seen, replaced_at: r.replaced_at })) };
+  },
+
+  async economics() {
+    let height = indexer.tip;
+    try { height = (await rpc('getChainInfo')).height; } catch {}
+    const burned = q.burnedSum.get();
+    return {
+      height, ...issuance(height), allocation_until: ALLOCATION_END, schedule: SUBSIDY_AT.map((at, i) => ({ height: at, noid: SUBSIDY_NOID[i] })),
+      fees: FEE_RULE, burned_micronoid: burned.n ? String(burned.s) : null,
+      note: 'Before height 210537 the live block reward is whatever the node reports. There is no max supply: the tail is 1 NOID per block.',
+    };
+  },
+
+  async receipts() {
+    return { available: false, how: 'parano1d-cli receipt TXID', verify: 'parano1d-cli verify', note: 'This explorer has no receipt RPC. Contract receipts stay verifiable with the CLI after the node prunes the block body.' };
+  },
+
+  async contracts() {
+    return {
+      available: false,
+      abi: '16-instruction integer ABI',
+      templates: ['refundable payments', 'timelocked vaults', 'delegated allowance', 'budgets', 'recurring', 'gradual release'],
+      note: 'No contract RPC is published for this explorer. Templates are executed and verified on the node; this page does not simulate them.',
+    };
   },
 
   async blocks(_, params) {
@@ -380,8 +802,11 @@ const routes = {
   async block(id) {
     if (RE.height.test(id)) return blockByHeight(Number(id));
     if (RE.hash.test(id)) {
-      const row = q.heightOf.get(id) ?? q.headerByHash.get(id);
-      return row ? blockByHeight(row.height) : null;
+      const buf = hashBuf(id);
+      const row = q.heightOf.get(buf) ?? q.headerByHash.get(buf);
+      if (row) return blockByHeight(row.height);
+      const orph = q.orphanByHash.get(buf);
+      return orph ? presentOrphan(orph) : null;
     }
     throw Object.assign(new Error('expected a height or 64-char hex hash'), { status: 400 });
   },
@@ -401,7 +826,21 @@ const routes = {
       rpc('getSlotsByOwner', [addr]), rpc('getRecentTransactions', [page, 32, addr]),
     ]);
     const balance = slots.reduce((sum, s) => sum + BigInt(s.value ?? 0), 0n);
-    return { address: addr, balance_micronoid: balance.toString(), rank: q.richRank.get(addr)?.rank ?? null, slots, activity };
+    const totals = q.addrTotals.get(addr);
+    const label = labelFor(addr);
+    return {
+      address: addr, balance_micronoid: balance.toString(), rank: q.richRank.get(addr)?.rank ?? null, slots, activity,
+      label: label ? { entity: label.entity || null, note: label.note || null } : null,
+      blocks_mined: q.minedCount.get(addr).n,
+      archive: {
+        partial: true,
+        note: 'Totals, the hourly net and payout destinations come only from block bodies this explorer stored. They are not a full wallet balance.',
+        sent_micronoid: String(totals.sent), received_micronoid: String(totals.received), tx_count: totals.n,
+        hourly: q.addrHourly.all(addr).map((r) => ({ t: r.t, net_micronoid: String(r.net) })),
+        recent: q.addrRecent.all(addr),
+        payouts: q.payoutsFor.all(addr).map((r) => ({ payout: r.payout, blocks: r.blocks, amount_micronoid: String(r.amount) })),
+      },
+    };
   },
 
   async txs(_, params) {
@@ -417,7 +856,9 @@ const routes = {
     const since = Math.floor(Date.now() / 1000) - (WINDOWS[params.get('window')] ?? WINDOWS['24h']);
     const rows = q.minersSince.all(since);
     const total = rows.reduce((s, r) => s + r.blocks, 0);
-    return { window: params.get('window') || '24h', blocks: total, miner_count: rows.length, miners: rows.slice(0, 15).map((r) => ({ ...r, share: r.blocks / total })) };
+    const miners = rows.slice(0, 15).map((r) => ({ ...r, share: total ? r.blocks / total : 0, entity: labelFor(r.miner)?.entity || null }));
+    const hot = miners.find((r) => r.share > 0.5);
+    return { window: params.get('window') || '24h', blocks: total, miner_count: rows.length, miners, warning: hot ? `${hot.entity || hot.miner || 'One miner'} mined more than half the blocks in this window.` : null };
   },
 
   // Time series for charts: hashrate, block time, difficulty, active slots per bucket.
@@ -436,9 +877,10 @@ const routes = {
     return {
       size: info?.size ?? txs.length, fee_floor: info?.fee_floor ?? null,
       total_fees_micronoid: txs.reduce((s, t) => s + Number(t.fee_micronoid || 0), 0),
-      txs: txs.slice(0, 100),
+      relay: FEE_RULE.relay, fees_rule: FEE_RULE,
+      txs: txs.slice(0, 100).map((t) => ({ ...t, fee_parts: feeParts(t) })),
       // Minimum accepted fee for common shapes (inputs -> outputs); NOID fees are rule-based, not an auction.
-      fees: [{ shape: '1 → 1', ...f11 }, { shape: '1 → 2 (typical payment)', ...f12 }, { shape: '2 → 2', ...f22 }].map((f) => ({ shape: f.shape, fee_micronoid: f.fee_micronoid, burn_slots: f.net_new_slots })),
+      fees: [{ shape: '1 → 1', ...f11 }, { shape: '1 → 2 (typical payment)', ...f12 }, { shape: '2 → 2', ...f22 }].map((f) => ({ shape: f.shape, fee_micronoid: f.fee_micronoid, burn_slots: f.net_new_slots, fee_parts: feeParts({ n_inputs: f.n_inputs, n_outputs: f.n_outputs, fee_micronoid: f.fee_micronoid }) })),
     };
   },
 
@@ -502,7 +944,9 @@ const routes = {
   async richlist(_, params) {
     const n = Math.min(Math.max(Number(params.get('limit')) || 50, 1), 500);
     const latest = q.lastHolders.get();
-    return { updated: latest?.ts ?? null, approximate: true, supply: latest?.supply ?? null, holders: latest?.holders ?? null, rows: q.richList.all(n).map((r) => ({ ...r, share: latest?.supply ? r.balance / latest.supply : null })) };
+    const rows = q.richList.all(n).map((r) => ({ ...r, share: latest?.supply ? r.balance / latest.supply : null, entity: labelFor(r.address)?.entity || null }));
+    const hot = rows.find((r) => r.share > 0.5);
+    return { updated: latest?.ts ?? null, approximate: true, supply: latest?.supply ?? null, holders: latest?.holders ?? null, warning: hot ? `${hot.entity || hot.address} holds more than half of the swept supply.` : null, rows };
   },
 
   async supply(_, params) {
@@ -529,7 +973,8 @@ const routes = {
     if (RE.address.test(s)) return { type: 'address', id: s };
     if (RE.hash.test(s)) {
       if (await rpc('getTx', [s])) return { type: 'tx', id: s };
-      if (q.heightOf.get(s) || q.headerByHash.get(s)) return { type: 'block', id: s };
+      const buf = hashBuf(s);
+      if (q.heightOf.get(buf) || q.headerByHash.get(buf) || q.orphanByHash.get(buf)) return { type: 'block', id: s };
     }
     return null;
   },
@@ -545,7 +990,7 @@ setInterval(() => hits.clear(), 60_000).unref();
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
 const inflight = new Map();
-const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender',
+const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
   'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
@@ -624,8 +1069,15 @@ async function handle(req, res) {
 
     // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
-    if (!acct && !ownPage && name !== 'stats') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
+    if (!acct && !ownPage && name !== 'stats' && name !== 'health') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
     if (url.pathname === '/api/live') return live(req, res, ip);
+    if (name === 'health') {
+      const stallMs = Number(process.env.STALL_MS || 120_000);
+      const age = indexer.at == null ? null : Date.now() - indexer.at;
+      const stalled = indexer.at == null || age > stallMs || !!indexer.error;
+      const body = { ok: !stalled, stalled, age_ms: age, stall_ms: stallMs, indexer, gaps: q.gapCount.get().n, reorgs: q.reorgCount.get().n };
+      return send(body.ok ? 200 : 503, body, { 'cache-control': 'no-store' });
+    }
     // Billing: a keyed request counts only when it returns data (200, cached or not); errors, 404s and the live feed are free.
     const ok = (body, xcache) => { if (acct) bill.countRequest(acct); send(200, body, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': xcache }); };
     const key = cacheKey(url);
@@ -714,4 +1166,4 @@ if (require.main === module) {
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice() };
+module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), migrateDb, compressJson, packStats, issuance };

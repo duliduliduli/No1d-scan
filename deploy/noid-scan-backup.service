@@ -1,0 +1,11 @@
+[Unit]
+Description=Snapshot the NOID Scan archive
+After=noid-scan.service
+
+[Service]
+Type=oneshot
+User=noidscan
+Environment=DB_PATH=/var/lib/noid-scan/noid.db
+Environment=BACKUP_DIR=/var/lib/noid-scan/backups
+# Environment=BACKUP_DEST=user@backup:/var/backups/noid-scan/
+ExecStart=/usr/bin/node /opt/noid-scan/scripts/backup.js

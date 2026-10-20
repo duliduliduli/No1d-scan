@@ -2,6 +2,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { zstdDecompressSync } = require('node:zlib');
 
 const H = (n, salt = '') => require('node:crypto').createHash('sha256').update(`${n}${salt}`).digest('hex');
 const ADDR = 'o1qqqqqqqqqqqq';
@@ -27,7 +31,7 @@ const holes = new Set(); // heights the fake node has no header for // `fork` ch
 const hash = (h) => H(h, h >= 98 ? fork : '');
 // Target 2^240 little-endian -> 2^16 expected hashes per block; blocks 60 s apart; two alternating miners.
 const TARGET = '00'.repeat(30) + '0100';
-const header = (h) => (h <= tip ? { height: h, hash: hash(h), prev_hash: hash(h - 1), timestamp: 1700000000 + h * 60, miner: h % 2 ? 'o1minerodd' : 'o1minereven', difficulty_target: TARGET, active_slot_count: 1000 + h } : null);
+const header = (h) => (h <= tip ? { height: h, hash: hash(h), prev_hash: hash(h - 1), timestamp: 1700000000 + h * 60, miner: h % 2 ? 'o1minerodd' : 'o1minereven', difficulty_target: TARGET, active_slot_count: 1000 + h, state_root: H('state' + h), tx_root: H('txroot' + h), nonce: '00000000000000ab', log_slots: 24 } : null);
 const tx = (h) => ({ tx_hash: H(`tx${h}`), fee_micronoid: 10 });
 
 const node = {
@@ -74,7 +78,10 @@ test('indexer + api', async (t) => {
   await new Promise((r) => aiServer.listen(0, r));
   process.env.OPENROUTER_API_KEY = 'or-test';
   process.env.OPENROUTER_URL = `http://127.0.0.1:${aiServer.address().port}`;
-  const { server, tick, db } = require('./server.js');
+  const labelFile = path.join(os.tmpdir(), `noid-labels-${process.pid}.json`);
+  fs.writeFileSync(labelFile, JSON.stringify({ o1whalewhale: { entity: 'Test Whale', note: 'fixture' } }));
+  process.env.LABELS_FILE = labelFile;
+  const { server, tick, db, compressJson, packStats, issuance } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
   const get = async (p, opt = {}) => {
     const headers = opt.bare ? opt.headers : { 'sec-fetch-site': 'same-origin', ...opt.headers };
@@ -87,6 +94,15 @@ test('indexer + api', async (t) => {
   await tick();
   const count = () => db.prepare('select count(*) n, min(height) lo from blocks').get();
   assert.deepStrictEqual({ ...count() }, { n: 42, lo: 58 }, 'stores exactly the retained window');
+  const raw99 = JSON.stringify(node.getBlockDetails([99]));
+  const z99 = db.prepare('select blob from blocks where height = 99').get();
+  assert.strictEqual(zstdDecompressSync(z99.blob).toString(), raw99, 'stored body is zstd of the node JSON');
+  assert.strictEqual(packStats.raw, raw99.length);
+  const fat = JSON.stringify({ header: header(1), retained: { transactions: Array.from({ length: 80 }, (_, i) => ({ tx_hash: H('fat' + i), fee_micronoid: 9000, n_inputs: 2, n_outputs: 2, outputs: [{ owner: 'o1minerodd', amount_micronoid: '1000000' }, { owner: 'o1minereven', amount_micronoid: '2000000' }] })) } });
+  const fatZ = compressJson(fat);
+  assert.ok(fatZ.length < Buffer.byteLength(fat));
+  console.log(`COMPRESSION live ${raw99.length} -> ${z99.blob.length} bytes; padded ${Buffer.byteLength(fat)} -> ${fatZ.length} bytes`);
+  assert.strictEqual(db.prepare(`select count(*) n from gaps where kind = 'body'`).get().n, 58, 'pruned heights with no body are gaps');
 
   // Body survives node pruning via our archive.
   tip = 120;
@@ -104,13 +120,21 @@ test('indexer + api', async (t) => {
   // Reorg: same heights, new hashes -> rows replaced.
   fork = 'b';
   await tick();
-  assert.strictEqual(db.prepare('select hash from blocks where height = 100').get().hash, hash(100));
+  assert.strictEqual(Buffer.from(db.prepare('select hash from blocks where height = 100').get().hash).toString('hex'), hash(100));
+  assert.strictEqual(db.prepare(`select count(*) n from orphans where height = 100 and kind = 'body' and reason = 'replace'`).get().n, 1, 'old body copied before replace');
+  assert.ok(zstdDecompressSync(db.prepare(`select blob from orphans where height = 100 and kind = 'body'`).get().blob).toString().includes(H(100, '')));
+  const [, old100] = await get(`block/${H(100, '')}`);
+  assert.strictEqual(old100.canonical, false);
+  assert.strictEqual(old100.header.hash, H(100, ''));
 
   // Archived body is not served under a header it does not belong to.
   tip = 150;
   await tick();
   const [, b100] = await get('block/100');
   assert.strictEqual(b100.archived, true);
+  assert.strictEqual(b100.canonical, true);
+  assert.ok(b100.first_seen > 0);
+  assert.ok(b100.others.some((o) => o.reason === 'replace' && o.hash === H(100, '')));
 
   const [, addr] = await get(`address/${ADDR}`);
   assert.strictEqual(addr.balance_micronoid, '9007199254741000', 'BigInt sum, no float loss');
@@ -281,10 +305,14 @@ test('indexer + api', async (t) => {
   tip -= 3; await tick();
   assert.strictEqual(db.prepare('select max(height) h from blocks').get().h, tip);
   assert.strictEqual(db.prepare('select max(height) h from headers').get().h, tip);
+  assert.ok(db.prepare(`select count(*) n from orphans where reason = 'reorg' and height > ?`).get(tip).n >= 3, 'rows copied before the rollback delete');
   const kept = db.prepare('select count(*) n from blocks').get().n;
+  const orphansKept = db.prepare('select count(*) n from orphans').get().n;
   tip -= 19;
   await assert.rejects(tick(), /indexing paused, nothing deleted/);
   assert.strictEqual(db.prepare('select count(*) n from blocks').get().n, kept);
+  assert.strictEqual(db.prepare('select count(*) n from orphans').get().n, orphansKept, 'a deep tip drop deletes nothing');
+  assert.strictEqual((await get('health'))[0], 503);
   tip = top; await tick();
   const { indexer: ix } = require('./server.js');
   assert.strictEqual(ix.error, null, 'recovers once the node is back');
@@ -310,10 +338,26 @@ test('indexer + api', async (t) => {
 
   // Header history: every height from genesis, overwritten on reorg; hashrate = work / time.
   assert.strictEqual(db.prepare('select count(*) n from headers').get().n, tip + 1, 'all headers since genesis');
-  assert.strictEqual(db.prepare('select hash from headers where height = 100').get().hash, hash(100), 'reorged header replaced');
+  assert.strictEqual(Buffer.from(db.prepare('select hash from headers where height = 100').get().hash).toString('hex'), hash(100), 'reorged header replaced');
+  assert.strictEqual(Buffer.from(db.prepare('select state_root from headers where height = 100').get().state_root).toString('hex'), H('state100'));
+  assert.strictEqual(Buffer.from(db.prepare('select nonce from headers where height = 100').get().nonce).toString('hex'), '00000000000000ab');
+  assert.strictEqual(db.prepare('select log_slots s from headers where height = 100').get().s, 24);
+  const seen = db.prepare('select first_seen from headers where height = 100').get().first_seen;
+  await tick();
+  assert.strictEqual(db.prepare('select first_seen from headers where height = 100').get().first_seen, seen, 're-reading the same header keeps first_seen');
   const [, st] = await get('stats');
   assert.ok(Math.abs(st.network.hashrate - 65536 / 60) < 15, `hashrate ${st.network.hashrate}`);
   assert.strictEqual(st.network.avg_block_time, 60);
+  assert.strictEqual(st.network.block_time_10m, 60);
+  assert.strictEqual(st.network.block_time_24h, 60);
+  assert.strictEqual(st.coverage.since, 1700000000);
+  assert.ok(st.coverage.gaps >= 58);
+  assert.ok(st.coverage.reorgs >= 1);
+  assert.strictEqual(st.economics.fee_floor, 5000);
+  assert.strictEqual(st.economics.burned_micronoid, null);
+  assert.strictEqual(st.economics.blocks_to_next_reward, 210537 - st.chain.height);
+  assert.strictEqual(st.economics.subsidy_noid, null);
+  assert.strictEqual((await get('health', { bare: true }))[0], 200);
   const [, allMiners] = await get('miners?window=all');
   assert.deepStrictEqual(allMiners.miners.map((m) => m.miner).sort(), ['o1minereven', 'o1minerodd']);
   assert.strictEqual(allMiners.blocks, tip + 1);
@@ -323,6 +367,10 @@ test('indexer + api', async (t) => {
   assert.strictEqual(mp.size, 2);
   assert.strictEqual(mp.total_fees_micronoid, 15000);
   assert.strictEqual(mp.fees[1].fee_micronoid, 7000);
+  assert.strictEqual(mp.txs[0].fee_parts.base, 5000);
+  assert.strictEqual(mp.txs[0].fee_parts.inputs, 100);
+  assert.strictEqual(mp.txs[0].fee_parts.outputs, 1400);
+  assert.strictEqual(mp.txs[0].fee_parts.growth_or_tip, 2500);
   assert.deepStrictEqual((await get(`search?q=${hash(5)}`))[1], { type: 'block', id: hash(5) }, 'any block hash is searchable');
   const [, bl] = await get('blocks?limit=3');
   assert.strictEqual(bl.blocks[0].txs, 1, 'tx count from captured body');
@@ -336,6 +384,7 @@ test('indexer + api', async (t) => {
   await tick(); const first = calls; calls = 0; await tick();
   assert.ok(first > tip - 10 && calls < 50, `walked from the hole once (${first} reads), then back to the top only (${calls})`);
   assert.strictEqual(db.prepare('select count(*) n from headers').get().n, tip, 'the one unservable height stays missing');
+  assert.strictEqual(db.prepare(`select count(*) n from gaps where kind = 'header' and height = 5`).get().n, 1);
   node.getBlockHeader = realHeader; holes.clear();
   // Big grouped queries keep temp data in memory (the service's /tmp is read-only).
   assert.strictEqual(db.prepare('pragma temp_store').get().temp_store, 2);
@@ -355,6 +404,9 @@ test('indexer + api', async (t) => {
   assert.strictEqual(hol.latest.holders, 3); assert.strictEqual(hol.latest.supply, 6200); assert.strictEqual(hol.latest.slots, 4);
   const [, rich] = await get('richlist?limit=2');
   assert.deepStrictEqual(rich.rows.map((r) => [r.address, r.balance, r.slots]), [['o1whalewhale', 5000, 1], ['o1minerodd', 1000, 2]]);
+  assert.strictEqual(rich.rows[0].entity, 'Test Whale');
+  assert.strictEqual(rich.rows[1].entity, null);
+  assert.match(rich.warning, /Test Whale/);
   assert.ok(Math.abs(rich.rows[0].share - 5000 / 6200) < 1e-9);
   assert.strictEqual((await get('address/o1whalewhale'))[1].rank, 1);
 
@@ -494,4 +546,93 @@ test('indexer + api', async (t) => {
   tip = tipBefore;
   await tick();
   delete process.env.ASSET_PROBE_MS;
+
+  const [, whale] = await get('address/o1whalewhale');
+  assert.strictEqual(whale.label.entity, 'Test Whale');
+  assert.strictEqual(whale.archive.partial, true);
+  assert.ok(db.prepare(`select count(*) n from headers where miner = 'o1minerodd'`).get().n > 0);
+  assert.ok(BigInt(db.prepare(`select coalesce(sum(cast(amount as integer)), 0) s from addr_tx where address = 'o1minerodd' and dir = 'miner'`).get().s) > 0n);
+  assert.ok(db.prepare(`select count(*) n from miner_payouts where miner = 'o1minerodd' and payout = 'o1minerodd'`).get().n > 0);
+  assert.deepStrictEqual(issuance(210537), { tier: 0, subsidy_noid: '16', blocks_to_next_reward: 1051200, next_reward_height: 1261737, miner_share: 0.9 });
+  assert.strictEqual(issuance(1261737).subsidy_noid, '11.30');
+  assert.strictEqual(issuance(8620137).subsidy_noid, '1');
+  assert.strictEqual(issuance(8620137).blocks_to_next_reward, null);
+  assert.strictEqual(issuance(3223778).miner_share, 1);
+  const [, eco] = await get('economics');
+  assert.strictEqual(eco.schedule[1].noid, '11.30');
+  assert.strictEqual(eco.schedule.at(-1).height, 8620137);
+  assert.strictEqual((await get('receipts'))[1].available, false);
+  assert.ok((await get('contracts'))[1].templates.includes('timelocked vaults'));
+  assert.ok((await get('orphans?limit=2'))[1].orphans.length >= 1);
+  assert.strictEqual((await get('gaps?limit=1'))[1].gaps.length, 1);
+
+  const peer = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c)).on('end', () => {
+      const call = JSON.parse(body || '{}');
+      const h = call.params?.[0];
+      const hdr = header(h);
+      const result = hdr && { header: hdr, retained: { reward_micronoid: 5e6, transactions: [{ tx_hash: H('cb' + h), coinbase: true, fee_micronoid: 0, outputs: [{ owner: PAY_ADDR, amount_micronoid: '5000000' }] }] } };
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
+    });
+  });
+  await new Promise((r) => peer.listen(0, '127.0.0.1', r));
+  db.prepare(`delete from gaps where not (height = 3 and kind = 'body')`).run();
+  process.env.ARCHIVE_PEERS = `http://127.0.0.1:${peer.address().port}`;
+  await tick();
+  peer.close();
+  assert.ok(db.prepare('select 1 from blocks where height = 3').get(), 'gap filled from an archive peer');
+  assert.strictEqual(db.prepare(`select count(*) n from gaps where height = 3`).get().n, 0);
+  assert.strictEqual(db.prepare('select payout from miner_payouts where height = 3').get().payout, PAY_ADDR);
+  const [, paid] = await get(`address/${PAY_ADDR}`);
+  assert.strictEqual(paid.archive.partial, true);
+  assert.ok(BigInt(paid.archive.received_micronoid) >= 5000000n);
+  assert.ok(paid.archive.hourly.length >= 1);
+
+  const cold = fs.mkdtempSync(path.join(os.tmpdir(), 'noid-cold-'));
+  process.env.COLD_DIR = cold;
+  process.env.COLD_AFTER = '0';
+  await tick();
+  const moved = db.prepare('select cold, blob from blocks where height = 70').get();
+  assert.match(moved.cold, /^70-[0-9a-f]{64}\.zst$/);
+  assert.strictEqual(moved.blob, null);
+  const [, cold70] = await get('block/70');
+  assert.strictEqual(cold70.archived, true);
+  assert.strictEqual(cold70.retained.transactions[0].tx_hash, H('tx70'));
+});
+
+test('migrates a text-hash archive and backups round-trip', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const { migrateDb } = require('./server.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noid-mig-'));
+  const file = path.join(dir, 'old.db');
+  const old = new DatabaseSync(file);
+  old.exec(`create table blocks (height integer primary key, hash text not null, details text not null);
+    create index blocks_hash on blocks(hash);
+    create table headers (height integer primary key, hash text not null, ts integer not null, miner text, work real not null, slots integer);
+    create index headers_hash on headers(hash);
+    create index headers_ts on headers(ts);`);
+  const details = JSON.stringify({ header: { hash: 'ab'.repeat(32), timestamp: 1700004800 }, retained: { reward_micronoid: 5, transactions: [{ tx_hash: 'cd'.repeat(32) }] } });
+  old.prepare('insert into blocks values (80, ?, ?)').run('ab'.repeat(32), details);
+  old.prepare('insert into headers values (80, ?, 1700004800, ?, 1, 1)').run('ab'.repeat(32), 'o1minerodd');
+  old.close();
+  const migrated = new DatabaseSync(file);
+  migrateDb(migrated);
+  const row = migrated.prepare('select hash, blob, reward, txs from blocks where height = 80').get();
+  assert.strictEqual(Buffer.from(row.hash).toString('hex'), 'ab'.repeat(32));
+  assert.strictEqual(zstdDecompressSync(row.blob).toString(), details);
+  assert.strictEqual(row.txs, 1);
+  assert.strictEqual(migrated.prepare(`select type from pragma_table_info('blocks') where name = 'hash'`).get().type.toUpperCase(), 'BLOB');
+  assert.strictEqual(Buffer.from(migrated.prepare('select hash from headers where height = 80').get().hash).toString('hex'), 'ab'.repeat(32));
+  migrated.close();
+
+  const { spawnSync } = require('node:child_process');
+  const backups = path.join(dir, 'backups');
+  const run = spawnSync(process.execPath, ['scripts/backup.js'], { cwd: '/workspace', env: { ...process.env, DB_PATH: file, BACKUP_DIR: backups } });
+  assert.strictEqual(run.status, 0, run.stderr.toString());
+  const out = fs.readdirSync(backups).filter((f) => f.endsWith('.db'));
+  assert.strictEqual(out.length, 1);
+  const snap = new DatabaseSync(path.join(backups, out[0]), { readOnly: true });
+  assert.strictEqual(snap.prepare('select txs from blocks where height = 80').get().txs, 1);
+  snap.close();
 });

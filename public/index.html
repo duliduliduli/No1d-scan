@@ -215,7 +215,11 @@
       <a href="/blocks/latest" data-link>All blocks</a>
       <a href="/mempool" data-link>Mempool &amp; fees</a>
       <a href="/mining" data-link>Mining &amp; calculator</a>
+      <a href="/economics" data-link>Economics &amp; halving</a>
+      <a href="/orphans" data-link>Orphans &amp; reorgs</a>
       <a href="/market" data-link>Market analytics</a>
+      <a href="/receipts" data-link>Receipts</a>
+      <a href="/contracts" data-link>Contracts</a>
       <a href="/account" data-link>API &amp; Credits</a>
       <a href="/chat" data-link>Ask AI</a>
       <button id="theme"></button>
@@ -420,8 +424,9 @@ function pct(v) { return v == null ? '<span class="muted">–</span>' : `<b clas
 function minersCard(m) {
   if (!m?.miners?.length) return `<h2>Top miners</h2>${m ? tabs('mwin', WINDOW_TABS, m.window) : ''}<p class="muted">No blocks in this window yet (history may still be loading).</p>`;
   const top = m.miners[0].blocks;
-  return `<h2>Top miners <small class="muted">${n0(m.blocks)} blocks · ${n0(m.miner_count)} miners</small></h2>${tabs('mwin', WINDOW_TABS, m.window)}<div class="bars" style="margin-top:12px">${m.miners.map((r) => {
-    const inner = `<span class="name">${esc(r.miner || 'unknown')}</span><span class="val">${(r.share * 100).toFixed(1)}% · ${n0(r.blocks)} blocks</span>
+  const warn = m.warning ? `<p class="msg err">${esc(m.warning)}</p>` : '';
+  return `<h2>Top miners <small class="muted">${n0(m.blocks)} blocks · ${n0(m.miner_count)} miners</small></h2>${tabs('mwin', WINDOW_TABS, m.window)}${warn}<div class="bars" style="margin-top:12px">${m.miners.map((r) => {
+    const inner = `<span class="name">${esc(r.entity || r.miner || 'unknown')}</span><span class="val">${(r.share * 100).toFixed(1)}% · ${n0(r.blocks)} blocks</span>
       <span class="track"><span class="fill" data-w="${((r.blocks / top) * 100).toFixed(1)}"></span></span>`;
     return r.miner ? `<a class="bar" href="/address/${encodeURIComponent(r.miner)}" data-link title="${esc(r.miner)}">${inner}</a>` : `<div class="bar">${inner}</div>`;
   }).join('')}</div>`;
@@ -944,6 +949,14 @@ const pages = {
         ${stat('Difficulty', 'diff', esc(si(s.network?.difficulty_work, 'H')), 'Expected number of hashes needed to find a block at the current target.')}
         ${stat('Avg block time (1 h)', 'abt', esc(s.network?.avg_block_time ? s.network.avg_block_time.toFixed(1) + ' s' : '–'), 'Average time between the last ~120 blocks. Target: 30 s.')}
         ${stat('Blocks (24 h)', 'b24', esc(n0(s.network?.blocks_24h)), 'Blocks mined in the last 24 hours.')}
+        ${stat('Block time (10 m)', 'bt10', esc(s.network?.block_time_10m ? s.network.block_time_10m.toFixed(1) + ' s' : '–'), 'Average over the last 10 minutes, or the last 20 blocks when that window is still empty.')}
+        ${stat('Block time (24 h)', 'bt24', esc(s.network?.block_time_24h ? s.network.block_time_24h.toFixed(1) + ' s' : '–'), 'Average over the last 24 hours, or the last 2,880 blocks.')}
+        ${stat('History since', 'since', esc(s.coverage?.since ? new Date(s.coverage.since * 1000).toLocaleDateString() : '–'), 'Time of the oldest header stored here.')}
+        ${stat('Gaps', 'gaps', esc(n0(s.coverage?.gaps)), 'Heights with no stored body. The node has already pruned these.')}
+        ${stat('Reorgs', 'reorgs', esc(n0(s.coverage?.reorgs)), 'Reorgs whose replaced blocks were copied into the orphan table.')}
+        ${stat('Fee floor', 'floor', esc(s.economics?.fee_floor == null ? '–' : n0(s.economics.fee_floor)), 'Minimum fee the relay accepts right now, in μNOID.')}
+        ${stat('Total burned', 'burn', esc(s.economics?.burned_micronoid == null ? 'unknown' : noid(s.economics.burned_micronoid)), 'Growth fees marked burned in stored bodies. Unknown until a body includes that field.')}
+        ${stat('Next reward step', 'nextrew', esc(s.economics?.blocks_to_next_reward == null ? '1 NOID tail' : n0(s.economics.blocks_to_next_reward)), 'Blocks until the next issuance step.')}
         ${stat('Mempool', 'mp', '…', 'Transactions waiting to be mined, and the minimum fee rate accepted.')}
         ${stat('Connected peers', 'peers', esc(s.peers), 'Other nodes this explorer’s node is talking to.')}
         ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
@@ -1008,7 +1021,13 @@ const pages = {
   async block(id) {
     const b = await api('block/' + encodeURIComponent(id));
     const txs = Object.values(b.retained || {}).find(Array.isArray);
-    app.innerHTML = `<div class="card"><h2>Block ${esc(b.header.height)}</h2>${kv(b.header)}</div>
+    const others = b.others?.length ? b.others.map((o) => `${link('block', o.hash, short(o.hash))} <span class="muted">${esc(o.kind)} · ${esc(o.reason)} · ${esc(when(o.replaced_at))}</span>`).join('<br>') : '<span class="muted">none</span>';
+    app.innerHTML = `<div class="card"><h2>Block ${esc(b.header.height)} ${b.canonical ? '' : '<small class="muted">not canonical</small>'}</h2>${kv(b.header)}</div>
+      <div class="card"><h2>Archive</h2><div class="kvl">
+        <small>First seen</small><span>${esc(when(b.first_seen))}</span>
+        <small>Canonical</small><span>${b.canonical ? 'yes, this is the node’s block at this height' : 'no'}${b.orphan ? ` · ${esc(b.orphan.reason)} ${esc(when(b.orphan.replaced_at))}` : ''}</span>
+        <small>Other blocks here</small><span>${others}</span>
+      </div></div>
       <div class="card"><h2>Body ${b.archived ? '<small class="muted">(archived by this explorer)</small>' : ''}</h2>
         ${b.retained ? kv(Object.fromEntries(Object.entries(b.retained).filter(([, v]) => !Array.isArray(v)))) : '<p class="muted">Body pruned by the network and not captured here. The header above is permanent.</p>'}</div>
       ${txs ? `<div class="card"><h2>Transactions (${txs.length})</h2>${rows(txs, Object.keys(txs[0] || {}))}</div>` : ''}`;
@@ -1023,7 +1042,8 @@ const pages = {
         <small>From</small><span>${details.coinbase ? '<span class="muted">New coins (block reward)</span>' : details.input_owner ? link('address', details.input_owner) + copyBtn(details.input_owner) : '<span class="muted">–</span>'}</span>
         ${to.map(([a, amt]) => `<small>To</small><span>${link('address', a)}${copyBtn(a)} <span class="muted">${esc(noid(amt))}</span></span>`).join('')}
       </div></div>` : '';
-    app.innerHTML = `${flow}<div class="card"><h2>Transaction</h2>${kv(ptr)}</div>
+    const parts = feePartsView(details);
+    app.innerHTML = `${flow}${parts}<div class="card"><h2>Transaction</h2>${kv(ptr)}</div>
       <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
   },
   'api-access': () => go('/account'),
@@ -1031,6 +1051,9 @@ const pages = {
   async market() {
     const [s, pr, ho, rl, su] = await Promise.all([api('stats'), api('price?window=24h'), api('holders?window=30d'), api('richlist?limit=25'), api('supply?window=30d')]);
     const p = pr.now, supplyNoid = Number(s.chain.circulating_supply_micronoid) / 1e6;
+    const richHtml = (rl.warning ? `<p class="msg err">${esc(rl.warning)}</p>` : '') + (rl.rows.length
+      ? `<div class="bars">${rl.rows.map((r) => `<a class="bar" href="/address/${encodeURIComponent(r.address)}" data-link title="${esc(r.address)}"><span class="name">#${r.rank} ${esc(r.entity || '—')} <span class="mono">${esc(short(r.address))}</span></span><span class="val">${esc(noid(r.balance))} · ${(100 * (r.share || 0)).toFixed(2)}% · ${n0(r.slots)} slots</span><span class="track"><span class="fill" data-w="${(100 * r.balance / rl.rows[0].balance).toFixed(1)}"></span></span></a>`).join('')}</div>`
+      : '<p class="muted">Available after the first Live State sweep (a few minutes after start).</p>');
     const card = (title, html, id = '') => `<div class="card"${id ? ` id="${id}"` : ''}><h2>${title}</h2>${html}</div>`;
     const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h')}<div id="${name}c" style="margin-top:10px">${priceSeries(h, key)}</div>`);
     app.innerHTML = `
@@ -1057,10 +1080,7 @@ const pages = {
           <div><small>Top 100 hold</small><b>${(100 * ho.latest.top100 / ho.latest.supply).toFixed(1)}%</b></div>
           <div><small>Live slots</small><b>${n0(ho.latest.slots)}</b></div>
           <div><small>Avg per holder</small><b>${esc(noid(Math.round(ho.latest.supply / ho.latest.holders)))}</b></div></div>` : '<p class="muted">Available after the first sweep.</p>')}
-      ${card(`Rich list <small class="muted">top 25 of ${rl.holders ? n0(rl.holders) : '…'} holders${rl.updated ? ' · approximate, swept ' + esc(ago(rl.updated)) : ''}</small>`,
-        rl.rows.length ? `<div class="bars">${rl.rows.map((r) => `<a class="bar" href="/address/${encodeURIComponent(r.address)}" data-link title="${esc(r.address)}">
-          <span class="name">#${r.rank} ${esc(r.address)}</span><span class="val">${esc(noid(r.balance))} · ${(100 * r.share).toFixed(2)}% · ${n0(r.slots)} slots</span>
-          <span class="track"><span class="fill" data-w="${(100 * r.balance / rl.rows[0].balance).toFixed(1)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Available after the first Live State sweep (a few minutes after start).</p>')}
+      ${card(`Rich list <small class="muted">top 25 of ${rl.holders ? n0(rl.holders) : '…'} holders${rl.updated ? ' · approximate, swept ' + esc(ago(rl.updated)) : ''} · entity labels refresh every 30 min</small>`, richHtml)}
       ${card('Markets', pr.markets?.length ? rows(pr.markets.map((m) => ({ exchange: m.exchange, pair: m.pair, price: usd4(m.usd), volume_24h: money(m.volume_24h_usd, 0), share: (m.share_pct ?? 0).toFixed(1) + '%' })), ['exchange', 'pair', 'price', 'volume_24h', 'share'])
         + '<p class="muted">Order books and individual trades are not published by these exchanges in a form this explorer can read; prices and volumes come from CoinPaprika.</p>' : '<p class="muted">Market list unavailable right now.</p>')}`;
     growBars();
@@ -1072,14 +1092,15 @@ const pages = {
 
   async mempool() {
     const m = await api('mempool');
+    const flat = (m.txs || []).map((t) => ({ tx_hash: t.tx_hash, fee_micronoid: t.fee_micronoid, base: t.fee_parts?.base ?? null, inputs: t.fee_parts?.inputs ?? null, outputs: t.fee_parts?.outputs ?? null, growth_or_tip: t.fee_parts?.growth_or_tip ?? null, n_inputs: t.n_inputs, n_outputs: t.n_outputs }));
     app.innerHTML = `<div class="grid">
         <div class="card stat"><small>Pending transactions</small><b>${n0(m.size)}</b></div>
         <div class="card stat"><small>Fees waiting</small><b>${esc(noid(m.total_fees_micronoid))}</b></div>
-        <div class="card stat" title="Lowest fee rate the node accepts right now"><small>Fee floor</small><b>${esc(m.fee_floor == null ? '–' : n0(m.fee_floor))}</b></div></div>
+        <div class="card stat" title="Lowest fee the node accepts right now"><small>Fee floor</small><b>${esc(m.fee_floor == null ? '–' : n0(m.fee_floor))}</b></div></div>
       <div class="card"><h2>Fees right now <small class="muted">minimum accepted by the network · NOID fees are rule-based, not an auction</small></h2>
-        ${rows(m.fees.map((f) => ({ shape: f.shape, fee_micronoid: f.fee_micronoid, burn_slots: f.burn_slots })), ['shape', 'fee_micronoid', 'burn_slots'])}
-        <p class="muted">"New slots" are outputs that grow the Live State; part of their fee is burned.</p></div>
-      <div class="card"><h2>Waiting to be mined</h2>${rows(m.txs, ['tx_hash', 'fee_micronoid', 'fee_rate', 'n_inputs', 'n_outputs'])}</div>`;
+        ${rows(m.fees.map((f) => ({ shape: f.shape, fee_micronoid: f.fee_micronoid, burn_slots: f.burn_slots, base: f.fee_parts?.base, inputs: f.fee_parts?.inputs, outputs: f.fee_parts?.outputs, growth_or_tip: f.fee_parts?.growth_or_tip })), ['shape', 'fee_micronoid', 'base', 'inputs', 'outputs', 'growth_or_tip', 'burn_slots'])}
+        <p class="muted">${esc(m.relay || '')} Base is 5,000 μNOID, plus 100 per input and 700 per output. Anything above that is growth (burned) or a tip. "New slots" are outputs that grow the Live State.</p></div>
+      <div class="card"><h2>Waiting to be mined</h2>${rows(flat, ['tx_hash', 'fee_micronoid', 'base', 'inputs', 'outputs', 'growth_or_tip', 'n_inputs', 'n_outputs'])}</div>`;
     clearInterval(ticker);
     ticker = setInterval(() => location.pathname === '/mempool' && pages.mempool().catch(() => {}), 15_000);
   },
@@ -1381,14 +1402,85 @@ const pages = {
   async address(id, page = 1) {
     const a = await api(`address/${encodeURIComponent(id)}?page=${page}`);
     const { transactions, ...summary } = a.activity || {};
-    app.innerHTML = `<div class="card"><h2>Address</h2><p class="mono">${esc(a.address)}${copyBtn(a.address)}</p>
+    const ar = a.archive || {};
+    const hourly = (ar.hourly || []).map((p) => [p.t, Number(p.net_micronoid) / 1e6]);
+    app.innerHTML = `<div class="card"><h2>Address ${a.label?.entity ? `<small>${esc(a.label.entity)}</small>` : ''}</h2><p class="mono">${esc(a.address)}${copyBtn(a.address)}</p>
+        ${a.label?.note ? `<p class="muted">${esc(a.label.note)}</p>` : ''}
         <div class="grid"><div class="stat"><small>Balance (Live State)</small><b>${esc(noid(a.balance_micronoid))}</b></div>
         <div class="stat"><small>Live slots</small><b>${a.slots.length}</b></div>
+        <div class="stat"><small>Blocks mined</small><b>${n0(a.blocks_mined)}</b></div>
         ${a.rank ? `<div class="stat"><small>Rich list rank</small><b>#${n0(a.rank)}</b></div>` : ''}</div></div>
+      <div class="card"><h2>Archive <small class="muted">partial · our stored bodies only</small></h2>
+        <p class="muted">${esc(ar.note || '')}</p>
+        <div class="grid">
+          <div class="stat"><small>Received in archive</small><b>${esc(noid(ar.received_micronoid))}</b></div>
+          <div class="stat"><small>Sent in archive</small><b>${esc(noid(ar.sent_micronoid))}</b></div>
+          <div class="stat"><small>Archived transfers</small><b>${n0(ar.tx_count)}</b></div>
+        </div>
+        <h2>Hourly net <small class="muted">NOID, partial</small></h2>
+        ${hourly.length > 1 ? ichart(hourly, 'dayhour', 'num', 140) : '<p class="muted">Not enough archived hours for a chart yet.</p>'}
+        ${ar.payouts?.length ? `<h2>Miner payout destinations</h2>${rows(ar.payouts.map((p) => ({ payout: p.payout, blocks: p.blocks, amount_micronoid: p.amount_micronoid })), ['payout', 'blocks', 'amount_micronoid'])}` : ''}
+        ${ar.recent?.length ? `<h2>Recent archived transfers</h2>${rows(ar.recent, ['height', 'txid', 'dir', 'amount'])}` : ''}
+      </div>
       <div class="card"><h2>Live slots</h2>${rows(a.slots, ['slot_index', 'value', 'creation_id'])}</div>
       <div class="card"><h2>Recent activity</h2>${kv(summary)}${rows(transactions, TX_COLS)}</div>`;
   },
+
+  async economics() {
+    const e = await api('economics');
+    const step = e.blocks_to_next_reward == null ? 'The tail is 1 NOID per block. There is no later step.' : `${n0(e.blocks_to_next_reward)} blocks until height ${n0(e.next_reward_height)} (${e.subsidy_noid == null ? 'the first v2 tier, 16 NOID' : 'the next tier'}).`;
+    app.innerHTML = `<div class="card"><h2>Issuance</h2>
+        <p>Height ${n0(e.height)}. Miner share of the subsidy is ${e.miner_share === 1 ? '100%' : '90%'} until block ${n0(e.allocation_until)}, then 100% to miners. The other 10% before that is 5% O(1) Network Fund and 5% Parano1d Lab.</p>
+        <p>${esc(step)} ${esc(e.note || '')}</p>
+        <p><a href="/halving" data-link>Halving schedule →</a></p></div>
+      <div class="card"><h2>Subsidy schedule</h2>${rows(e.schedule.map((s) => ({ height: s.height, noid_per_block: s.noid })), ['height', 'noid_per_block'])}</div>
+      <div class="card"><h2>Fees</h2>
+        <p>5,000 μNOID per transaction + 100 per live input + 700 per live output + 2,500 × occupancy pressure per net-new slot. Pressure is 1× under 50% full, 2× from 50–75%, 4× from 75–90%, and 8× at 90% or more. The growth component is burned. Base, inputs, outputs and tip are claimable by the miner.</p>
+        <p class="muted">${esc(e.fees?.relay || '')}</p>
+        <p>Total burned in stored bodies: ${e.burned_micronoid == null ? 'unknown (bodies do not include a growth field yet)' : esc(noid(e.burned_micronoid))}.</p></div>`;
+  },
+  async halving() {
+    const e = await api('economics');
+    app.innerHTML = `<div class="card"><h2>Halving</h2>
+        <p>From height 210,537 the subsidy steps down every 1,051,200 blocks and then stays at 1 NOID. There is no maximum supply. ${e.subsidy_noid == null ? 'This chain is still on the pre-v2 reward; the node’s live block reward is the number that pays.' : `Current subsidy ${esc(e.subsidy_noid)} NOID per block (tier ${esc(e.tier)}).`}</p>
+        <p>${e.blocks_to_next_reward == null ? 'No further step.' : `${n0(e.blocks_to_next_reward)} blocks to the next step.`}</p>
+        <p><a href="/economics" data-link>Fees and allocation →</a></p></div>
+      <div class="card"><h2>Schedule</h2>${rows(e.schedule.map((s, i) => ({ step: i, height: s.height, noid_per_block: s.noid })), ['step', 'height', 'noid_per_block'])}</div>`;
+  },
+  async orphans() {
+    const [o, g] = await Promise.all([api('orphans?limit=50'), api('gaps?limit=50')]);
+    app.innerHTML = `<div class="card"><h2>Orphaned blocks <small class="muted">${n0(o.count)} stored</small></h2>
+        <p class="muted">Copied before a hash was replaced or a tip rollback deleted the canonical row. This is the only copy once the node prunes the body.</p>
+        ${rows((o.orphans || []).map((r) => ({ height: r.height, hash: r.hash, kind: r.kind, reason: r.reason, replaced_at: r.replaced_at })), ['height', 'hash', 'kind', 'reason', 'replaced_at'])}</div>
+      <div class="card"><h2>Gaps <small class="muted">${n0(g.count)} missing</small></h2>
+        <p class="muted">Heights whose body was already pruned before this explorer stored it. Recovery retries the node, then any archive peers in ARCHIVE_PEERS.</p>
+        ${rows(g.gaps || [], ['height', 'kind', 'tries', 'last_error'])}</div>`;
+  },
+  receipts() {
+    app.innerHTML = `<div class="card"><h2>Receipts</h2>
+        <p>This explorer cannot verify a receipt. The node does not expose a receipt method to it.</p>
+        <p>On a machine with the Parano1d CLI: <code>parano1d-cli receipt TXID</code> and <code>parano1d-cli verify</code>. Contract receipts stay verifiable after the block body is pruned.</p></div>`;
+  },
+  contracts() {
+    app.innerHTML = `<div class="card"><h2>Contracts</h2>
+        <p>Parano1d contracts use a 16-instruction integer ABI. This page does not compile, simulate or verify one.</p>
+        <p>The six templates are refundable payments, timelocked vaults, delegated allowance, budgets, recurring payments and gradual release. Verification is <code>parano1d-cli receipt</code> / <code>parano1d-cli verify</code>.</p></div>`;
+  },
 };
+
+function feePartsView(t) {
+  const inputs = t?.n_inputs ?? t?.inputs?.length;
+  const outputs = t?.n_outputs ?? t?.outputs?.length;
+  if (inputs == null || outputs == null || t?.fee_micronoid == null) return '';
+  const base = 5000, inputFee = 100 * inputs, outputFee = 700 * outputs, known = base + inputFee + outputFee;
+  const rest = Math.max(0, Number(t.fee_micronoid) - known);
+  return `<div class="card"><h2>Fee breakdown</h2><div class="kvl">
+      <small>Base</small><span>${esc(noid(base))}</span>
+      <small>Inputs</small><span>${esc(noid(inputFee))} <span class="muted">${inputs} × 100 μ</span></span>
+      <small>Outputs</small><span>${esc(noid(outputFee))} <span class="muted">${outputs} × 700 μ</span></span>
+      <small>Growth or tip</small><span>${esc(noid(rest))}</span>
+    </div><p class="muted">Growth is burned. Base, inputs, outputs and a tip are claimable by the miner. This split does not know the occupancy pressure, so growth and tip stay together.</p></div>`;
+}
 
 async function render() {
   const [, type, id] = location.pathname.split('/');
@@ -1403,7 +1495,7 @@ async function render() {
   for (const a of document.querySelectorAll('header a.explore, #menunav a[href^="/explore"]')) a.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
+    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms', 'economics', 'halving', 'orphans', 'receipts', 'contracts'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>Not found</h2><p class="muted">${esc(e.message)}</p></div>`;
   }
