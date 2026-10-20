@@ -465,7 +465,7 @@ test('indexer + api', async (t) => {
   const [, none] = await get('tokens');
   assert.strictEqual(none.demo, false);
   assert.strictEqual(none.tokens.length, 0);
-  assert.match(none.notice, /Native tokens activate with Parano1d v2\.1/);
+  assert.match(none.notice, /Tokens coming with v2\.1/);
   assert.strictEqual((await get('collections'))[1].collections.length, 0);
   const [, demo] = await get('tokens?demo=1');
   assert.strictEqual(demo.demo, true);
@@ -496,6 +496,21 @@ test('indexer + api', async (t) => {
   assert.strictEqual(tok.token.venue, 'pool');
   assert.ok(tok.chart.length >= 2 && tok.trades.length >= 1 && tok.holders.length >= 1);
   assert.strictEqual((await get('token/gcat'))[0], 404);
+  const [, screen] = await get('tokens/gcat?demo=1');
+  assert.strictEqual(screen.token.launch, 'launchpad');
+  assert.strictEqual(screen.token.fdv_micronoid, screen.token.mcap_micronoid);
+  assert.ok(screen.token.makers >= 1);
+  assert.ok(screen.warnings.some((w) => w.code === 'dev_hold'));
+  assert.ok(screen.token.top10_pct >= 40);
+  assert.strictEqual((await get('tokens/crown?demo=1'))[1].token.launch, 'direct');
+  assert.ok((await get('tokens/crown?demo=1'))[1].warnings.some((w) => w.code === 'low_liq'));
+  const [, candles] = await get('tokens/gcat/candles?demo=1&tf=5m');
+  assert.strictEqual(candles.tf, '5m');
+  assert.ok(candles.candles.length > 20);
+  assert.ok(candles.candles.every((c) => BigInt(c.h) >= BigInt(c.l) && BigInt(c.h) >= BigInt(c.o) && BigInt(c.h) >= BigInt(c.c)));
+  assert.ok((await get('tokens/gcat/trades?demo=1'))[1].trades.length >= 1);
+  assert.strictEqual((await get('tokens/gcat/candles?demo=1&tf=nope'))[0], 400);
+  assert.strictEqual((await get('tokens/missing/trades?demo=1'))[0], 404);
   assert.strictEqual((await get('collections?demo=1'))[1].collections[0].id, 'stamps');
   assert.strictEqual((await get('collections?demo=1&q=paper'))[1].collections[0].id, 'faces');
   assert.deepStrictEqual((await get('collections?demo=1&min_floor=5'))[1].collections.map((c) => c.id), ['stamps']);
@@ -523,13 +538,16 @@ test('indexer + api', async (t) => {
   process.env.ASSET_PROBE_MS = '0';
   node.getAssetSnapshot = () => ({
     tokens: [{ id: 'live1', name: 'Live Coin', ticker: 'LIVE', supply: '1000', reserve_micronoid: '1000000', created_ts: 1700000000, graduated: false, price_micronoid: '1000', curve_target_micronoid: '20000000000', curve_raised_micronoid: '1000000000', holders: [{ address: 'o1acdefghjkmnpqr', balance: '400' }] }],
-    trades: [{ txid: 'live1trade01', token_id: 'live1', ts: Math.floor(Date.now() / 1000) - 30, side: 'buy', token_amount: '10', noid_micronoid: '10000', price_micronoid: '1000', venue: 'curve' }],
+    trades: [{ txid: 'live1trade01', token_id: 'live1', ts: Math.floor(Date.now() / 1000) - 30, side: 'buy', token_amount: '10', noid_micronoid: '10000', price_micronoid: '1000', venue: 'curve', trader: 'o1acdefghjkmnpqr' }],
+    transfers: [{ txid: 'live1trade01', token_id: 'live1', ts: Math.floor(Date.now() / 1000) - 30, to: 'o1acdefghjkmnpqr', amount: '10' }],
     collections: [{ id: 'col1', name: 'Live Col', items: 2, owners: 1, floor_micronoid: '5000000', volume_micronoid: '9000000', created_ts: 1700000000, nfts: [{ id: 'n1', name: 'One', owner: 'o1acdefghjkmnpqr' }] }],
   });
   await tick();
   await tick();
   assert.strictEqual(db.prepare('select count(*) n from tokens').get().n, 1);
   assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 1, 'the same trade is stored once');
+  assert.strictEqual(db.prepare(`select n from token_candles where token_id = 'live1'`).get().n, 1, 'a trade rolls into one 1m candle, once');
+  assert.strictEqual(db.prepare('select count(*) n from token_transfers').get().n, 1);
   const [, liveTok] = await get('tokens');
   assert.strictEqual(liveTok.demo, false);
   assert.strictEqual(liveTok.tokens[0].ticker, 'LIVE');
@@ -539,10 +557,14 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('collection/col1'))[1].items[0].name, 'One');
   assert.strictEqual((await get('swap/quote?token=live1&side=buy&amount=1'))[1].enabled, false, 'snapshot alone does not turn swaps on');
   db.prepare(`insert into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid) values ('reorgtrade1', 'live1', 1700000000, ?, 'buy', '1', '1')`).run(tip + 5);
+  db.prepare(`insert into token_candles (token_id, bucket, o, h, l, c, v, n, height) values ('live1', 1, 1, 1, 1, 1, 1, 1, ?)`).run(tip + 5);
+  db.prepare(`insert into token_transfers (txid, token_id, ts, height, from_addr, to_addr, amount) values ('reorgxfer01', 'live1', 1, ?, '', 'o1acdefghjkmnpqr', '1')`).run(tip + 5);
   const tipBefore = tip;
   tip -= 2;
   await tick();
   assert.strictEqual(db.prepare(`select count(*) n from token_trades where txid = 'reorgtrade1'`).get().n, 0);
+  assert.strictEqual(db.prepare('select count(*) n from token_candles where height > 0').get().n, 0);
+  assert.strictEqual(db.prepare(`select count(*) n from token_transfers where txid = 'reorgxfer01'`).get().n, 0);
   tip = tipBefore;
   await tick();
   delete process.env.ASSET_PROBE_MS;

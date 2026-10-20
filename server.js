@@ -503,7 +503,7 @@ async function tick() {
     db.exec('begin');
     try {
       orphanAbove(tip); // before the delete: these rows are the only copy once the node has moved on
-      for (const t of ['blocks', 'stats', 'headers', 'token_trades', 'tx_index', 'addr_tx', 'miner_payouts']) db.prepare(`delete from ${t} where height > ?`).run(tip);
+      for (const t of ['blocks', 'stats', 'headers', 'token_trades', 'token_transfers', 'token_candles', 'tx_index', 'addr_tx', 'miner_payouts']) db.prepare(`delete from ${t} where height > ?`).run(tip);
       q.addReorg.run(top, tip, Date.now(), top - tip);
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
@@ -990,7 +990,7 @@ setInterval(() => hits.clear(), 60_000).unref();
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
 const inflight = new Map();
-const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind',
+const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
   'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
@@ -1047,7 +1047,10 @@ async function handle(req, res) {
     if (acct) res.setHeader('x-credits-remaining', acct.credits);
     if (n > limit) return send(429, { error: `rate limited: ${limit} requests per minute on the ${paid ? 'paid' : 'free'} tier` }, { 'retry-after': 60 });
 
-    const [, , name, id = ''] = url.pathname.split('/');
+    const parts = url.pathname.split('/');
+    const name = parts[2];
+    const id = parts[3] || '';
+    const sub = parts[4] ? decodeURIComponent(parts[4]) : '';
     // Account, payment and chat routes: never cached, may take a JSON body.
     if (name === 'stripe-webhook' && req.method === 'POST') return send(200, bill.stripeWebhook(await readBody(req), req.headers['stripe-signature']));
     if (name === 'chat' && req.method === 'POST') {
@@ -1088,7 +1091,7 @@ async function handle(req, res) {
     if (!route) return send(404, { error: 'unknown endpoint' });
     let p = inflight.get(key);
     if (!p) {
-      p = route(decodeURIComponent(id), url.searchParams).finally(() => inflight.delete(key));
+      p = route(decodeURIComponent(id), url.searchParams, sub).finally(() => inflight.delete(key));
       inflight.set(key, p);
     }
     const out = await p;

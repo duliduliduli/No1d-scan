@@ -125,7 +125,14 @@
   .mcard .chgs, .mcard .meta { grid-column:2 / -1; color:var(--muted); font:11px var(--mono) }
   .curve { height:6px; background:var(--head); border-radius:4px; overflow:hidden; margin-top:4px } .curve > span { display:block; height:100%; background:var(--accent); box-shadow:var(--glow) }
   .split { display:grid; grid-template-columns:1fr minmax(280px, 340px); gap:14px; align-items:start }
+  .split > * { min-width:0 }
   @media (max-width:800px) { .split { grid-template-columns:1fr } .sidecol { order:-1 } }
+  @media (max-width:800px) { .pair .sidecol { order:0 } }
+  .rank { color:var(--muted); font:12px var(--mono); margin-right:8px }
+  #tv { height:380px; min-height:280px; width:100%; overflow:hidden }
+  .tfs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 8px }
+  .tfs button.on { background:var(--accent); color:var(--bg) }
+  .tape td.side { font-weight:700 }
   .swap .fine { color:var(--muted); font:12px/1.5 var(--mono); margin:10px 0 0 } .swap .kvl { margin-top:12px }
   .pill { display:inline-block; padding:1px 6px; border:1px solid var(--line); border-radius:3px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
   .items { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
@@ -474,6 +481,7 @@ function markNew(tableId, oldTip) {
 
 // ---- globe: countries of peers connected to this explorer's node (never exact locations, never miner locations)
 const GLOBE_JS = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js';
+const LW_JS = 'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js';
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/example/datasets/ne_110m_admin_0_countries.geojson';
 const ISO_FIX = { France: 'FR', Norway: 'NO' }; // Natural Earth leaves these as -99
 // Small countries/territories (common hosting spots) that the 1:110m map omits; points only, no outline.
@@ -681,7 +689,7 @@ const demoHref = (path) => {
   const demo = new URLSearchParams(location.search).get('demo') === '1';
   return demo ? `${path}${path.includes('?') ? '&' : '?'}demo=1` : path;
 };
-const TOKEN_SORTS = [['liquidity', 'Liquidity'], ['volume', 'Volume'], ['age', 'Age'], ['mcap', 'MCap'], ['txns', 'Txns'], ['buys', 'Buys'], ['sells', 'Sells'], ['change', 'Change'], ['progress', 'Curve']];
+const TOKEN_SORTS = [['liquidity', 'Liquidity'], ['volume', 'Volume'], ['age', 'Age'], ['mcap', 'MCap'], ['fdv', 'FDV'], ['txns', 'Txns'], ['makers', 'Makers'], ['buys', 'Buys'], ['sells', 'Sells'], ['change', 'Change'], ['progress', 'Curve']];
 const NFT_SORTS = [['volume', 'Volume'], ['floor', 'Floor'], ['items', 'Items'], ['owners', 'Owners'], ['age', 'Age']];
 function sortTh(key, label, on, dir, opt) {
   const mark = on === key ? (dir === 'asc' ? ' ↑' : ' ↓') : '';
@@ -692,15 +700,17 @@ function chgTh(win, sort, dir, window) {
   const opt = win === '5m' || win === '1h';
   return `<th class="${opt ? 'opt' : ''}" aria-sort="${on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}"><button type="button" class="sort${on ? ' on' : ''}" data-sort="change" data-win="${win}" aria-label="Sort by ${win} change">${win}${on ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}</button></th>`;
 }
-function tokenTable(list, sort, dir, window) {
-  const head = `<tr><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('buys', 'Buys', sort, dir, true)}${sortTh('sells', 'Sells', sort, dir, true)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th class="opt">Backing</th><th class="opt">Curve</th></tr>`;
-  const body = list.map((t) => `<tr>
-      <td><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b><small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
+const launchHtml = (t) => t.launch === 'launchpad' ? '<span class="pill">Launchpad</span>' : t.launch === 'direct' ? '<span class="pill">Direct issue</span>' : '<span class="muted">–</span>';
+function tokenTable(list, sort, dir, window, page, pageSize) {
+  const head = `<tr><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('makers', 'Makers', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${sortTh('fdv', 'FDV', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th>Launch</th><th class="opt">Backing</th></tr>`;
+  const body = list.map((t, i) => `<tr>
+      <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b><small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
       <td>${sparkSvg(t.spark)}${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
-      <td>${esc(ageLabel(t))}</td><td class="num">${n0(t.txns)}</td><td class="num opt">${n0(t.buys)}</td><td class="num opt">${n0(t.sells)}</td>
-      ${numCell(t.volume_micronoid)}${numCell(t.liquidity_micronoid)}${numCell(t.mcap_micronoid)}
-      <td class="opt">${chgHtml(t.change['5m'])}</td><td class="opt">${chgHtml(t.change['1h'])}</td><td>${chgHtml(t.change['6h'])}</td><td>${chgHtml(t.change['24h'])}</td>
-      <td class="num opt" title="${esc(fmtNoid(t.backing_per_token_micronoid))} per token">${esc(compactNoid(t.backing_per_token_micronoid))}</td><td class="opt">${curveHtml(t)}</td></tr>`).join('');
+      <td>${esc(ageLabel(t))}</td><td class="num">${n0(t.txns)}</td><td class="num">${n0(t.makers)}</td>
+      ${numCell(t.volume_micronoid)}${numCell(t.liquidity_micronoid)}${numCell(t.mcap_micronoid)}${numCell(t.fdv_micronoid)}
+      <td>${chgHtml(t.change['5m'])}</td><td>${chgHtml(t.change['1h'])}</td><td>${chgHtml(t.change['6h'])}</td><td>${chgHtml(t.change['24h'])}</td>
+      <td>${launchHtml(t)}</td>
+      <td class="num opt" title="${esc(fmtNoid(t.backing_per_token_micronoid))} per token">${esc(compactNoid(t.backing_per_token_micronoid))}</td></tr>`).join('');
   return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function tokenCards(list) {
@@ -708,8 +718,8 @@ function tokenCards(list) {
       ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
       <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</small></span>
       <span class="chgs">${sparkSvg(t.spark)} 5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</span>
-      <span class="meta">Liq ${esc(fmtNoid(t.liquidity_micronoid))} · Vol ${esc(fmtNoid(t.volume_micronoid))} · MCap ${esc(fmtNoid(t.mcap_micronoid))}</span>
-      <span class="meta">${n0(t.txns)} txns · ${n0(t.buys)} buys · ${n0(t.sells)} sells · Backing ${esc(fmtNoid(t.backing_per_token_micronoid))}</span>
+      <span class="meta">Liq ${esc(fmtNoid(t.liquidity_micronoid))} · Vol ${esc(fmtNoid(t.volume_micronoid))} · MCap ${esc(fmtNoid(t.mcap_micronoid))} · FDV ${esc(fmtNoid(t.fdv_micronoid))}</span>
+      <span class="meta">${n0(t.txns)} txns · ${n0(t.makers)} makers · Backing ${esc(fmtNoid(t.backing_per_token_micronoid))} · ${t.launch === 'direct' ? 'Direct issue' : t.launch === 'launchpad' ? 'Launchpad' : ''}</span>
       ${!t.graduated && t.curve ? `<span class="chgs">${curveHtml(t)}</span>` : ''}</a>`).join('') || ''}</div>`;
 }
 function nftTable(list, sort, dir) {
@@ -727,7 +737,7 @@ function nftCards(list) {
       <span class="meta">Vol ${esc(fmtNoid(c.volume_micronoid))} · ${n0(c.items)} items · ${n0(c.owners)} owners</span></a>`).join('')}</div>`;
 }
 const rangeInputs = (label, a, b, params) => `<label>${label}<span class="pair"><input data-f="${a}" value="${esc(params.get(a) || '')}" placeholder="min" inputmode="decimal" aria-label="${esc(label)} minimum"><input data-f="${b}" value="${esc(params.get(b) || '')}" placeholder="max" inputmode="decimal" aria-label="${esc(label)} maximum"></span></label>`;
-let exGen = 0;
+let exGen = 0, exploreTimer = null, tokenTimer = null, tvChart = null;
 function exploreShell(tab, params) {
   const sorts = tab === 'nfts' ? NFT_SORTS : TOKEN_SORTS;
   const sort = params.get('sort') || (tab === 'nfts' ? 'volume' : 'volume');
@@ -743,7 +753,8 @@ function exploreShell(tab, params) {
         <select id="exsort" aria-label="Sort">${sorts.flatMap(([k]) => [['desc', '↓'], ['asc', '↑']].map(([d, arrow]) => `<option value="${k}:${d}"${sort === k && dir === d ? ' selected' : ''}>${sorts.find((s) => s[0] === k)[1]} ${arrow}</option>`)).join('')}</select>
         ${tab === 'tokens' ? `<select id="exwin" aria-label="Stats window">${['5m', '1h', '6h', '24h'].map((w) => `<option${(params.get('window') || '24h') === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
       </div>
-      ${tab === 'tokens' ? tabs('preset', [['', 'All'], ['trending', 'Trending'], ['new', 'New'], ['gainers', 'Top gainers'], ['graduating', 'Graduating soon']], params.get('preset') || '') : ''}
+      ${tab === 'tokens' ? tabs('preset', [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon']], params.get('preset') || '') : ''}
+      ${tab === 'tokens' ? '<p class="muted" style="margin:8px 0 0;font:11px var(--mono)">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
       <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
       <div id="exchips"></div>
     </div>
@@ -779,11 +790,11 @@ async function fillExplore() {
   if (gen !== exGen || !$('exlist')) return;
   const bare = ![...params.keys()].some((k) => !['tab', 'demo'].includes(k));
   const rows = tab === 'nfts' ? data.collections : data.tokens;
-  $('exbanner').innerHTML = data.demo ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Native tokens activate with Parano1d v2.1.</p>` : '';
+  $('exbanner').innerHTML = data.demo ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>` : '';
   if (!data.demo && !data.live && !rows.length && bare) {
     $('extools').hidden = true;
     $('exlist').removeAttribute('aria-busy');
-    $('exlist').innerHTML = `<div class="empty"><b>${esc(data.notice || 'Native tokens activate with Parano1d v2.1')}</b><p class="muted">Listings stay empty until a Parano1d node exposes native tokens, curves, pools and collections. Nothing on this page is sample data.</p></div>`;
+    $('exlist').innerHTML = `<div class="empty"><b>${esc(data.notice || 'Tokens coming with v2.1')}</b><p class="muted">Listings stay empty until a Parano1d node exposes native tokens. Nothing on this page is sample data.</p></div>`;
     return;
   }
   $('extools').hidden = false;
@@ -797,7 +808,10 @@ async function fillExplore() {
   }
   const win = data.window || params.get('window') || '24h';
   const note = `<p class="muted" style="font-size:12px">${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'}${tab === 'tokens' ? ` · volume, txns, buys and sells are the last ${esc(win)}` : ''}</p>`;
-  const table = tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows) : tokenTable(rows, data.sort, data.dir, win) + tokenCards(rows);
+  const sig = rows.map((t) => `${t.id}:${t.price_micronoid}:${t.txns}:${t.makers}`).join('|') + data.page + data.sort + data.dir + win;
+  if ($('exlist').dataset.sig === sig && $('exlist').querySelector('table, .mcard, .empty')) return;
+  $('exlist').dataset.sig = sig;
+  const table = tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows) : tokenTable(rows, data.sort, data.dir, win, data.page, data.page_size) + tokenCards(rows);
   $('exlist').innerHTML = note + table + pagerHtml(data);
 }
 const showExErr = (e) => { if ($('exlist')) { $('exlist').removeAttribute('aria-busy'); $('exlist').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; } };
@@ -868,6 +882,8 @@ function wireExplore() {
     history.replaceState(null, '', u.pathname + u.search);
     fillExplore().catch(showExErr);
   });
+  clearInterval(exploreTimer);
+  exploreTimer = setInterval(() => { if (document.hidden || document.activeElement === $('exq')) return; fillExplore().catch(showExErr); }, 15_000);
 }
 async function mountSwap(d, id) {
   const feePct = d.swap.fee_pct.toFixed(2);
@@ -958,7 +974,7 @@ function exploreCard(demo) {
 function homeStrip(list) {
   if (!list?.length) return '';
   return `<div class="card"><h2>Sample tokens <small>not on chain</small></h2>
-    <p class="demo-banner">Sample data for layout preview. These rows are not on chain. Native tokens activate with Parano1d v2.1.</p>
+    <p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>
     ${list.slice(0, 5).map((t) => `<a class="mcard" style="display:grid" href="/token/${encodeURIComponent(t.id)}?demo=1" data-link>
       ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
       <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}
@@ -1402,50 +1418,102 @@ const pages = {
   },
   async token(id) {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
-    const d = await api(`token/${encodeURIComponent(id)}${demo ? '?demo=1' : ''}`);
+    const q = demo ? '?demo=1' : '';
+    const d = await api(`tokens/${encodeURIComponent(id)}${q}`);
     const t = d.token;
     const show = d.demo || (d.swap?.live && WalletDex.ready());
-    const span = d.chart.length > 1 ? d.chart.at(-1).t - d.chart[0].t : 0;
-    const fx = span > 3 * 86400 ? 'day' : span > 86400 ? 'dayhour' : 'hour';
-    const chart = d.chart.length > 1 ? ichart(d.chart.map((p) => [p.t, Number(p.price_micronoid)]), fx, 'tokpx', 180) : '<p class="muted">Not enough trades for a chart yet.</p>';
     const share = location.origin + location.pathname + location.search;
-    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Native tokens activate with Parano1d v2.1.</p>' : ''}
-      <p><a href="${demoHref('/explore')}" data-link>← Explore</a>
+    const links = t.links ? [
+      t.links.website ? `<a href="${esc(t.links.website)}" target="_blank" rel="noopener">Website</a>` : '',
+      t.links.twitter ? `<a href="https://x.com/${esc(t.links.twitter)}" target="_blank" rel="noopener">X</a>` : '',
+      t.links.telegram ? `<a href="https://t.me/${esc(t.links.telegram)}" target="_blank" rel="noopener">Telegram</a>` : '',
+    ].filter(Boolean).join(' · ') : '';
+    const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
+    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}
+      <p><a href="${demoHref('/explore')}" data-link>← Tokens</a>
         <button type="button" class="copy" data-copy="${esc(share)}" aria-label="Copy link to this token">Copy link</button>
-        ${copyBtn(t.id)}</p>
-      <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small></h2>
-        <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
-        <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div>
-        <div class="muted">${t.creator ? `Creator ${link('address', t.creator, short(t.creator))}` : 'Creator not published yet.'}</div></div></div></div>
-      <div class="${show ? 'split' : ''}"><div>
-        <div class="card"><h2>Price <small>NOID per token</small></h2>${chart}</div>
-        <div class="grid">
-          <div class="card stat"><small>Liquidity</small><b>${esc(fmtNoid(t.liquidity_micronoid))}</b></div>
-          <div class="card stat"><small>24h volume</small><b>${esc(fmtNoid(t.volume_micronoid))}</b></div>
-          <div class="card stat"><small>Market cap</small><b>${esc(fmtNoid(t.mcap_micronoid))}</b><small class="muted">${esc(t.mcap_usd == null ? '' : usd4(t.mcap_usd))}</small></div>
-          <div class="card stat"><small>Txns 24h</small><b>${n0(t.txns)}</b><small class="muted">${n0(t.buys)} buys · ${n0(t.sells)} sells</small></div>
-          <div class="card stat" title="Preview rate until v2.1 docs confirm 0.001 NOID per whole token"><small>NOID backing <span class="pill">preview</span></small><b>${esc(fmtNoid(t.backing_per_token_micronoid))}</b><small class="muted">per whole token · ${esc(fmtNoid(t.reserve_micronoid))} locked</small></div>
-          <div class="card stat"><small>Pair age</small><b>${esc(ageShort(t.age_s))}</b></div>
-          <div class="card stat"><small>Supply</small><b>${esc(Number(t.supply).toLocaleString())}</b></div>
+        <button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy token id">Copy token id</button></p>
+      <div class="split pair"><div>
+        <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${launchHtml(t)}</h2>
+          <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
+          <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div>
+        </div></div></div>
+        <div class="card"><h2>Price <small>NOID per token</small></h2>
+          <div class="tfs" data-tabs="tf">${['1m', '5m', '15m', '1h', '4h', '1d'].map((tf) => `<button type="button" data-v="${tf}" class="${tf === '15m' ? 'on' : ''}">${tf}</button>`).join('')}</div>
+          <div id="tv"><p class="muted">Loading chart…</p></div></div>
+        <div class="card"><h2>Trades <small class="muted">auto-refresh 15s</small></h2><div id="tape"></div></div>
+        <div class="card"><h2>Holders <small class="muted">${n0(t.holders_n)} · top 10 hold ${esc(t.top10_pct)}%</small></h2>${d.holders.length ? `<div class="bars">${d.holders.map((h) => `<a class="bar" href="/address/${encodeURIComponent(h.address)}" data-link><span class="name">${esc(h.address)}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Top holders are not published for this token yet.</p>'}</div>
+      </div><div class="sidecol">
+        ${warns}
+        <div class="card"><h2>Stats</h2><div class="kvl">
+          <small>Price</small><span>${esc(fmtNoid(t.price_micronoid))}${t.price_usd == null ? '' : ` <span class="muted">${esc(usd4(t.price_usd))}</span>`}</span>
+          <small>Liquidity</small><span>${esc(fmtNoid(t.liquidity_micronoid))}</span>
+          <small>FDV</small><span>${esc(fmtNoid(t.fdv_micronoid))}</span>
+          <small>Market cap</small><span>${esc(fmtNoid(t.mcap_micronoid))}</span>
+          <small>Supply</small><span>${esc(Number(t.supply).toLocaleString())}</span>
+          <small>Holders</small><span>${n0(t.holders_n)}</span>
+          <small>Backing / token</small><span>${esc(fmtNoid(t.backing_per_token_micronoid))}</span>
+          <small>Creator</small><span>${t.creator ? link('address', t.creator, short(t.creator)) : '<span class="muted">not published</span>'}</span>
+          <small>Launch height</small><span>${t.created_height == null ? '<span class="muted">not published</span>' : n0(t.created_height)}</span>
+          <small>Where</small><span>${t.launch === 'launchpad' ? 'Launchpad' : t.launch === 'direct' ? 'Direct issue' : '<span class="muted">not published</span>'}</span>
+          ${links ? `<small>Links</small><span>${links}</span>` : ''}
         </div>
-        <div class="card"><h2>${t.graduated ? 'Liquidity pool' : 'Bonding curve'}</h2>
-          ${t.graduated && t.pool ? `<p>Graduated. Pool reserves ${esc(fmtNoid(t.pool.reserve_noid_micronoid))} and ${esc(Number(t.pool.reserve_token).toLocaleString())} ${esc(t.ticker)}.</p>` : ''}
-          ${!t.graduated && t.curve ? `<p>Launchpad curve, not graduated. ${curveHtml(t)}</p><p class="muted">Graduation target ${esc(fmtNoid(t.curve.target_micronoid))}.</p>` : ''}
-          ${!t.pool && !t.curve ? '<p class="muted">No curve or pool published for this token yet.</p>' : ''}
-          <p class="muted">Backing is a preview of 0.001 NOID locked per whole token until Parano1d v2.1 docs confirm that rate. Total locked for this token: ${esc(fmtNoid(t.reserve_micronoid))}.</p>
+        <p class="muted">Backing is a preview of 0.001 NOID locked per whole token until Parano1d v2.1 docs confirm that rate. Market cap and FDV match until the node publishes a circulating supply separate from total supply.</p>
+        ${t.graduated && t.pool ? `<p>Pool reserves ${esc(fmtNoid(t.pool.reserve_noid_micronoid))} and ${esc(Number(t.pool.reserve_token).toLocaleString())} ${esc(t.ticker)}.</p>` : ''}
+        ${!t.graduated && t.curve ? `<p>Launchpad curve. ${curveHtml(t)} Graduation target ${esc(fmtNoid(t.curve.target_micronoid))}.</p>` : ''}
         </div>
-        <div class="card"><h2>Recent trades</h2>${d.trades.length ? `<table class="list"><tr><th>Time</th><th>Side</th><th>Tokens</th><th>NOID</th><th>Price</th><th>Trader</th></tr>
-          ${d.trades.map((tr) => `<tr><td>${esc(ago(tr.ts))}</td><td class="${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td><td>${esc(Number(tr.token_amount).toLocaleString())}</td><td>${esc(fmtNoid(tr.noid_micronoid))}</td><td>${esc(fmtNoid(tr.price_micronoid))}</td><td>${tr.trader ? link('address', tr.trader, short(tr.trader)) : '<span class="muted">–</span>'}</td></tr>`).join('')}</table>` : '<p class="muted">No trades captured yet.</p>'}</div>
-        <div class="card"><h2>Top holders</h2>${d.holders.length ? `<div class="bars">${d.holders.map((h) => `<a class="bar" href="/address/${encodeURIComponent(h.address)}" data-link><span class="name">${esc(h.address)}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Top holders are not published for this token yet.</p>'}</div>
-      </div>${show ? '<div class="sidecol" id="swappane"></div>' : ''}</div>`;
+        ${show ? '<div id="swappane"></div>' : ''}
+      </div></div>`;
     growBars();
-    if (show) mountSwap(d, id);
+    const paintTape = (trades) => {
+      const el = $('tape');
+      if (!el) return;
+      el.innerHTML = trades.length ? `<div class="scroller"><table class="list tape"><tr><th>Age</th><th>Side</th><th>Tokens</th><th>NOID</th><th>Price</th><th>Maker</th></tr>
+        ${trades.map((tr) => `<tr><td>${esc(ago(tr.ts))}</td><td class="side ${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td><td>${esc(Number(tr.token_amount).toLocaleString())}</td><td>${esc(fmtNoid(tr.noid_micronoid))}</td><td>${esc(fmtNoid(tr.price_micronoid))}</td><td>${tr.trader ? link('address', tr.trader, short(tr.trader)) : '<span class="muted">–</span>'}</td></tr>`).join('')}</table></div>` : '<p class="muted">No trades captured yet.</p>';
+    };
+    paintTape(d.trades);
+    const loadTf = async (tf) => {
+      const box = $('tv');
+      if (!box) return;
+      const candles = await api(`tokens/${encodeURIComponent(id)}/candles${q}${q ? '&' : '?'}tf=${tf}`);
+      if (!$('tv')) return;
+      if (!window.LightweightCharts) {
+        try { await loadScript(LW_JS); } catch { box.innerHTML = '<p class="muted">Chart library failed to load.</p>'; return; }
+      }
+      if (!$('tv')) return;
+      const rows = (candles.candles || []).filter((c) => Number(c.h) >= Number(c.l)).map((c) => ({
+        time: c.t, open: Number(c.o) / 1e6, high: Number(c.h) / 1e6, low: Number(c.l) / 1e6, close: Number(c.c) / 1e6,
+      }));
+      if (rows.length < 2) { tvChart?.remove(); tvChart = null; box.innerHTML = '<p class="muted">Not enough trades for a chart yet.</p>'; return; }
+      if (!tvChart) {
+        box.innerHTML = '';
+        const fg = cssv('--muted') || '#a9c0c1', line = cssv('--line') || '#152a2d';
+        tvChart = LightweightCharts.createChart(box, {
+          width: box.clientWidth, height: 380,
+          layout: { background: { color: 'transparent' }, textColor: fg, fontFamily: cssv('--mono') || 'monospace' },
+          grid: { vertLines: { color: line }, horzLines: { color: line } },
+          rightPriceScale: { borderColor: line }, timeScale: { borderColor: line, timeVisible: true, secondsVisible: false },
+        });
+        tvChart._series = tvChart.addCandlestickSeries({ upColor: '#3ddc97', downColor: '#ff6b6b', borderVisible: false, wickUpColor: '#3ddc97', wickDownColor: '#ff6b6b' });
+        new ResizeObserver(() => tvChart?.applyOptions({ width: box.clientWidth })).observe(box);
+      }
+      tvChart._series.setData(rows);
+      tvChart.timeScale().fitContent();
+    };
+    onTabs('tf', (tf) => { loadTf(tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
+    await loadTf('15m');
+    if (show && $('swappane')) mountSwap(d, id);
+    clearInterval(tokenTimer);
+    tokenTimer = setInterval(async () => {
+      if (document.hidden || !$('tape')) return;
+      try { paintTape((await api(`tokens/${encodeURIComponent(id)}/trades${q}`)).trades || []); } catch {}
+    }, 15_000);
   },
   async collection(id) {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
     const d = await api(`collection/${encodeURIComponent(id)}${demo ? '?demo=1' : ''}`);
     const c = d.collection;
-    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample collection for layout preview. Not on chain. Native tokens activate with Parano1d v2.1.</p>' : ''}
+    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample collection for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}
       <p><a href="${demoHref('/explore?tab=nfts')}" data-link>← Explore</a></p>
       <div class="card"><h2>${esc(c.name)}</h2>
         <div class="grid">
@@ -1550,7 +1618,8 @@ function feePartsView(t) {
 
 async function render() {
   const [, type, id] = location.pathname.split('/');
-  feed?.close(); feed = null; clearInterval(ticker); unmountGlobe();
+  feed?.close(); feed = null; clearInterval(ticker); clearInterval(exploreTimer); clearInterval(tokenTimer); exploreTimer = null; tokenTimer = null;
+  tvChart?.remove(); tvChart = null; unmountGlobe();
   const onEx = type === 'explore' || type === 'token' || type === 'collection';
   for (const a of document.querySelectorAll('#menu nav a, a.explore')) {
     const href = a.getAttribute('href');
