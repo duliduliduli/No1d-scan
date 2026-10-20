@@ -492,12 +492,16 @@ function centroid(f) {
   return { lat: (Math.min(...ys) + Math.max(...ys)) / 2, lng: (Math.min(...xs) + Math.max(...xs)) / 2 };
 }
 const G = { peers: new Map(), seen: new Set(), home: null, arcs: [], bursts: [] };
+let arcRAF = 0, arcNext = 0, arcN = 0;
+const motionReduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const globeMobile = () => matchMedia('(max-width: 640px)').matches;
+const arcCap = () => (globeMobile() ? 6 : 12); // concurrent arcs; phones stay at the low end
 function globeColors() {
   const acc = cssv('--accent'), gold = cssv('--gold');
   globe.atmosphereColor(acc).globeMaterial().color.set(cssv('--card'));
   globe.hexPolygonColor(({ properties: p }) => G.peers.has(p.cc) ? acc : G.seen.has(p.cc) ? alpha(acc, 0.45) : alpha(acc, 0.13))
     .pointColor(() => acc).ringColor((r) => (t) => alpha(r.burst ? gold : acc, (1 - t) * (r.burst ? 1 : 0.7)))
-    .arcColor(() => [alpha(gold, 0.35), gold]);
+    .arcColor((a) => (a?.burst ? [alpha(gold, 0.9), gold] : [alpha(gold, 0.55), gold]));
 }
 function globeLayers() {
   const pts = [...G.peers].map(([cc, count]) => ({ ...spot(cc), cc, count })).filter((p) => p.lat != null);
@@ -526,17 +530,21 @@ async function mountGlobe(net) {
     .pointLabel((d) => peerLabel(d.cc, countries.find((f) => f.properties.cc === d.cc)?.properties.ADMIN || d.cc))
     .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 4 : 2.5)).ringPropagationSpeed((r) => (r.burst ? 6 : 2)).ringRepeatPeriod((r) => (r.burst ? 9e9 : r.home ? 1200 : 1800))
     .arcStartLat((a) => a.from.lat).arcStartLng((a) => a.from.lng).arcEndLat((a) => a.to.lat).arcEndLng((a) => a.to.lng)
-    .arcDashLength(0.7).arcDashGap(0.6).arcDashInitialGap(1).arcDashAnimateTime(1500).arcStroke(0.9).arcAltitudeAutoScale(0.45);
+    .arcDashLength(0.4).arcDashGap(0.8).arcDashInitialGap((a) => a.gap).arcDashAnimateTime(1300)
+    .arcStroke(globeMobile() ? 0.6 : 0.85).arcAltitudeAutoScale(0.4).arcsTransitionDuration(0);
   globe.hexPolygonUseDots?.(true);
   const ctl = globe.controls();
-  Object.assign(ctl, { autoRotate: true, autoRotateSpeed: 0.55, enableDamping: true });
+  Object.assign(ctl, { autoRotate: !motionReduce(), autoRotateSpeed: 0.55, enableDamping: true });
   let idle; ctl.addEventListener('start', () => { ctl.autoRotate = false; clearTimeout(idle); });
-  ctl.addEventListener('end', () => { idle = setTimeout(() => (ctl.autoRotate = true), 6000); });
+  ctl.addEventListener('end', () => { idle = setTimeout(() => { if (!motionReduce()) ctl.autoRotate = true; }, 6000); });
   globeResize = new ResizeObserver(() => globe?.width(el.clientWidth).height(el.clientHeight));
   globeResize.observe(el);
   setNetwork(net);
-  if (G.home) globe.pointOfView({ ...G.home, altitude: 2.3 }, 1200);
+  if (G.home) globe.pointOfView({ ...G.home, altitude: 2.3 }, motionReduce() ? 0 : 1200);
   globeTimer = setInterval(() => api('network').then(setNetwork).catch(() => {}), 60_000);
+  cancelAnimationFrame(arcRAF);
+  arcNext = 0;
+  arcRAF = requestAnimationFrame(arcTick);
 }
 function setNetwork(net) {
   if (!net) return;
@@ -546,19 +554,73 @@ function setNetwork(net) {
   setNum('gcc', G.peers.size || G.seen.size);
   if (globe) globeLayers();
 }
-// New block: arcs from every peer country into our node, plus a burst at the node.
+// Peer countries that are not the node's own country: an arc needs two different points.
+function arcSpots() {
+  if (!G.home) return [];
+  const out = [];
+  for (const cc of G.peers.keys()) {
+    const s = spot(cc);
+    if (s && (Math.abs(s.lat - G.home.lat) > 0.4 || Math.abs(s.lng - G.home.lng) > 0.4)) out.push(s);
+  }
+  return out;
+}
+// One traveling arc, peer ↔ node, round-robin so every connected country gets a turn.
+function pushArc(kind) {
+  const spots = arcSpots();
+  if (!globe || !spots.length || motionReduce()) return false;
+  while (G.arcs.length >= arcCap()) G.arcs.shift();
+  const src = spots[arcN++ % spots.length];
+  const inbound = arcN % 2 === 0;
+  G.arcs.push({
+    from: inbound ? src : G.home, to: inbound ? G.home : src,
+    born: performance.now(), life: kind === 'burst' ? 1500 : 4200,
+    gap: Math.random() * 0.65, burst: kind === 'burst',
+  });
+  return true;
+}
+function syncArcs() { if (globe) globe.arcsData(G.arcs); }
+// Steady traffic: fill to several arcs quickly, then one new arc every 150–300ms, never above the cap.
+function arcTick(now) {
+  arcRAF = requestAnimationFrame(arcTick);
+  if (!globe || document.hidden) return;
+  if (motionReduce()) {
+    if (G.arcs.length) { G.arcs = []; syncArcs(); }
+    return;
+  }
+  const before = G.arcs.length;
+  G.arcs = G.arcs.filter((a) => now - a.born < a.life);
+  let dirty = G.arcs.length !== before;
+  // Keep spawning at the cap: pushArc drops the oldest, so the globe never goes empty between blocks.
+  if (arcSpots().length && now >= arcNext) {
+    dirty = pushArc('steady') || dirty;
+    arcNext = now + (G.arcs.length < Math.min(6, arcCap()) ? 70 : 150 + Math.random() * 150);
+  }
+  if (dirty) syncArcs();
+}
+function globeFlash(n) {
+  if (!globe || !G.home || motionReduce()) return;
+  let dirty = false;
+  for (let i = 0; i < n; i++) dirty = pushArc('burst') || dirty;
+  if (dirty) syncArcs();
+}
+// New block: a ring at our node, and a short run of brighter arcs. Count stays at the cap.
 function globeBlock(h) {
   const ev = $('gevent');
   if (ev) { ev.textContent = `◆ Block #${h.toLocaleString()} received`; ev.classList.add('show'); setTimeout(() => ev.classList.remove('show'), 3500); }
-  if (!globe || !G.home) return;
-  const from = [...G.peers.keys()].map(spot).filter(Boolean);
-  const arcs = from.map((f) => ({ from: f, to: G.home })), burst = { ...G.home, burst: true };
-  G.arcs.push(...arcs); G.bursts.push(burst); globeLayers();
-  setTimeout(() => { G.arcs = G.arcs.filter((a) => !arcs.includes(a)); G.bursts = G.bursts.filter((b) => b !== burst); globe && globeLayers(); }, 3400);
+  if (!globe || !G.home || motionReduce()) return;
+  const burst = { ...G.home, burst: true };
+  G.bursts.push(burst); globeLayers();
+  globeFlash(globeMobile() ? 3 : 6);
+  setTimeout(() => { G.bursts = G.bursts.filter((b) => b !== burst); if (globe) globeLayers(); }, 2200);
 }
+// New transactions waiting in the mempool. Smaller than a block burst.
+function globeTx(n) { globeFlash(Math.min(globeMobile() ? 2 : 4, Math.max(1, n))); }
 function unmountGlobe() {
-  clearInterval(globeTimer); globeResize?.disconnect();
+  clearInterval(globeTimer); globeTimer = null;
+  cancelAnimationFrame(arcRAF); arcRAF = 0;
+  globeResize?.disconnect(); globeResize = null;
   globe?._destructor?.(); globe = null;
+  G.arcs = []; G.bursts = [];
 }
 
 // Wallet / DEX adapter. Live swaps stay hidden until the server reports the node
@@ -996,7 +1058,11 @@ const pages = {
         setText('hr', si(d.network.hashrate, 'H/s')); setText('diff', si(d.network.difficulty_work, 'H'));
         setText('abt', d.network.avg_block_time ? d.network.avg_block_time.toFixed(1) + ' s' : '–'); setText('b24', n0(d.network.blocks_24h));
       }
-      if (d.mempool) setText('mp', `${n0(d.mempool.size)} pending`);
+      if (d.mempool) {
+        if (feed._mp != null && d.mempool.size > feed._mp) globeTx(d.mempool.size - feed._mp);
+        feed._mp = d.mempool.size;
+        setText('mp', `${n0(d.mempool.size)} pending`);
+      }
       setText('node', d.node.synced ? 'synced' : 'syncing: ' + d.node.sync_stage);
       const h = Number(d.chain.height);
       if (h <= tip) return;
