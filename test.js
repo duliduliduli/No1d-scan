@@ -335,6 +335,32 @@ test('indexer + api', async (t) => {
   node.getBlockHeader = realHeader; holes.clear();
   // Big grouped queries keep temp data in memory (the service's /tmp is read-only).
   assert.strictEqual(db.prepare('pragma temp_store').get().temp_store, 2);
+  // Supply reads through the ts index. A GROUP BY temp b-tree is what fails with "disk I/O error"
+  // when /tmp, /var/tmp and the cwd are read-only.
+  const plan = db.prepare(`explain query plan select ts, cast(json_extract(data, '$.circulating_supply_micronoid') as real) supply from stats where ts >= 0 order by ts`).all().map((r) => r.detail).join('\n');
+  assert.match(plan, /USING INDEX stats_ts/);
+  assert.doesNotMatch(plan, /TEMP B-TREE/);
+  // Fake headers are stamped in 2023, so recent windows only see rows we place near Date.now().
+  const supplyNow = Math.floor(Date.now() / 1000);
+  const old = supplyNow - 10 * 86400;
+  db.exec('begin');
+  const insStat = db.prepare('insert into stats (height, ts, data, hash) values (?, ?, ?, ?)');
+  for (let i = 0; i < 48; i++) insStat.run(5_000_000 + i, old + i * 3600, JSON.stringify({ circulating_supply_micronoid: 5000 + i }), `sup${i}`);
+  for (let i = 0; i < 6; i++) insStat.run(6_000_000 + i, supplyNow - 3000 + i * 300, JSON.stringify({ circulating_supply_micronoid: 9000 + i }), `suph${i}`);
+  db.exec('commit');
+  const [, supAll] = await get('supply?window=all');
+  assert.strictEqual(supAll.window, 'all');
+  assert.ok(supAll.points.some((p) => p.supply === 5047), 'last old sample is the max of its bucket');
+  assert.strictEqual(supAll.points.at(-1).supply, 9005);
+  const [, sup7] = await get('supply?window=7d');
+  assert.ok(sup7.points.length >= 1 && sup7.points.every((p) => p.supply >= 9000 && p.supply <= 9005));
+  const [, sup1] = await get('supply?window=1h');
+  assert.strictEqual(sup1.window, '1h');
+  assert.strictEqual(sup1.points.at(-1).supply, 9005);
+  assert.ok(sup1.points.every((p) => p.t >= supplyNow - 3600 - 300));
+  const [hc, hb] = await get('health', { bare: true });
+  assert.strictEqual(hc, 200);
+  assert.deepStrictEqual({ ok: hb.ok, result: hb.db.result, temp: hb.temp_store }, { ok: true, result: 'ok', temp: 2 });
 
   // Icons and link-preview image are served as files; anything else falls back to the app page.
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -403,4 +429,19 @@ test('indexer + api', async (t) => {
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
+
+  // db-check is read-only and refuses to rebuild a healthy file.
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { DatabaseSync } = require('node:sqlite');
+  const { execFileSync } = require('node:child_process');
+  const tmpDb = path.join(os.tmpdir(), `noid-check-${process.pid}.db`);
+  const tdb = new DatabaseSync(tmpDb);
+  tdb.exec('create table stats (height integer primary key, ts integer, data text not null)');
+  tdb.close();
+  const out = execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/db-check.js', tmpDb], { encoding: 'utf8' });
+  assert.match(out, /quick_check: ok/);
+  assert.throws(() => execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/db-check.js', '--repair', tmpDb], { encoding: 'utf8' }), (e) => e.status === 2 && /Refusing --repair/.test(e.stderr));
+  fs.rmSync(tmpDb, { force: true });
 });

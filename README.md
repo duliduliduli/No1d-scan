@@ -17,7 +17,8 @@ npm start     # http://127.0.0.1:8080
 |---|---|---|
 | `RPC_URL` | `http://127.0.0.1:9601` | Node JSON-RPC |
 | `RPC_TOKEN` | – | Bearer token, only for a remote node |
-| `DB_PATH` | `./noid.db` | SQLite file |
+| `DB_PATH` | `./noid.db` | SQLite file. Sort spill files go in this file's directory unless `SQLITE_TMPDIR` is set |
+| `DB_QUICK_CHECK` | on | Set to `0` to skip the startup `PRAGMA quick_check` |
 | `PORT` / `HOST` | `8080` / `127.0.0.1` | |
 | `RATE_LIMIT` | `120` | API requests per IP per minute |
 | `CACHE_MS` | `5000` | How long an API response is reused in server memory (and by the visitor's browser) |
@@ -26,7 +27,7 @@ npm start     # http://127.0.0.1:8080
 
 ## API
 
-`/api/stats` · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price?window=…` (3-minute ticks, market cap, volume, markets) · `/api/holders?window=…` · `/api/richlist?limit=N` · `/api/supply?window=…` · `/api/candles?interval=15m|1h|4h|1d|1w` (OHLC built from the 3-minute price samples; `approx` candles are older daily/hourly closes) · `/api/live` (server-sent events)
+`/api/stats` · `/api/health` (no key: database `quick_check` plus indexer status) · `/api/blocks?before=H&limit=N` · `/api/block/:height|:hash` · `/api/tx/:txid` · `/api/address/:o1…?page=N` · `/api/txs?page=N` · `/api/charts` · `/api/search?q=…` · `/api/history?window=24h|7d|30d|all` · `/api/miners?window=…` · `/api/mempool` · `/api/network` · `/api/price?window=…` (3-minute ticks, market cap, volume, markets) · `/api/holders?window=…` · `/api/richlist?limit=N` · `/api/supply?window=1h|24h|7d|30d|all` · `/api/candles?interval=15m|1h|4h|1d|1w` (OHLC built from the 3-minute price samples; `approx` candles are older daily/hourly closes) · `/api/live` (server-sent events)
 
 Errors are JSON `{"error": "…"}`: 400 bad input, 401 missing/unknown key, 402 out of credits (AI), 404 not found, 429 rate limited (`retry-after`), 502 node or upstream unavailable. `/api/stats` has `coverage` (which heights have captured bodies) and `indexer.error`. Holder counts and the rich list are approximate: a sweep reads the Live State over ~20 minutes while blocks keep arriving.
 
@@ -42,7 +43,28 @@ All amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); large values com
 2. **Explorer:** install Node 22+ (Ubuntu's own package is too old: use NodeSource or `nvm`), put this repo in `/opt/noid-scan`, then `useradd -r noidscan`, `cp deploy/noid-scan.service /etc/systemd/system/` and `systemctl enable --now noid-scan`.
 3. **TLS:** install Caddy and copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile`. In Cloudflare add A records for `@` and `www` pointing at the droplet, first with the proxy **off** (grey cloud) so Caddy can obtain its certificate; once `https://parano1d-scan.com` loads, set Cloudflare SSL mode to **Full (strict)** and turn the proxy **on** (orange cloud).
 4. **Backups:** back up `/var/lib/noid-scan/noid.db` (plus its `-wal` file, or use `sqlite3 noid.db '.backup out.db'`). It is the only data the node no longer has.
-5. **Monitoring:** point an uptime check at `/api/stats`; its `indexer.at` is the time of the last successful indexer pass. Alert if it is more than a few minutes old.
+5. **Monitoring:** point an uptime check at `/api/health` (or `/api/stats`). `ok` is false when `quick_check` failed or the indexer is paused; `indexer.at` is the time of the last successful pass. Alert if it is more than a few minutes old. Set `DB_QUICK_CHECK=0` to skip the startup check.
+
+### "disk I/O error" on a long window
+
+`ProtectSystem=strict` makes `/tmp`, `/var/tmp` and the working directory (`/opt/noid-scan`) read-only. A grouped query that no longer fits in memory (supply from 7 days, miners and history from 30 days) asks SQLite for a sort file, the create fails, and the API returns `{"error":"disk I/O error"}`. A 24 h window is small enough to stay in memory, so it still works. The database is not full and a reboot does not change this. The process keeps sorts in memory and, if one still spills, writes it next to `noid.db`.
+
+Check the file (read-only; nothing is deleted) after the new code is on the droplet:
+
+```sh
+sudo node /opt/noid-scan/scripts/db-check.js /var/lib/noid-scan/noid.db
+curl -fsS http://127.0.0.1:8080/api/health
+curl -fsS -H 'sec-fetch-site: same-origin' 'http://127.0.0.1:8080/api/supply?window=7d' | head -c 200
+```
+
+`quick_check: ok` means it was the temp directory, not corruption. If the check fails, stop the service and rebuild a **copy** (the live file is not modified):
+
+```sh
+sudo systemctl stop noid-scan
+sudo node /opt/noid-scan/scripts/db-check.js --repair /var/lib/noid-scan/noid.db
+```
+
+The script prints the copy path and the commands to keep a backup and swap it in. Do not delete `noid.db`. `REINDEX` only rebuilds indexes; if the copy is still damaged, the script prints a `sqlite3 .recover` command, which can drop unreadable pages and must land in a new file.
 6. **Cloudflare:** do *not* add a cache rule for `/api/*`: API responses are `private` so the CDN cannot hand keyed data to keyless scripts; the server's own 5 s cache and the shared live feed already keep node load flat. In the DigitalOcean cloud firewall allow ports 80/443 only from [Cloudflare's IP ranges](https://www.cloudflare.com/ips/), plus 9600 from anywhere (node peers) and 22 from your IP. That keeps the rate limiter's client IPs honest.
 
 Run the indexer continuously. Any block body it misses is gone once the node prunes it.
