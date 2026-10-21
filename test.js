@@ -408,6 +408,67 @@ test('indexer + api', async (t) => {
   const [, ps] = await get('price?window=24h');
   assert.ok(ps.points.length >= 2 && ps.points.at(-1).usd === 0.6 && Math.abs(ps.points.at(-1).market_cap_usd - 1.2) < 1e-9);
 
+  // Full history is paged on the price_ticks primary key (no GROUP BY, no temp file).
+  const aged = T - 3 * 86400;
+  const insTick = db.prepare('insert into price_ticks (ts, usd) values (?, ?)');
+  for (let i = 0; i < 48; i++) insTick.run(aged + i * 900, 0.2 + (i % 5) * 0.01);
+  const tickPlan = db.prepare('explain query plan select ts, usd, volume_24h, supply from price_ticks where ts < ? order by ts desc limit cast(? as integer)').all(2_000_000_000, 10).map((r) => r.detail).join('\n');
+  assert.match(tickPlan, /PRIMARY KEY|COVERING INDEX/i, tickPlan);
+  assert.doesNotMatch(tickPlan, /TEMP/);
+  const [, newest] = await get('price?limit=2');
+  assert.strictEqual(newest.points.length, 2);
+  assert.strictEqual(newest.points[1].usd, 0.6);
+  assert.ok(newest.points[0].t < newest.points[1].t && newest.more && newest.oldest === newest.points[0].t);
+  let cursor = newest.oldest, pages = 0, sawDaily = false, prev = newest.points[0].t + 1;
+  while (pages++ < 20) {
+    const [, p] = await get(`price?limit=20&before=${cursor}`);
+    assert.ok(p.points.every((x) => x.t < cursor && x.t < prev), 'price pages move backward without overlap');
+    prev = p.oldest ?? 0;
+    if (p.points.some((x) => x.hi == null && x.usd < 0.4)) sawDaily = true;
+    if (!p.more) { assert.ok(p.points.length); break; }
+    assert.ok(p.oldest < cursor);
+    cursor = p.oldest;
+  }
+  assert.ok(sawDaily, 'paging reaches CoinPaprika daily closes');
+  assert.ok(pages < 40, 'price history ends');
+  const [, cpage] = await get('candles?interval=15m&limit=2');
+  assert.strictEqual(cpage.candles.length, 2);
+  assert.ok(cpage.more && cpage.candles.every((c) => c.t % 900 === 0 && c.t <= cpage.candles.at(-1).t));
+  const [, colder] = await get(`candles?interval=15m&limit=40&before=${cpage.oldest}`);
+  assert.ok(colder.candles.every((c) => c.t < cpage.oldest));
+  let b15 = null, seenT = false, seenOld = false, n15 = 0;
+  while (n15++ < 15) {
+    const [, p] = await get(`candles?interval=15m&limit=40${b15 ? `&before=${b15}` : ''}`);
+    const hit = p.candles.find((c) => c.t === T);
+    if (hit) {
+      seenT = true;
+      assert.deepStrictEqual(hit, { t: T, o: 0.5, h: 0.7, l: 0.4, c: 0.55, n: 4, approx: false });
+    }
+    if (p.candles.some((c) => c.t === aged)) seenOld = true;
+    if (!p.more) break;
+    assert.ok(p.oldest < (b15 ?? Infinity));
+    b15 = p.oldest;
+  }
+  assert.ok(seenT && seenOld, '15m pages include the known candle and older samples');
+  let wk = null, wpages = 0, mondays = [];
+  while (wpages++ < 20) {
+    const [, w] = await get(`candles?interval=1w&limit=3${wk ? `&before=${wk}` : ''}`);
+    assert.strictEqual(w.interval, '1w');
+    assert.ok(w.candles.every((c) => new Date(c.t * 1000).getUTCDay() === 1 && (!wk || c.t < wk)));
+    mondays.push(...w.candles);
+    if (!w.more) break;
+    wk = w.oldest;
+  }
+  assert.ok(mondays.length >= 2 && wpages < 20, 'weekly history is finite and aligned');
+  assert.strictEqual((await get('candles?interval=1h&before=soon'))[0], 400);
+  assert.strictEqual((await get('price?limit=lots'))[0], 400);
+  const [, capped] = await get('candles?interval=1d&limit=999999');
+  assert.ok(capped.candles.length >= 1 && capped.candles.length <= 5000);
+  const js = await fetch(base + '/lightweight-charts.js');
+  assert.strictEqual(js.status, 200);
+  assert.match(js.headers.get('content-type'), /javascript/);
+  assert.match(await js.text(), /LightweightCharts/);
+
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
   const big = parseRpc('{"result":[{"creation_id":9223372036854775807,"value":5},{"creation_id":9223372036854775806,"value":5}]}');
