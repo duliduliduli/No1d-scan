@@ -13,15 +13,20 @@ const RATE_LIMIT = Number(process.env.RATE_LIMIT || 120); // requests per IP per
 const PAID_RATE_LIMIT = Number(process.env.PAID_RATE_LIMIT || 3000); // per account with credits
 const CACHE_MS = Number(process.env.CACHE_MS ?? 5000); // API responses are reused this long; blocks change ~once a minute
 
-const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'noid.db'));
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'noid.db');
+// A GROUP BY that outgrows the in-memory sorter spills to etilqs in SQLITE_TMPDIR, /var/tmp, /tmp, then the
+// cwd. ProtectSystem=strict makes every one of those read-only, and SQLite reports the failed create as
+// "disk I/O error" (supply from 7d up; miners and history from 30d up). The db directory is the writable
+// StateDirectory. temp_store=memory skips the file; this is the fallback for anything that still spills.
+if (DB_PATH !== ':memory:' && !process.env.SQLITE_TMPDIR) process.env.SQLITE_TMPDIR = path.dirname(path.resolve(DB_PATH));
+const db = new DatabaseSync(DB_PATH);
 db.exec(`
   pragma journal_mode = wal;
-  -- Sorting/grouping big queries (miners or history over 7d+) needs temp space. The service runs with
-  -- ProtectSystem=strict, so /tmp is read-only and a temp file fails with "disk I/O error". Keep it in memory.
   pragma temp_store = memory;
   create table if not exists blocks (height integer primary key, hash text not null, details text not null);
   create index if not exists blocks_hash on blocks(hash);
   create table if not exists stats (height integer primary key, ts integer, data text not null);
+  create index if not exists stats_ts on stats(ts);
   -- Every header since genesis (headers are never pruned): powers all-time hashrate, block time and miner stats.
   -- Our own price samples every 3 minutes (CoinPaprika's free history is hourly for 24 h, daily beyond).
   create table if not exists price_ticks (ts integer primary key, usd real not null, volume_24h real, supply integer);
@@ -51,8 +56,10 @@ const q = {
     from price_ticks where ts >= :since group by ts / cast(:b as integer) order by t`),
   firstTick: db.prepare('select min(ts) t from price_ticks'),
   tickRange: db.prepare('select ts, usd from price_ticks where ts >= ? order by ts'),
-  supplySeries: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, max(cast(json_extract(data, '$.circulating_supply_micronoid') as real)) supply
-    from stats where ts >= :since group by ts / cast(:b as integer) order by t`),
+  // Index scan, no GROUP BY: a temp b-tree here is what returns "disk I/O error" when the cwd is read-only.
+  // shortcut: bucketed in JS. Aggregate in SQL again if stats passes a few million rows.
+  supplySeries: db.prepare(`select ts, cast(json_extract(data, '$.circulating_supply_micronoid') as real) supply
+    from stats where ts >= ? order by ts`),
   addHolders: db.prepare('insert or replace into holders (ts, holders, supply, top10, top100, slots) values (?, ?, ?, ?, ?, ?)'),
   holdersSeries: db.prepare('select ts t, holders, supply, top10, top100, slots from holders where ts >= ? order by ts'),
   lastHolders: db.prepare('select ts, holders, supply, top10, top100, slots from holders order by ts desc limit 1'),
@@ -346,11 +353,38 @@ async function sweepHolders() {
 
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip);
 
+// One quick_check at startup (DB_QUICK_CHECK=0 skips it). Logs either way; never rewrites the file.
+let dbCheck = { ok: true, result: 'skipped' };
+function checkDb() {
+  if (process.env.DB_QUICK_CHECK === '0') return dbCheck;
+  try {
+    const rows = db.prepare('pragma quick_check').all().map((r) => String(Object.values(r)[0]));
+    const ok = rows.length === 1 && rows[0] === 'ok';
+    dbCheck = { ok, result: ok ? 'ok' : rows.slice(0, 20).join('\n') };
+    (ok ? console.log : console.error)(`db quick_check: ${dbCheck.result}`);
+  } catch (e) {
+    dbCheck = { ok: false, result: e.message };
+    console.error('db quick_check:', e.message);
+  }
+  return dbCheck;
+}
+checkDb();
+
 // Candle interval -> [seconds per candle, how far back to show].
 const CANDLES = { '15m': [900, 86400], '1h': [3600, 4 * 86400], '4h': [14400, 16 * 86400], '1d': [86400, 120 * 86400], '1w': [604800, 3 * 365 * 86400] }; // ~100 candles each
 const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
 
 const routes = {
+  // No key required, same as /api/stats: uptime checks hit this directly.
+  async health() {
+    return {
+      ok: dbCheck.ok && !indexer.error,
+      db: dbCheck,
+      temp_store: db.prepare('pragma temp_store').get().temp_store,
+      indexer: { tip: indexer.tip, at: indexer.at, error: indexer.error },
+    };
+  },
+
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
       rpc('getChainInfo'), rpc('getStateInfo'), rpc('getNodeStatus'), rpc('getPeerCount'), rpc('getMiningInfo'),
@@ -504,9 +538,19 @@ const routes = {
 
   async supply(_, params) {
     const w = params.get('window') || '30d';
-    const now = Math.floor(Date.now() / 1000);
-    const bucket = { '24h': 900, '7d': 3600, '30d': 21600, all: 86400 }[w] ?? 21600;
-    return { window: w, points: q.supplySeries.all({ b: bucket, since: now - (WINDOWS[w] ?? WINDOWS['30d']) }) };
+    // 1h is not a chart tab; without this it used to fall through to the 30-day scan.
+    const spec = { '1h': [300, 3600], '24h': [900, 86400], '7d': [3600, 7 * 86400], '30d': [21600, 30 * 86400], all: [86400, 1e10] }[w]
+      ?? [21600, 30 * 86400];
+    const [bucket, span] = spec;
+    const points = [];
+    for (const r of q.supplySeries.all(Math.floor(Date.now() / 1000) - span)) {
+      if (r.supply == null) continue;
+      const t = Math.floor(r.ts / bucket) * bucket;
+      const last = points.at(-1);
+      if (last?.t === t) { if (r.supply > last.supply) last.supply = r.supply; }
+      else points.push({ t, supply: r.supply });
+    }
+    return { window: w, points };
   },
 
   async charts() {
@@ -612,7 +656,7 @@ async function handle(req, res) {
 
     // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
-    if (!acct && !ownPage && name !== 'stats') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
+    if (!acct && !ownPage && name !== 'stats' && name !== 'health') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
     if (url.pathname === '/api/live') return live(req, res, ip);
     // Billing: a keyed request counts only when it returns data (200, cached or not); errors, 404s and the live feed are free.
     const ok = (body, xcache) => { if (acct) bill.countRequest(acct); send(200, body, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': xcache }); };

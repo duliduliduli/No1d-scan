@@ -187,6 +187,9 @@ const api = async (p, body) => {
   if (!r.ok) throw Object.assign(new Error(j.error), { status: r.status });
   return j;
 };
+// One failed call must not reject the whole page: the card shows the error, the rest still render.
+const part = (p) => api(p).catch((e) => ({ _err: e.message }));
+const errp = (x) => `<p class="msg err">${esc(x?._err || 'unavailable')}</p>`;
 const n0 = (x) => Number(x ?? 0).toLocaleString();
 const usd = (credits, per) => `$${(credits / per).toFixed(2)}`;
 
@@ -232,7 +235,7 @@ const rows = (list, cols) => list?.length
 // ---- live helpers
 let feed = null, ticker = null;
 const $ = (id) => document.getElementById(id);
-function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+function flash(el) { if (!el) return; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
 function setText(id, s) { const el = $(id); if (el && el.textContent !== String(s)) { el.textContent = s; flash(el); } }
 // Count from the shown value to the new one so changes are visible.
 function setNum(id, n) {
@@ -500,7 +503,8 @@ function unmountGlobe() {
 
 const pages = {
   async home() {
-    const [s, b, t, hi, net, mi] = await Promise.all([api('stats'), api('blocks?limit=15'), api('txs').catch(() => null), api('history?window=24h'), api('network').catch(() => null), api('miners?window=24h').catch(() => null)]);
+    const [s0, b0, t0, hi0, net0, mi0] = await Promise.all([part('stats'), part('blocks?limit=15'), part('txs'), part('history?window=24h'), part('network'), part('miners?window=24h')]);
+    const s = s0._err ? null : s0, b = b0._err ? null : b0, t = t0._err ? null : t0, hi = hi0._err ? null : hi0, net = net0._err ? null : net0, mi = mi0._err ? null : mi0;
     let chartWin = '24h', minerWin = '24h';
     const stat = (k, id, v, tip) => `<div class="card stat" title="${esc(tip)}"><small>${k}</small><b id="${id}">${v}</b></div>`;
     const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, TX_COLS)}` : '';
@@ -508,21 +512,21 @@ const pages = {
       <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
       <div class="card globe"><div id="globe"><div class="glmsg">Loading network globe…</div></div>
         <div class="over">
-          <div class="chip">Block<b id="gh">${n0(s.chain.height)}</b></div>
-          <div class="chip">Last block<b id="gago">${esc(ago(b.blocks[0]?.timestamp))}</b></div>
-          <div class="chip">NOID<b id="gpx">${esc(s.price ? usd4(s.price.usd) : '–')}</b></div>
-          <div class="chip">Peers<b id="gpeers">${n0(s.peers)}</b></div>
-          <div class="chip">Countries<b id="gcc">${n0(net?.peers.length)}</b></div>
+          <div class="chip">Block<b id="gh">${s ? n0(s.chain.height) : '–'}</b></div>
+          <div class="chip">Last block<b id="gago">${b ? esc(ago(b.blocks[0]?.timestamp)) : '–'}</b></div>
+          <div class="chip">NOID<b id="gpx">${esc(s?.price ? usd4(s.price.usd) : '–')}</b></div>
+          <div class="chip">Peers<b id="gpeers">${s ? n0(s.peers) : '–'}</b></div>
+          <div class="chip">Countries<b id="gcc">${net ? n0(net.peers.length) : '–'}</b></div>
         </div>
         <div class="event" id="gevent"></div>
         <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
-      <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
-        <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
+      <div class="card"><h2>NOID price <small class="muted">${esc(s?.price?.source || '')}</small></h2>
+        <div id="phead">${s ? priceHead(s.price, s.chain.circulating_supply_micronoid) : errp(s0)}</div>
         <div style="margin:12px 0 0">${priceBox('pwin')}</div>
         <p style="margin:8px 0 0;text-align:right"><a href="/market" data-link>Full market analytics →</a></p></div>
-      <div class="grid">
+      ${s ? `<div class="grid">
         ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
-        ${stat('Last block', 'ago', esc(ago(b.blocks[0]?.timestamp)), 'Time since the newest block was mined.')}
+        ${stat('Last block', 'ago', b ? esc(ago(b.blocks[0]?.timestamp)) : '–', 'Time since the newest block was mined.')}
         ${stat('Circulating supply', 'supply', esc(noid(s.chain.circulating_supply_micronoid)), 'All NOID currently in existence.')}
         ${stat('Block reward', 'reward', esc(noid(s.mining.block_reward_micronoid)), 'NOID paid to the miner of each new block.')}
         ${stat('Active slots', 'slots', esc(Number(s.state.active_slots).toLocaleString()), 'Unspent outputs in the Live State (like UTXOs).')}
@@ -534,30 +538,31 @@ const pages = {
         ${stat('Mempool', 'mp', '…', 'Transactions waiting to be mined, and the minimum fee rate accepted.')}
         ${stat('Connected peers', 'peers', esc(s.peers), 'Other nodes this explorer’s node is talking to.')}
         ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
-      </div>
+      </div>` : `<div class="card"><h2>Overview</h2>${errp(s0)}</div>`}
       <div class="card"><h2>Network history</h2>${tabs('cwin', WINDOW_TABS, '24h')}</div>
-      <div class="grid" id="charts">${charts(hi)}</div>
-      <div class="card" id="miners">${minersCard(mi)}</div>
-      <div class="card"><h2>Latest blocks</h2><div id="blocks">${rows(b.blocks, BLOCK_COLS)}</div>
-        <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p></div>
-      <div class="card" id="txs">${txsCard(t)}</div>`;
-    for (const [id, v] of Object.entries({ h: s.chain.height, gh: s.chain.height, slots: s.state.active_slots, peers: s.peers, gpeers: s.peers, gcc: net?.peers.length })) $(id).dataset.v = v ?? 0;
+      <div class="grid" id="charts">${hi ? charts(hi) : errp(hi0)}</div>
+      <div class="card" id="miners">${mi ? minersCard(mi) : `<h2>Top miners</h2>${errp(mi0)}`}</div>
+      <div class="card"><h2>Latest blocks</h2>${b ? `<div id="blocks">${rows(b.blocks, BLOCK_COLS)}</div>
+        <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p>` : errp(b0)}</div>
+      <div class="card" id="txs">${t0._err ? errp(t0) : txsCard(t)}</div>`;
+    if (s) for (const [id, v] of Object.entries({ h: s.chain.height, gh: s.chain.height, slots: s.state.active_slots, peers: s.peers, gpeers: s.peers, gcc: net?.peers.length })) { const el = $(id); if (el) el.dataset.v = v ?? 0; }
     growBars();
-    const loadCharts = async () => { $('charts').innerHTML = charts(await api(`history?window=${chartWin}&at=${tip}`)); };
+    const loadCharts = async () => { const el = $('charts'); if (el) el.innerHTML = charts(await api(`history?window=${chartWin}&at=${tip}`)); };
     const loadMiners = () => showMiners(`miners?window=${minerWin}&at=${tip}`, (v) => { minerWin = v; loadMiners(); });
-    onTabs('cwin', (v) => { chartWin = v; loadCharts().catch((e) => { $('charts').innerHTML = `<p class="msg err">Could not load this window: ${esc(e.message)}</p>`; }); });
+    onTabs('cwin', (v) => { chartWin = v; loadCharts().catch((e) => { const el = $('charts'); if (el) el.innerHTML = `<p class="msg err">Could not load this window: ${esc(e.message)}</p>`; }); });
     onTabs('mwin', (v) => { minerWin = v; loadMiners(); });
-    mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
+    if (net0._err) { const g = $('globe'); if (g) g.innerHTML = `<div class="glmsg">${esc(net0._err)}</div>`; }
+    else mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
     wirePriceBox('pwin', 170);
-    let tip = Number(s.chain.height), tipTs = b.blocks[0]?.timestamp;
-    ticker = setInterval(() => { if (tipTs) { $('ago').textContent = ago(tipTs); $('gago').textContent = ago(tipTs); } }, 1000);
+    let tip = s ? Number(s.chain.height) : 0, tipTs = b?.blocks[0]?.timestamp;
+    ticker = setInterval(() => { if (tipTs) { if ($('ago')) $('ago').textContent = ago(tipTs); if ($('gago')) $('gago').textContent = ago(tipTs); } }, 1000);
     feed = new EventSource('/api/live');
     feed.onmessage = async (e) => {
       const d = JSON.parse(e.data);
-      $('dot').classList.remove('off'); $('livemsg').textContent = `LIVE · updates every 2 s · checked ${new Date(d.at).toLocaleTimeString()}`;
+      $('dot')?.classList.remove('off'); if ($('livemsg')) $('livemsg').textContent = `LIVE · updates every 2 s · checked ${new Date(d.at).toLocaleTimeString()}`;
       setText('supply', noid(d.chain.circulating_supply_micronoid));
-      if (d.price) {
+      if (d.price && $('pxch')) {
         setText('px', usd4(d.price.usd)); setText('gpx', usd4(d.price.usd)); setText('pxvol', money(d.price.volume_24h_usd, 0));
         setText('pxcap', money((Number(d.chain.circulating_supply_micronoid) / 1e6) * d.price.usd, 0));
         const ch = d.price.change_24h_pct; $('pxch').className = ch >= 0 ? 'up' : 'down';
@@ -575,17 +580,17 @@ const pages = {
       const h = Number(d.chain.height);
       if (h <= tip) return;
       const old = tip; tip = h; tipTs = d.header?.timestamp ?? tipTs;
-      $('h').href = `/block/${h}`; setNum('h', h); setNum('gh', h);
+      if ($('h')) $('h').href = `/block/${h}`; setNum('h', h); setNum('gh', h);
       flash($('ago')); flash($('gago')); globeBlock(h);
       // ?at= makes each new height a fresh (but still shared) cache entry.
       const [nb, nt] = await Promise.all([api(`blocks?limit=15&at=${h}`), api(`txs?at=${h}`).catch(() => null)]);
       if (!feed) return;
-      $('blocks').innerHTML = rows(nb.blocks, BLOCK_COLS); markNew('blocks', old);
-      $('txs').innerHTML = txsCard(nt); loadCharts().catch(() => {}); loadMiners().catch(() => {});
+      if ($('blocks')) { $('blocks').innerHTML = rows(nb.blocks, BLOCK_COLS); markNew('blocks', old); }
+      if ($('txs')) $('txs').innerHTML = txsCard(nt); loadCharts().catch(() => {}); loadMiners().catch(() => {});
     };
-    feed.addEventListener('down', () => { $('dot').classList.add('off'); $('livemsg').textContent = 'Node not responding · retrying'; });
+    feed.addEventListener('down', () => { $('dot')?.classList.add('off'); if ($('livemsg')) $('livemsg').textContent = 'Node not responding · retrying'; });
     feed.onerror = () => { $('dot')?.classList.add('off'); $('livemsg') && ($('livemsg').textContent = 'Connection lost · reconnecting…'); };
-    if (s.donate) document.getElementById('foot').innerHTML += `<p>Support this explorer: ${link('address', s.donate)}</p>`;
+    if (s?.donate) document.getElementById('foot').innerHTML += `<p>Support this explorer: ${link('address', s.donate)}</p>`;
   },
   async blocks(before) {
     const b = await api(`blocks?limit=50&before=${encodeURIComponent(before)}`);
@@ -616,45 +621,52 @@ const pages = {
   'api-access': () => go('/account'),
 
   async market() {
-    const [s, pr, ho, rl, su] = await Promise.all([api('stats'), api('price?window=24h'), api('holders?window=30d'), api('richlist?limit=25'), api('supply?window=30d')]);
-    const p = pr.now, supplyNoid = Number(s.chain.circulating_supply_micronoid) / 1e6;
+    const [s, pr, ho, rl, su] = await Promise.all([
+      part('stats'), part('price?window=24h'), part('holders?window=30d'), part('richlist?limit=25'), part('supply?window=30d'),
+    ]);
+    const p = pr._err ? null : pr.now;
+    const supplyMicro = s._err ? null : s.chain.circulating_supply_micronoid;
+    const supplyNoid = supplyMicro == null ? null : Number(supplyMicro) / 1e6;
     const card = (title, html, id = '') => `<div class="card"${id ? ` id="${id}"` : ''}><h2>${title}</h2>${html}</div>`;
-    const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h')}<div id="${name}c" style="margin-top:10px">${priceSeries(h, key)}</div>`);
+    const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h')}<div id="${name}c" style="margin-top:10px">${h._err ? errp(h) : priceSeries(h, key)}</div>`);
+    const supplyBody = su._err ? errp(su) : (su.points.length > 1 ? ichart(su.points.map((x) => [x.t, x.supply / 1e6]), 'day', 'num', 130) : '<p class="muted">Collecting…</p>');
+    const holdersBody = ho._err ? errp(ho) : (ho.points.length > 1 ? ichart(ho.points.map((x) => [x.t, x.holders]), 'day', 'count', 130) : '<p class="muted">Collecting: one point per sweep, every ' + Math.round(ho.sweep.every_ms / 60000) + ' minutes.</p>');
     app.innerHTML = `
       <div class="grid">
-        <div class="card stat"><small>NOID price</small><b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small></div>
-        <div class="card stat" title="Price × circulating supply from this node"><small>Market cap</small><b>${esc(money(supplyNoid * p.usd, 0))}</b></div>
-        <div class="card stat"><small>24h volume</small><b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small></div>
-        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small><b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'approx. · swept ' + ago(ho.latest.ts) : ho.sweep.running ? 'first sweep ' + Math.round(100 * (ho.sweep.progress || 0)) + '% done' : 'first sweep pending'}</small></div>
-        <div class="card stat"><small>All-time high</small><b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small></div>
-        <div class="card stat"><small>Circulating supply</small><b>${esc(noid(s.chain.circulating_supply_micronoid))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small></div>
+        <div class="card stat"><small>NOID price</small>${p ? `<b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small>` : errp(pr)}</div>
+        <div class="card stat" title="Price × circulating supply from this node"><small>Market cap</small>${p && supplyNoid != null ? `<b>${esc(money(supplyNoid * p.usd, 0))}</b>` : errp(s._err ? s : pr)}</div>
+        <div class="card stat"><small>24h volume</small>${p ? `<b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small>` : errp(pr)}</div>
+        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small>${ho._err ? errp(ho) : `<b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'approx. · swept ' + ago(ho.latest.ts) : ho.sweep.running ? 'first sweep ' + Math.round(100 * (ho.sweep.progress || 0)) + '% done' : 'first sweep pending'}</small>`}</div>
+        <div class="card stat"><small>All-time high</small>${p ? `<b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small>` : errp(pr)}</div>
+        <div class="card stat"><small>Circulating supply</small>${s._err ? errp(s) : `<b>${esc(noid(supplyMicro))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small>`}</div>
       </div>
-      ${card('Price change', `<div class="delta">${['15m', '1h', '6h', '24h', '7d', '30d'].map((k) => `<div><small>${k}</small>${pct(p.change[k])}</div>`).join('')}</div>`)}
-      ${card(`NOID / USD <small class="muted">${pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`, priceBox('px'))}
+      ${card('Price change', p ? `<div class="delta">${['15m', '1h', '6h', '24h', '7d', '30d'].map((k) => `<div><small>${k}</small>${pct(p.change[k])}</div>`).join('')}</div>` : errp(pr))}
+      ${card(`NOID / USD <small class="muted">${!pr._err && pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`, priceBox('px'))}
       <div class="grid">
         ${chartCard('Market cap', 'mc', 'cap', pr)}
         ${chartCard('24h volume', 'vo', 'vol', pr)}
       </div>
       <div class="grid">
-        ${card(`Holders over time${ho.first ? ` <small class="muted">tracked since ${esc(new Date(ho.first * 1000).toLocaleDateString())}; longer windows show the same data until then</small>` : ''}`, `${tabs('hw', WINDOW_TABS, '30d')}<div id="hwc" style="margin-top:10px">${ho.points.length > 1 ? ichart(ho.points.map((x) => [x.t, x.holders]), 'day', 'count', 130) : '<p class="muted">Collecting: one point per sweep, every ' + Math.round(ho.sweep.every_ms / 60000) + ' minutes.</p>'}</div>`)}
-        ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d')}<div id="swc" style="margin-top:10px">${su.points.length > 1 ? ichart(su.points.map((x) => [x.t, x.supply / 1e6]), 'day', 'num', 130) : '<p class="muted">Collecting…</p>'}</div>`)}
+        ${card(`Holders over time${!ho._err && ho.first ? ` <small class="muted">tracked since ${esc(new Date(ho.first * 1000).toLocaleDateString())}; longer windows show the same data until then</small>` : ''}`, `${tabs('hw', WINDOW_TABS, '30d')}<div id="hwc" style="margin-top:10px">${holdersBody}</div>`)}
+        ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d')}<div id="swc" style="margin-top:10px">${supplyBody}</div>`)}
       </div>
-      ${card('Concentration', ho.latest?.holders ? `<div class="delta">
+      ${card('Concentration', ho._err ? errp(ho) : ho.latest?.holders ? `<div class="delta">
           <div><small>Top 10 hold</small><b>${(100 * ho.latest.top10 / ho.latest.supply).toFixed(1)}%</b></div>
           <div><small>Top 100 hold</small><b>${(100 * ho.latest.top100 / ho.latest.supply).toFixed(1)}%</b></div>
           <div><small>Live slots</small><b>${n0(ho.latest.slots)}</b></div>
           <div><small>Avg per holder</small><b>${esc(noid(Math.round(ho.latest.supply / ho.latest.holders)))}</b></div></div>` : '<p class="muted">Available after the first sweep.</p>')}
-      ${card(`Rich list <small class="muted">top 25 of ${rl.holders ? n0(rl.holders) : '…'} holders${rl.updated ? ' · approximate, swept ' + esc(ago(rl.updated)) : ''}</small>`,
-        rl.rows.length ? `<div class="bars">${rl.rows.map((r) => `<a class="bar" href="/address/${encodeURIComponent(r.address)}" data-link title="${esc(r.address)}">
+      ${card(`Rich list <small class="muted">top 25 of ${!rl._err && rl.holders ? n0(rl.holders) : '…'} holders${!rl._err && rl.updated ? ' · approximate, swept ' + esc(ago(rl.updated)) : ''}</small>`,
+        rl._err ? errp(rl) : rl.rows.length ? `<div class="bars">${rl.rows.map((r) => `<a class="bar" href="/address/${encodeURIComponent(r.address)}" data-link title="${esc(r.address)}">
           <span class="name">#${r.rank} ${esc(r.address)}</span><span class="val">${esc(noid(r.balance))} · ${(100 * r.share).toFixed(2)}% · ${n0(r.slots)} slots</span>
           <span class="track"><span class="fill" data-w="${(100 * r.balance / rl.rows[0].balance).toFixed(1)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Available after the first Live State sweep (a few minutes after start).</p>')}
-      ${card('Markets', pr.markets?.length ? rows(pr.markets.map((m) => ({ exchange: m.exchange, pair: m.pair, price: usd4(m.usd), volume_24h: money(m.volume_24h_usd, 0), share: (m.share_pct ?? 0).toFixed(1) + '%' })), ['exchange', 'pair', 'price', 'volume_24h', 'share'])
+      ${card('Markets', pr._err ? errp(pr) : pr.markets?.length ? rows(pr.markets.map((m) => ({ exchange: m.exchange, pair: m.pair, price: usd4(m.usd), volume_24h: money(m.volume_24h_usd, 0), share: (m.share_pct ?? 0).toFixed(1) + '%' })), ['exchange', 'pair', 'price', 'volume_24h', 'share'])
         + '<p class="muted">Order books and individual trades are not published by these exchanges in a form this explorer can read; prices and volumes come from CoinPaprika.</p>' : '<p class="muted">Market list unavailable right now.</p>')}`;
     growBars();
-    const reload = (name, key) => (w) => api(`price?window=${w}`).then((h) => { $(name + 'c').innerHTML = priceSeries(h, key); });
+    const into = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+    const reload = (name, key) => (w) => api(`price?window=${w}`).then((h) => into(name + 'c', priceSeries(h, key))).catch((e) => into(name + 'c', errp({ _err: e.message })));
     wirePriceBox('px', 200); onTabs('mc', reload('mc', 'cap')); onTabs('vo', reload('vo', 'vol'));
-    onTabs('hw', (w) => api(`holders?window=${w}`).then((h) => { $('hwc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.holders]), BUCKET_FMT[w], 'count', 130) : '<p class="muted">Not enough sweeps in this window yet.</p>'; }));
-    onTabs('sw', (w) => api(`supply?window=${w}`).then((h) => { $('swc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.supply / 1e6]), BUCKET_FMT[w], 'num', 130) : '<p class="muted">Collecting…</p>'; }));
+    onTabs('hw', (w) => api(`holders?window=${w}`).then((h) => into('hwc', h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.holders]), BUCKET_FMT[w], 'count', 130) : '<p class="muted">Not enough sweeps in this window yet.</p>')).catch((e) => into('hwc', errp({ _err: e.message }))));
+    onTabs('sw', (w) => api(`supply?window=${w}`).then((h) => into('swc', h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.supply / 1e6]), BUCKET_FMT[w], 'num', 130) : '<p class="muted">Collecting…</p>')).catch((e) => into('swc', errp({ _err: e.message }))));
   },
 
   async mempool() {
@@ -672,11 +684,14 @@ const pages = {
   },
 
   async mining() {
-    const [s, m, h] = await Promise.all([api('stats'), api('miners?window=24h'), api('history?window=7d')]);
-    const net = s.network, height = Number(s.chain.height);
-    // Until block 3,223,778 miners get 90% of the subsidy; the other 10% goes to the allocation schedule.
-    const minerShare = height < 3223778 ? 0.9 : 1, reward = (Number(s.mining.block_reward_micronoid) / 1e6) * minerShare;
-    app.innerHTML = `<div class="grid">
+    const [s, m, h] = await Promise.all([part('stats'), part('miners?window=24h'), part('history?window=7d')]);
+    const hashCard = `<div class="card"><h2>Hashrate, last 7 days</h2>${h._err ? errp(h) : ichart(h.points.map((p) => [p.t, p.hashrate]), 'dayhour', 'hs', 150)}</div>`;
+    const minerCard = `<div class="card" id="miners">${m._err ? `<h2>Top miners</h2>${errp(m)}` : minersCard(m)}</div>`;
+    if (!s._err) {
+      const net = s.network, height = Number(s.chain.height);
+      // Until block 3,223,778 miners get 90% of the subsidy; the other 10% goes to the allocation schedule.
+      const minerShare = height < 3223778 ? 0.9 : 1, reward = (Number(s.mining.block_reward_micronoid) / 1e6) * minerShare;
+      app.innerHTML = `<div class="grid">
         <div class="card stat"><small>Network hashrate</small><b>${esc(si(net.hashrate, 'H/s'))}</b></div>
         <div class="card stat"><small>Difficulty</small><b>${esc(si(net.difficulty_work, 'H'))}</b></div>
         <div class="card stat"><small>Avg block time</small><b>${esc(net.avg_block_time?.toFixed(1) ?? '–')} s</b></div>
@@ -689,21 +704,22 @@ const pages = {
         </div>
         <div class="grid" id="mout" style="margin-top:12px"></div>
         <p class="muted">Mining is random: real results vary a lot from day to day, especially with a small share of the network. "Revenue minus electricity" leaves out hardware cost, pool and exchange fees, how much NOID the market can absorb, and future changes in difficulty and price.</p></div>
-      <div class="card"><h2>Hashrate, last 7 days</h2>${ichart(h.points.map((p) => [p.t, p.hashrate]), 'dayhour', 'hs', 150)}</div>
-      <div class="card" id="miners">${minersCard(m)}</div>`;
-    const calc = () => {
-      const mine = Number($('mh').value) * Number($('mu').value), share = net.hashrate ? mine / net.hashrate : 0;
-      const blocksDay = 86400 / (net.avg_block_time || 30), myBlocks = blocksDay * share, noidDay = myBlocks * reward;
-      const usd = s.price?.usd, power = (Number($('mw').value) / 1000) * 24 * Number($('mk').value);
-      const out = (k, v) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b></div>`;
-      $('mout').innerHTML = out('Share of network', `${(share * 100).toPrecision(3)}%`) + out('NOID per day', noidDay.toLocaleString(undefined, { maximumFractionDigits: 4 }))
-        + out('Revenue per day', usd ? money(noidDay * usd) : '–') + out('Electricity per day', money(power))
-        + out('Revenue minus electricity / day', usd ? money(noidDay * usd - power) : '–') + out('Avg time to find a block', myBlocks ? (myBlocks >= 24 ? `${((24 * 60) / myBlocks).toFixed(1)} min` : myBlocks >= 1 ? `${(24 / myBlocks).toFixed(1)} h` : `${(1 / myBlocks).toFixed(1)} days`) : '–');
-    };
-    for (const id of ['mh', 'mu', 'mw', 'mk']) $(id).oninput = calc;
-    calc(); growBars();
-    const pick = (v) => showMiners(`miners?window=${v}`, pick);
-    onTabs('mwin', pick);
+      ${hashCard}
+      ${minerCard}`;
+      const calc = () => {
+        const mine = Number($('mh').value) * Number($('mu').value), share = net.hashrate ? mine / net.hashrate : 0;
+        const blocksDay = 86400 / (net.avg_block_time || 30), myBlocks = blocksDay * share, noidDay = myBlocks * reward;
+        const usd = s.price?.usd, power = (Number($('mw').value) / 1000) * 24 * Number($('mk').value);
+        const out = (k, v) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b></div>`;
+        $('mout').innerHTML = out('Share of network', `${(share * 100).toPrecision(3)}%`) + out('NOID per day', noidDay.toLocaleString(undefined, { maximumFractionDigits: 4 }))
+          + out('Revenue per day', usd ? money(noidDay * usd) : '–') + out('Electricity per day', money(power))
+          + out('Revenue minus electricity / day', usd ? money(noidDay * usd - power) : '–') + out('Avg time to find a block', myBlocks ? (myBlocks >= 24 ? `${((24 * 60) / myBlocks).toFixed(1)} min` : myBlocks >= 1 ? `${(24 / myBlocks).toFixed(1)} h` : `${(1 / myBlocks).toFixed(1)} days`) : '–');
+      };
+      for (const id of ['mh', 'mu', 'mw', 'mk']) $(id).oninput = calc;
+      calc();
+    } else app.innerHTML = `<div class="card"><h2>Mining</h2>${errp(s)}</div>${hashCard}${minerCard}`;
+    growBars();
+    if (!m._err) { const pick = (v) => showMiners(`miners?window=${v}`, pick); onTabs('mwin', pick); }
   },
 
 
@@ -728,6 +744,7 @@ const pages = {
         <table>
           <tr><th>Endpoint</th><th>Returns</th></tr>
           <tr><td><code>GET /stats</code></td><td>Height, supply, difficulty, block reward, Live State, peers, node status</td></tr>
+          <tr><td><code>GET /health</code></td><td>Database quick_check and indexer status, for uptime monitors (no key)</td></tr>
           <tr><td><code>GET /live</code></td><td>Server-sent events: the stats above, pushed every 2 s</td></tr>
           <tr><td><code>GET /blocks?before=H&amp;limit=N</code></td><td>Block headers, newest first (max 50)</td></tr>
           <tr><td><code>GET /block/:height|:hash</code></td><td>One block, with its transactions while retained</td></tr>
@@ -913,7 +930,7 @@ async function render() {
   try {
     await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
-    app.innerHTML = `<div class="card"><h2>Not found</h2><p class="muted">${esc(e.message)}</p></div>`;
+    app.innerHTML = `<div class="card"><h2>${e.status === 404 ? 'Not found' : 'Unavailable'}</h2><p class="muted">${esc(e.message)}</p></div>`;
   }
 }
 const go = (href) => { history.pushState(null, '', href); render(); };
