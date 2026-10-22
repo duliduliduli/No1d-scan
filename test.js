@@ -580,6 +580,9 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /data-boost=/);
   assert.match(homeHtml, /id="promotion"/);
   assert.match(homeHtml, /aria-label="Promoted"/);
+  assert.match(homeHtml, /Get Enhanced/);
+  assert.match(homeHtml, /id="sortpop"/);
+  assert.match(homeHtml, /id="listbar"/);
   assert.match(homeHtml, /aria-label="USDC chain"/);
   assert.match(homeHtml, /native USDC on the chain you pick/);
   assert.match(homeHtml, /© 2026 Duli Media LLC/);

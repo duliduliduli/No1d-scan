@@ -28,7 +28,7 @@
   :root[data-theme="light"] body { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%230a7a6e' stroke-opacity='.08'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3C/svg%3E") }
   * { box-sizing:border-box }
   body { margin:0; color:var(--fg); font:15px/1.55 system-ui, sans-serif; min-height:100vh;
-    background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%23a8f5e9' stroke-opacity='.09'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%23a8f5e9' fill-opacity='.18' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
+    background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%23a8f5e9' stroke-opacity='.045'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%23a8f5e9' fill-opacity='.08' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
   a { color:var(--accent); text-decoration:none } a:hover { text-shadow:var(--glow) }
   header, main, footer { max-width:1100px; margin:0 auto; padding:16px }
   header { display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--line) }
@@ -168,12 +168,20 @@
   .swap .risk b { display:block; margin-bottom:6px; color:var(--gold); letter-spacing:.06em; text-transform:uppercase; font-size:11px }
   .swap .risk ul { margin:0; padding-left:1.1em } .swap .risk li { margin:4px 0 }
   .swap.off p { margin:0 0 8px } .swap.off p:last-child { margin:0 }
-  .pill { display:inline-block; padding:1px 6px; border:1px solid var(--line); border-radius:3px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
-  .pill.enh, .pill.promo { color:var(--gold); border-color:var(--gold); margin-left:6px; vertical-align:1px }
-  section.promo { margin:0 0 12px; padding:12px; border:1px solid var(--gold); border-radius:4px; background:color-mix(in srgb, var(--gold) 10%, var(--card)) }
+  .pill { display:inline-block; padding:2px 8px; border:1px solid var(--line); border-radius:999px; font:600 11px system-ui, sans-serif; letter-spacing:.02em; color:var(--muted) }
+  .pill.enh { color:var(--gold); border-color:var(--gold); margin-left:6px; vertical-align:1px }
+  .pill.promo { margin-left:6px; vertical-align:1px; background:var(--gold); color:#1a1203; border-color:var(--gold); font-weight:700 }
+  section.promo { margin:0 0 14px; padding:0 0 12px; border:1px solid color-mix(in srgb, var(--gold) 70%, var(--line)); border-left:4px solid var(--gold); border-radius:12px; background:color-mix(in srgb, var(--gold) 16%, var(--card)); overflow:hidden }
+  .promohead { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-right:12px; background:color-mix(in srgb, var(--gold) 30%, var(--head)); border-bottom:1px solid color-mix(in srgb, var(--gold) 50%, var(--line)) }
+  section.promo h2 { margin:0; flex:1; background:transparent; border-bottom:0; color:var(--gold) }
+  section.promo h2::before { background:var(--gold); box-shadow:none }
+  a.getenh { flex:none; padding:5px 10px; border-radius:999px; background:var(--gold); color:#1a1203; font:700 12px system-ui, sans-serif; letter-spacing:0 }
+  a.getenh:hover { text-shadow:none; filter:brightness(1.06); color:#1a1203 }
+  section.promo .paidnote { margin:8px 12px 0 }
   #boostform { border-color:var(--gold) }
-  .promorow { display:flex; gap:8px; overflow:auto }
-  .promorow .pcard { flex:0 0 200px; display:flex; flex-direction:column; gap:4px; padding:10px; border:1px solid var(--gold); border-radius:4px; color:inherit; text-decoration:none }
+  .promorow { display:flex; gap:8px; overflow:auto; padding:0 12px }
+  .promorow .pcard { flex:0 0 200px; display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:10px; border:1px solid color-mix(in srgb, var(--gold) 55%, var(--line)); border-radius:10px; background:color-mix(in srgb, var(--card) 78%, var(--gold)); color:inherit; text-decoration:none }
+  .promorow .pcard .pill.promo { margin:0 0 2px }
   .paidnote, .paidnote a { text-transform:none; letter-spacing:0; font:12px/1.4 var(--mono); color:var(--muted) }
   .banner { display:block; width:100%; aspect-ratio:3/1; max-height:220px; object-fit:cover; border:1px solid var(--line); border-radius:4px; margin:0 0 12px }
   .enhdesc, .enhlinks { margin:8px 0 0; font:13px/1.45 var(--mono) }
@@ -290,8 +298,9 @@
   .tile small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.06em; text-transform:uppercase }
   .tile b { display:block; font:700 14px var(--mono); overflow-wrap:anywhere }
   .mobmeta { margin:0 0 8px; color:var(--muted); font:12px var(--mono) }
-  .mobfilters, .pairnav, .dock { position:fixed; left:0; right:0; z-index:30; background:var(--card); border-top:1px solid var(--line) }
-  .mobfilters, .pairnav { bottom:56px; gap:6px; padding:8px 10px; align-items:center }
+  .pairnav, .dock { position:fixed; left:0; right:0; z-index:30; background:var(--card); border-top:1px solid var(--line) }
+  .pairnav { bottom:56px; gap:6px; padding:8px 10px; align-items:center }
+  .mobfilters { position:relative; z-index:8; gap:6px; align-items:center }
   .mobfilters select, .mobfilters button, .pairnav button { flex:1 }
   .dock { bottom:0; justify-content:space-around; padding:6px 4px 8px }
   .dock a, .dock button { flex:1; border:0; background:none; color:var(--muted); font:600 10px var(--mono); letter-spacing:.04em; text-align:center; padding:4px 2px; box-shadow:none }
@@ -328,7 +337,7 @@
     .mob.flex { display:flex }
     .mob.grid { display:grid }
     body { padding-bottom:76px }
-    body.widepage { padding-bottom:128px }
+    body.widepage { padding-bottom:76px }
     #exsort, #exwin, [data-tabs="preset"], .desknote, .deskbit, .paircard { display:none }
     #extools .filters { display:none }
     #extools .filters.open { display:block }
@@ -353,6 +362,42 @@
     .tape-mob { display:block }
     .tape-desk:has(+ .tape-mob) { display:none }
     header, main, footer { padding-left:12px; padding-right:12px }
+  }
+  /* Numbers and labels stay in a sans face. The square on the logo and on headings is the only pixel accent. */
+  button, input, select, textarea, th, td, h2, .pill, .stat b, .stat small, .tile b, .tile small,
+  .mcard, .mcard .px, .mcard .who small, .narrow .mcard .l1, .narrow .mcard .l2, .narrow .mcard .subpx, .narrow .mcard .chgpair,
+  .chip, .dock a, .dock button, .pairnav button, .winnums, .winnums b, .winpct, .infolist div, .big, .fee, .demo-banner,
+  .paidnote, .paidnote a, .tabs, .tfs, .pager, .empty b, button.sort, .filters summary, .fgrid label, .pairname, .idline, .mobmeta, footer {
+    font-family:system-ui, sans-serif; letter-spacing:.01em;
+  }
+  button, .filters summary, .stat small, .tile small, th, .pill { text-transform:none }
+  h2 { text-transform:uppercase; letter-spacing:.06em }
+  .addr, code, .mono, header h1 { font-family:var(--mono) }
+  button, input, select, textarea, .card, .tile, .winbox, .banner, .demo-banner, .menu nav, .more div, .item, a.explore { border-radius:10px }
+  button:hover { box-shadow:none }
+  td, .stat b, .tile b, .narrow .mcard .subpx, .winnums b { font-variant-numeric:tabular-nums }
+  .narrow .mcard { padding:11px 0 }
+  .narrow .mcard .l2, .narrow .mcard .chgpair { font-size:12px }
+  #excard { overflow:visible }
+  .listwrap { --barh:0px }
+  .listbar { position:sticky; top:0; z-index:6; background:var(--card); padding:8px 0 6px; margin:0 0 4px; border-bottom:1px solid var(--line) }
+  .listbar .mtabs, .listbar .tabs { margin:0 0 8px }
+  .barrow { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+  .barrow #exq { flex:1 1 180px; min-width:0 }
+  .listwrap .tok thead th { top:var(--barh) }
+  .popwrap { position:relative; flex:1; min-width:0 }
+  .popover { position:absolute; top:calc(100% + 4px); left:0; z-index:20; min-width:200px; max-height:280px; overflow:auto; padding:4px; background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:0 10px 28px rgba(0,0,0,.4) }
+  .popover button { display:block; width:100%; text-align:left; border:0; border-radius:8px; padding:8px 12px; background:none; color:var(--fg); font:600 14px system-ui, sans-serif; letter-spacing:0; text-transform:none }
+  .popover.up { top:auto; bottom:calc(100% + 4px) }
+  .popover button.on, .popover button:hover { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); box-shadow:none }
+  .sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0 }
+  #mobrank[aria-pressed="true"] { background:var(--accent); color:var(--bg) }
+  .listbar .chips { margin:8px 0 0 }
+  .excount { margin:6px 0 0; font:12px system-ui, sans-serif }
+  @media (max-width:899px) {
+    .barrow { display:block }
+    .barrow #exq { width:100%; margin:0 0 8px; flex:none }
+    .excount { display:none }
   }
 </style>
 </head>
@@ -1308,38 +1353,49 @@ function exploreShell(tab, params) {
     : [['preset:trending', 'Trending'], ['preset:new', 'New'], ['volume:desc', 'Top volume'], ['preset:gainers', 'Top gainers'], ['preset:graduating', 'Graduating soon']].concat(sorts.filter(([k]) => k !== 'volume').map(([k, l]) => [`${k}:desc`, l]));
   const curPick = params.get('preset') && tab !== 'nfts' ? `preset:${params.get('preset')}` : `${sort}:${dir}`;
   const win = params.get('window') || '24h';
+  const sortMenu = picks.map(([v, l]) => `<button type="button" role="menuitem" data-pick="${esc(v)}" class="${v === curPick ? 'on' : ''}">${esc(l)}</button>`).join('');
+  const curLabel = picks.find(([v]) => v === curPick)?.[1] || 'Sort';
   return `${tabs('extab', [['tokens', 'Tokens'], ['nfts', 'NFTs']], tab)}
-    <div id="extools">
-      <div class="mob flex mtabs" data-tabs="mobtab">
-        <button type="button" data-v="trending">Trending</button>
-        <button type="button" data-v="new">New</button>
-        <button type="button" data-v="volume">Top volume</button>
-        <select id="mobpick" aria-label="Sort">${picks.map(([v, l]) => `<option value="${v}"${v === curPick ? ' selected' : ''}>${l}</option>`).join('')}</select>
-      </div>
-      <p class="mob mobmeta" id="mobmeta"></p>
-      <div class="mob grid tiles3" id="mobtiles"></div>
-      <div class="exbar">
-        <input id="exq" value="${esc(params.get('q') || '')}" placeholder="${tab === 'nfts' ? 'Collection name or id' : 'Name, ticker or token id'}" aria-label="Search listings" autocomplete="off">
-        <select id="exsort" aria-label="Sort">${sorts.flatMap(([k]) => [['desc', '↓'], ['asc', '↑']].map(([d, arrow]) => `<option value="${k}:${d}"${sort === k && dir === d ? ' selected' : ''}>${sorts.find((s) => s[0] === k)[1]} ${arrow}</option>`)).join('')}</select>
-        ${tab === 'tokens' ? `<select id="exwin" aria-label="Stats window">${['5m', '1h', '6h', '24h'].map((w) => `<option${win === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
-      </div>
-      ${tabs('preset', tab === 'nfts' ? [['', 'All'], ['watch', 'Watchlist']] : [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Watchlist']], params.get('preset') || '')}
-      ${tab === 'tokens' ? '<p class="muted desknote" style="margin:8px 0 0;font:11px var(--mono)">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
-      <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
-      <div id="exchips"></div>
-      <div class="mob flex mobfilters">
-        ${tab === 'tokens' ? `<select id="mobwin" aria-label="Timeframe">${['5m', '1h', '6h', '24h'].map((w) => `<option${win === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
-        <button type="button" id="mobsort">Sort</button>
-        <button type="button" id="mobrank" aria-pressed="${showRank}">Rank</button>
-        <button type="button" id="mobmore">Filters</button>
-      </div>
-    </div>
-    <div id="exbanner"></div><div id="promobox"></div><div id="exlist" aria-live="polite" aria-busy="true"><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>`;
+    <p class="mob mobmeta" id="mobmeta"></p>
+    <div class="mob grid tiles3" id="mobtiles"></div>
+    ${tab === 'tokens' ? '<p class="muted desknote" style="margin:8px 0 0">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
+    <div id="exbanner"></div><div id="promobox"></div>
+    <div class="listwrap" id="extools">
+        <div class="listbar" id="listbar">
+          <div class="mob flex mtabs" data-tabs="mobtab">
+            <button type="button" data-v="trending">Trending</button>
+            <button type="button" data-v="new">New</button>
+            <button type="button" data-v="volume">Top volume</button>
+          </div>
+          ${tabs('preset', tab === 'nfts' ? [['', 'All'], ['watch', 'Watchlist']] : [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Watchlist']], params.get('preset') || '')}
+          <div class="barrow">
+            <input id="exq" value="${esc(params.get('q') || '')}" placeholder="${tab === 'nfts' ? 'Collection name or id' : 'Name, ticker or token id'}" aria-label="Search listings" autocomplete="off">
+            <select id="exsort" aria-label="Sort">${sorts.flatMap(([k]) => [['desc', '↓'], ['asc', '↑']].map(([d, arrow]) => `<option value="${k}:${d}"${sort === k && dir === d ? ' selected' : ''}>${sorts.find((s) => s[0] === k)[1]} ${arrow}</option>`)).join('')}</select>
+            ${tab === 'tokens' ? `<select id="exwin" aria-label="Stats window">${['5m', '1h', '6h', '24h'].map((w) => `<option${win === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
+            <div class="mob flex mobfilters">
+              ${tab === 'tokens' ? `<select id="mobwin" aria-label="Timeframe">${['5m', '1h', '6h', '24h'].map((w) => `<option${win === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
+              <div class="popwrap">
+                <button type="button" id="mobsort" aria-haspopup="menu" aria-expanded="false" aria-controls="sortpop">${esc(curLabel)}</button>
+                <div id="sortpop" class="popover" role="menu" hidden>${sortMenu}</div>
+                <select id="mobpick" class="sr" aria-hidden="true" tabindex="-1">${picks.map(([v, l]) => `<option value="${v}"${v === curPick ? ' selected' : ''}>${l}</option>`).join('')}</select>
+              </div>
+              <button type="button" id="mobrank" aria-pressed="${showRank}">Rank</button>
+              <button type="button" id="mobmore">Filters</button>
+            </div>
+          </div>
+          <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
+          <div id="exchips"></div>
+          <p id="excount" class="muted excount"></p>
+        </div>
+      <div id="exlist" aria-live="polite" aria-busy="true"><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>
+    </div>`;
 }
 function chipHtml(params) {
   const bits = [];
   const q = params.get('q');
   if (q) bits.push(['q', `Search ${q}`]);
+  const win = params.get('window');
+  if (win && win !== '24h') bits.push(['window', win]);
   for (const [k, v] of params) if (k.startsWith('min_') || k.startsWith('max_')) bits.push([k, `${k.replace(/^(min|max)_/, '$1 ').replaceAll('_', ' ')} ${v}`]);
   if (!bits.length) return '';
   return `<div class="chips">${bits.map(([k, label]) => `<button type="button" class="chipx" data-clear="${esc(k)}" aria-label="Remove ${esc(label)}">${esc(label)} ×</button>`).join('')}<button type="button" id="exreset">Reset</button></div>`;
@@ -1355,7 +1411,7 @@ function syncExploreUrl() {
   for (const k of ['tab', 'demo', 'preset', 'sort', 'dir', 'window']) if (cur.get(k)) next.set(k, cur.get(k));
   const q = $('exq')?.value.trim();
   if (q) next.set('q', q);
-  for (const input of document.querySelectorAll('#extools [data-f]')) if (input.value.trim()) next.set(input.dataset.f, input.value.trim());
+  for (const input of document.querySelectorAll('#excard [data-f]')) if (input.value.trim()) next.set(input.dataset.f, input.value.trim());
   history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next : ''));
 }
 function promoSection(promo) {
@@ -1367,9 +1423,9 @@ function promoSection(promo) {
       ? demoHref('/collection/' + encodeURIComponent(b.asset_id))
       : demoHref('/token/' + encodeURIComponent(b.asset_id));
     const sub = a.ticker ? esc(a.ticker) : (a.floor_micronoid != null ? `${esc(fmtNoid(a.floor_micronoid))} floor` : '');
-    return `<a class="pcard" href="${href}" data-link><b>${esc(a.name || b.asset_id)}</b> ${promoBadge()} ${enhBadge(a)}<small>${sub}</small><span class="muted">until ${esc(when(b.until))}</span></a>`;
+    return `<a class="pcard" href="${href}" data-link>${promoBadge()}<b>${esc(a.name || b.asset_id)}</b> ${enhBadge(a)}<small>${sub}</small><span class="muted">until ${esc(when(b.until))}</span></a>`;
   }).join('');
-  return `<section class="promo" aria-label="Promoted"><h2>Promoted <small>paid slots</small></h2><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
+  return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted <small>paid slots</small></h2><a class="getenh" href="/terms#promotion" data-link>Get Enhanced</a></div><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
 }
 async function loadPromo(tab, demo, gen) {
   const box = $('promobox');
@@ -1401,7 +1457,7 @@ async function fillExplore() {
     const ids = [...starSet()];
     if (!ids.length) {
       if ($('exbanner')) $('exbanner').innerHTML = params.get('demo') === '1' ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>` : '';
-      $('extools').hidden = false;
+      $('listbar').hidden = false;
       $('exlist').removeAttribute('aria-busy');
       $('exlist').innerHTML = `<div class="empty"><b>Nothing starred</b><p class="muted">Star a token or collection to pin it here. ${myKey() ? 'Stars are saved on your account.' : 'They stay in this browser until you log in, then they save to your account.'}</p></div>`;
       return;
@@ -1414,12 +1470,12 @@ async function fillExplore() {
   const rows = tab === 'nfts' ? data.collections : data.tokens;
   $('exbanner').innerHTML = data.demo ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>` : '';
   if (!data.demo && !data.live && !rows.length && bare) {
-    $('extools').hidden = true;
+    $('listbar').hidden = true;
     $('exlist').removeAttribute('aria-busy');
     $('exlist').innerHTML = `<div class="empty"><b>${esc(data.notice || 'Tokens coming with v2.1')}</b><p class="muted">Listings stay empty until a Parano1d node exposes native tokens. Nothing on this page is sample data.</p></div>`;
     return;
   }
-  $('extools').hidden = false;
+  $('listbar').hidden = false;
   if ($('exchips')) $('exchips').innerHTML = chipHtml(params);
   const opt = `${data.sort}:${data.dir}`;
   if ($('exsort')?.querySelector(`[value="${opt}"]`)) $('exsort').value = opt;
@@ -1429,13 +1485,13 @@ async function fillExplore() {
     return;
   }
   const win = data.window || params.get('window') || '24h';
-  const note = `<p class="muted" style="font-size:12px">${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'}${tab === 'tokens' ? ` · volume, txns, buys and sells are the last ${esc(win)}` : ''}</p>`;
+  if ($('excount')) $('excount').textContent = `${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'}${tab === 'tokens' ? ` · volume, txns, buys and sells are the last ${win}` : ''}`;
   paintMobChrome(rows, data, tab, params);
   const sig = rows.map((t) => `${t.id}:${t.price_micronoid}:${t.txns}:${t.makers}`).join('|') + data.page + data.sort + data.dir + win + (showRank ? 'r' : '') + [...promoIds].join(',');
   if ($('exlist').dataset.sig === sig && $('exlist').querySelector('table, .mcard, .empty')) return;
   $('exlist').dataset.sig = sig;
   const table = tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows, data.page, data.page_size) : tokenTable(rows, data.sort, data.dir, win, data.page, data.page_size) + tokenCards(rows, data.page, data.page_size);
-  $('exlist').innerHTML = note + table + pagerHtml(data);
+  $('exlist').innerHTML = table + pagerHtml(data);
 }
 function paintMobChrome(rows, data, tab, params) {
   const win = data.window || params.get('window') || '24h';
@@ -1462,6 +1518,14 @@ function paintMobChrome(rows, data, tab, params) {
   }
   if ($('mobwin') && $('exwin')) $('mobwin').value = $('exwin').value;
   $('mobrank')?.setAttribute('aria-pressed', showRank ? 'true' : 'false');
+  const pick = params.get('preset') && tab !== 'nfts' ? `preset:${params.get('preset')}` : `${data.sort}:${data.dir}`;
+  if ($('mobpick')?.querySelector(`[value="${pick}"]`)) $('mobpick').value = pick;
+  document.querySelectorAll('#sortpop button').forEach((b) => b.classList.toggle('on', b.dataset.pick === $('mobpick')?.value));
+  const onSort = document.querySelector('#sortpop button.on');
+  if ($('mobsort') && onSort) $('mobsort').textContent = onSort.textContent;
+  const bar = $('listbar');
+  // shortcut: header offset is the toolbar height at paint time. A resize can leave it a few pixels off until the next refresh.
+  bar?.closest('.listwrap')?.style.setProperty('--barh', bar.offsetHeight + 'px');
 }
 const showExErr = (e) => { if ($('exlist')) { $('exlist').removeAttribute('aria-busy'); $('exlist').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; } };
 function wireExplore() {
@@ -1515,15 +1579,38 @@ function wireExplore() {
     history.replaceState(null, '', u.pathname + u.search);
     fillExplore().catch(showExErr);
   };
-  $('mobsort')?.addEventListener('click', () => $('mobpick')?.focus());
+  const closeSort = () => { const pop = $('sortpop'); if (!pop) return; pop.hidden = true; $('mobsort')?.setAttribute('aria-expanded', 'false'); };
+  $('mobsort')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pop = $('sortpop');
+    if (!pop) return;
+    const open = pop.hidden;
+    const roomBelow = window.innerHeight - $('mobsort').getBoundingClientRect().bottom;
+    pop.classList.toggle('up', roomBelow < 220);
+    pop.hidden = !open;
+    $('mobsort').setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  $('sortpop')?.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-pick]');
+    if (!b || !$('mobpick')) return;
+    $('mobpick').value = b.dataset.pick;
+    $('mobpick').dispatchEvent(new Event('change'));
+    closeSort();
+  });
   $('mobrank')?.addEventListener('click', () => { showRank = !showRank; if ($('exlist')) delete $('exlist').dataset.sig; fillExplore().catch(showExErr); });
   $('mobmore')?.addEventListener('click', () => {
-    const f = document.querySelector('#extools .filters');
+    const f = document.querySelector('#excard .filters');
     if (!f) return;
     f.classList.toggle('open');
     f.open = f.classList.contains('open');
+    const bar = $('listbar');
+    bar?.closest('.listwrap')?.style.setProperty('--barh', bar.offsetHeight + 'px');
   });
-  for (const input of document.querySelectorAll('#extools [data-f]')) input.addEventListener('input', refill);
+  document.querySelector('#excard .filters')?.addEventListener('toggle', () => {
+    const bar = $('listbar');
+    bar?.closest('.listwrap')?.style.setProperty('--barh', bar.offsetHeight + 'px');
+  });
+  for (const input of document.querySelectorAll('#excard [data-f]')) input.addEventListener('input', refill);
   onTabs('extab', (v) => {
     const u = new URL('/explore', location.origin);
     const cur = new URLSearchParams(location.search);
@@ -1558,13 +1645,17 @@ function wireExplore() {
       u.searchParams.set('page', pg.dataset.page);
     } else if (clr) {
       u.searchParams.delete(clr.dataset.clear);
-      const input = document.querySelector(`#extools [data-f="${clr.dataset.clear}"]`);
+      const input = document.querySelector(`#excard [data-f="${clr.dataset.clear}"]`);
       if (input) input.value = '';
       if (clr.dataset.clear === 'q' && $('exq')) $('exq').value = '';
+      if (clr.dataset.clear === 'window') { if ($('exwin')) $('exwin').value = '24h'; if ($('mobwin')) $('mobwin').value = '24h'; }
+      if (clr.dataset.clear === 'preset') document.querySelectorAll('[data-tabs="preset"] button').forEach((x) => x.classList.toggle('on', x.dataset.v === ''));
     } else {
-      for (const k of [...u.searchParams.keys()]) if (k === 'q' || k.startsWith('min_') || k.startsWith('max_') || k === 'preset') u.searchParams.delete(k);
+      for (const k of [...u.searchParams.keys()]) if (k === 'q' || k.startsWith('min_') || k.startsWith('max_') || k === 'preset' || k === 'window') u.searchParams.delete(k);
       if ($('exq')) $('exq').value = '';
-      for (const input of document.querySelectorAll('#extools [data-f]')) input.value = '';
+      if ($('exwin')) $('exwin').value = '24h';
+      if ($('mobwin')) $('mobwin').value = '24h';
+      for (const input of document.querySelectorAll('#excard [data-f]')) input.value = '';
       document.querySelectorAll('[data-tabs="preset"] button').forEach((x) => x.classList.toggle('on', x.dataset.v === ''));
     }
     u.searchParams.delete('page');
@@ -3272,7 +3363,12 @@ const menu = (open) => { $('menu').classList.toggle('open', open); $('menubtn').
 $('menubtn').onclick = (e) => { e.stopPropagation(); menu(!$('menu').classList.contains('open')); };
 $('dockmenu').onclick = (e) => { e.stopPropagation(); menu(true); };
 $('docksearch').onclick = () => { document.querySelector('#search input')?.focus(); window.scrollTo(0, 0); };
-addEventListener('keydown', (e) => e.key === 'Escape' && menu(false));
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  menu(false);
+  const pop = document.getElementById('sortpop');
+  if (pop && !pop.hidden) { pop.hidden = true; document.getElementById('mobsort')?.setAttribute('aria-expanded', 'false'); }
+});
 
 async function copy(text, btn) {
   try { await navigator.clipboard.writeText(text); }
@@ -3293,6 +3389,10 @@ document.addEventListener('click', (e) => {
   const c = e.target.closest('button.copy');
   if (c) { e.preventDefault(); return copy(c.dataset.copy, c); }
   if (!e.target.closest('#menu nav button')) menu(false);
+  if (!e.target.closest('#sortpop, #mobsort')) {
+    const pop = document.getElementById('sortpop');
+    if (pop && !pop.hidden) { pop.hidden = true; document.getElementById('mobsort')?.setAttribute('aria-expanded', 'false'); }
+  }
   const a = e.target.closest('a[data-link]');
   if (a && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(a.getAttribute('href')); }
 });
