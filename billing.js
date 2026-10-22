@@ -22,8 +22,8 @@ const HOLD_MS = 7 * 86400_000; // after expiry its last digits stay reserved thi
 const PRICE_MAX_AGE_MS = Number(process.env.PRICE_MAX_AGE_MS || 15 * 60_000);
 
 // livePrice() -> { usd, at } (at = when the price was fetched) or null; tipNow() -> current chain height.
-module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () => null, profiles = null) {
-  const usdcPay = require('./usdc.js')(db, profiles);
+module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () => null, profiles = null, boosts = null) {
+  const usdcPay = require('./usdc.js')(db, profiles, boosts);
   // USD_PER_NOID pins the price. Otherwise new quotes use the live market price, and pause when it is older than
   // PRICE_MAX_AGE_MS. Orders already quoted keep their price and are still settled while the feed is down.
   const priceNow = () => {
@@ -343,6 +343,19 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       }
       throw bad('could not allocate a payment amount, try again', 503);
     },
+    'POST boost': (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      if (!boosts) throw bad('promoted slots are off', 503);
+      return boosts.create(acct, body);
+    },
+    'POST boost-pay': (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const row = boosts?.ownedUnpaid(acct.id, body?.id);
+      if (!row) return null;
+      if (body?.method && body.method !== 'usdc') throw bad('promoted slots are paid in USDC');
+      return usdcPay.quote(acct, row.id, row.usdc);
+    },
+    'GET boost': (acct, _, id) => boosts ? boosts.view(acct, id) : null,
     'GET profile': (acct, _, id) => profiles ? profiles.view(acct, id) : null,
     'GET usdc-order': (acct, _, id) => usdcPay.view(acct, id),
     'POST topup': async (acct, body) => {

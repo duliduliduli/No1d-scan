@@ -1,4 +1,4 @@
-// Enhanced-profile USDC. The reference is the exact base-unit amount (100 USDC plus a unique suffix).
+// USDC for an enhanced profile or a promoted slot. The reference is the exact base-unit amount (the price plus a unique suffix).
 // A different amount does not match. Card and NOID stay separate.
 // Base reads Transfer logs that are already USDC_CONFIRMATIONS behind the head.
 // Solana reads a finalized balance increase for the wallet owner, or a transfer into the token account.
@@ -71,7 +71,7 @@ function solanaCredits(tx, cfg) {
   return out;
 }
 
-function usdc(db, profiles) {
+function usdc(db, profiles, boosts = null) {
   db.exec(`
     create table if not exists usdc_orders (
       id text primary key, account text not null, profile_id text not null,
@@ -92,16 +92,18 @@ function usdc(db, profiles) {
     const amount = BigInt(row.amount);
     return {
       id: row.id, kind: 'profile', method: 'usdc', chain: row.chain, address: row.address,
-      usdc: priceUsdc(), amount_base: amount.toString(), amount_usdc: formatUnits(amount),
+      usdc: Number(amount / 1_000_000n), amount_base: amount.toString(), amount_usdc: formatUnits(amount),
       reference: (amount % 1_000_000n).toString().padStart(6, '0'),
       paid: !!row.paid_tx, paid_tx: row.paid_tx, profile_id: row.profile_id, status: row.paid_tx ? 'paid' : 'waiting',
     };
   }
 
-  function quote(acct, profileId) {
+  function quote(acct, profileId, usdcWhole) {
     const cfg = config();
     if (!cfg.ok) throw Object.assign(new Error(cfg.reason), { status: 503 });
-    const base = BigInt(priceUsdc()) * 1_000_000n;
+    const whole = usdcWhole == null ? priceUsdc() : Number(usdcWhole);
+    if (!Number.isInteger(whole) || whole < 1 || whole > 1_000_000) throw Object.assign(new Error('bad USDC amount'), { status: 400 });
+    const base = BigInt(whole) * 1_000_000n;
     for (let i = 0; i < 5; i++) {
       const amount = base + BigInt(randomInt(1, 1_000_000));
       const id = randomBytes(6).toString('hex');
@@ -117,12 +119,14 @@ function usdc(db, profiles) {
     for (const tr of transfers || []) {
       if (!tr?.tx || !/^\d+$/.test(String(tr.amount || ''))) continue;
       const row = q.open.get(chain, String(tr.amount));
-      if (!row || !profiles) continue;
+      if (!row) continue;
       const txid = `${chain}:${tr.tx}`;
       db.exec('begin');
       try {
         if (q.claim.run(txid, row.id).changes !== 1) throw new Error('already paid');
-        if (!profiles.markPaid(row.profile_id, txid, row.account)) throw new Error('profile was not waiting');
+        const paid = (profiles && profiles.markPaid(row.profile_id, txid, row.account))
+          || (boosts && boosts.markPaid(row.profile_id, txid, row.account));
+        if (!paid) throw new Error('nothing was waiting');
         db.exec('commit');
         n++;
       } catch { db.exec('rollback'); }
@@ -174,7 +178,7 @@ function usdc(db, profiles) {
 
   async function poll() {
     const cfg = config();
-    if (!cfg.ok || !profiles) return 0;
+    if (!cfg.ok || (!profiles && !boosts)) return 0;
     const transfers = cfg.chain === 'solana' ? await solanaTransfers(cfg) : await baseTransfers(cfg);
     return settle(cfg.chain, transfers);
   }

@@ -557,6 +557,14 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Listings and floor depth/);
   assert.match(homeHtml, /class="traits"/);
   assert.match(homeHtml, /Sales and transfers/);
+  assert.doesNotMatch(homeHtml, /Recommended/);
+  assert.doesNotMatch(homeHtml, /featured pick/i);
+  assert.doesNotMatch(homeHtml, /\bendorsed\b/i);
+  assert.match(homeHtml, />Promoted</);
+  assert.match(homeHtml, /Paid promotion\. Not a recommendation or endorsement by NOID Scan\./);
+  assert.match(homeHtml, /data-boost=/);
+  assert.match(homeHtml, /id="promotion"/);
+  assert.match(homeHtml, /aria-label="Promoted"/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -590,6 +598,18 @@ test('indexer + api', async (t) => {
   const [, demo] = await get('tokens?demo=1');
   assert.strictEqual(demo.demo, true);
   assert.strictEqual(demo.tokens[0].id, 'gcat');
+  const [, byAge] = await get('tokens?demo=1&sort=age&dir=asc');
+  assert.notStrictEqual(byAge.tokens[0].id, 'gcat');
+  assert.ok(byAge.tokens.some((t) => t.id === 'gcat'));
+  const [, promoTok] = await get('boosts?demo=1&kind=token');
+  assert.ok(promoTok.boosts.some((b) => b.asset_id === 'gcat' && b.label === 'Promoted'));
+  assert.strictEqual(promoTok.disclaimer, 'Paid promotion. Not a recommendation or endorsement by NOID Scan.');
+  assert.doesNotMatch(JSON.stringify(promoTok), /Recommended/);
+  assert.ok(promoTok.boosts[0].asset.enhanced);
+  const [, byFloor] = await get('collections?demo=1&sort=floor&dir=asc');
+  assert.notStrictEqual(byFloor.collections[0].id, 'stamps');
+  const [, promoNft] = await get('boosts?demo=1&kind=collection');
+  assert.ok(promoNft.boosts.some((b) => b.asset_id === 'stamps' && b.label === 'Promoted'));
   assert.ok(demo.tokens.every((t) => t.backing_per_token_micronoid === '1000'));
   assert.strictEqual(demo.page, 1);
   assert.strictEqual(demo.count, 5);
@@ -1022,12 +1042,13 @@ test('indexer + api', async (t) => {
   delete process.env.USDC_RPC_URL;
   assert.match((await post('profile-pay', { id: third.id, method: 'usdc' }, K))[1].error, /USDC_RPC_URL/);
   let usdcLog = null;
+  let usdcTx = '0x' + 'ab'.repeat(32);
   const usdcRpc = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c)).on('end', () => {
       const call = JSON.parse(body || '{}');
       const result = call.method === 'eth_blockNumber' ? '0x64'
-        : usdcLog ? [{ transactionHash: '0x' + 'ab'.repeat(32), data: '0x' + BigInt(usdcLog).toString(16) }] : [];
+        : usdcLog ? [{ transactionHash: usdcTx, data: '0x' + BigInt(usdcLog).toString(16) }] : [];
       res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
     });
   });
@@ -1055,11 +1076,52 @@ test('indexer + api', async (t) => {
     assert.strictEqual(await credits(), creditsBefore, 'USDC profile payment does not add credits');
     assert.strictEqual(await pollUsdc(), 0);
     assert.strictEqual((await get(`usdc-order/${order.id}`, { headers: K }))[1].paid, true);
+
+    // A promoted slot uses the pack price, stays out of the organic sort, and expires on the next read.
+    process.env.BOOST_PACKS = '12:6h';
+    assert.strictEqual((await post('boost', { asset_id: 'live1', kind: 'token', pack: 'nope' }, K))[0], 400);
+    assert.strictEqual((await post('boost', { asset_id: 'not-a-token', kind: 'token', pack: '6h' }, K))[0], 400);
+    const [boostStatus, madeBoost] = await post('boost', { asset_id: 'live1', kind: 'token', pack: '6h' }, K);
+    assert.strictEqual(boostStatus, 200);
+    assert.strictEqual(madeBoost.usdc, 12);
+    assert.strictEqual(madeBoost.status, 'unpaid');
+    const [, colBoost] = await post('boost', { asset_id: 'col1', kind: 'collection', pack: '6h' }, K);
+    assert.strictEqual(colBoost.kind, 'collection');
+    assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /USDC/);
+    const [boostPayStatus, boostOrder] = await post('boost-pay', { id: madeBoost.id, method: 'usdc' }, K);
+    assert.strictEqual(boostPayStatus, 200);
+    assert.strictEqual(boostOrder.usdc, 12);
+    assert.match(boostOrder.amount_usdc, /^12\./);
+    usdcLog = (BigInt(boostOrder.amount_base) + 1n).toString();
+    assert.strictEqual(await pollUsdc(), 0);
+    assert.strictEqual((await get(`boost/${madeBoost.id}`, { headers: K }))[1].status, 'unpaid');
+    usdcTx = '0x' + 'cd'.repeat(32);
+    usdcLog = boostOrder.amount_base;
+    assert.strictEqual(await pollUsdc(), 1);
+    assert.strictEqual((await get(`boost/${madeBoost.id}`, { headers: K }))[1].status, 'pending');
+    assert.strictEqual(await credits(), creditsBefore, 'a promoted slot does not add credits');
+    assert.ok(!(await get('boosts?kind=token&window=1m'))[1].boosts.some((b) => b.asset_id === 'live1'));
+    const organic = (await get('tokens?sort=volume&dir=desc&window=6h'))[1].tokens.map((t) => t.id);
+    process.env.ADMIN_TOKEN = 'adm-test';
+    assert.strictEqual((await post('admin', { id: madeBoost.id, action: 'approve', kind: 'boost' }, { 'x-admin-token': 'adm-test' }))[1].status, 'live');
+    const [, liveBoosts] = await get('boosts?kind=token&window=5m');
+    assert.ok(liveBoosts.boosts.some((b) => b.asset_id === 'live1' && b.label === 'Promoted'));
+    assert.doesNotMatch(JSON.stringify(liveBoosts), /Recommended/);
+    assert.deepStrictEqual((await get('tokens?sort=volume&dir=desc&window=24h'))[1].tokens.map((t) => t.id), organic);
+    db.prepare('update boosts set ends = ? where id = ?').run(Date.now() - 1000, madeBoost.id);
+    const [, expiredBoosts] = await get('boosts?kind=token&window=1h');
+    assert.ok(!expiredBoosts.boosts.some((b) => b.asset_id === 'live1'));
+    assert.strictEqual(db.prepare('select status from boosts where id = ?').get(madeBoost.id).status, 'expired');
+    const boostPlan = db.prepare("explain query plan select asset_id from boosts where status = 'live' and ends > 0 order by ends").all().map((r) => r.detail).join(' ');
+    assert.match(boostPlan, /boosts_live/);
+    assert.doesNotMatch(boostPlan, /TEMP B-TREE/);
   } finally {
     usdcRpc.close();
     delete process.env.USDC_CHAIN;
     delete process.env.USDC_PAY_ADDRESS;
     delete process.env.USDC_RPC_URL;
+    delete process.env.BOOST_PACKS;
+    delete process.env.ADMIN_TOKEN;
   }
 
   const [, whale] = await get('address/o1whalewhale');

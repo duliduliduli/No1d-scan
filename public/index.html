@@ -168,7 +168,12 @@
   .swap .risk ul { margin:0; padding-left:1.1em } .swap .risk li { margin:4px 0 }
   .swap.off p { margin:0 0 8px } .swap.off p:last-child { margin:0 }
   .pill { display:inline-block; padding:1px 6px; border:1px solid var(--line); border-radius:3px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
-  .pill.enh { color:var(--gold); border-color:var(--gold); margin-left:6px; vertical-align:1px }
+  .pill.enh, .pill.promo { color:var(--gold); border-color:var(--gold); margin-left:6px; vertical-align:1px }
+  section.promo { margin:0 0 12px; padding:12px; border:1px solid var(--gold); border-radius:4px; background:color-mix(in srgb, var(--gold) 10%, var(--card)) }
+  #boostform { border-color:var(--gold) }
+  .promorow { display:flex; gap:8px; overflow:auto }
+  .promorow .pcard { flex:0 0 200px; display:flex; flex-direction:column; gap:4px; padding:10px; border:1px solid var(--gold); border-radius:4px; color:inherit; text-decoration:none }
+  .paidnote, .paidnote a { text-transform:none; letter-spacing:0; font:12px/1.4 var(--mono); color:var(--muted) }
   .banner { display:block; width:100%; aspect-ratio:3/1; max-height:220px; object-fit:cover; border:1px solid var(--line); border-radius:4px; margin:0 0 12px }
   .enhdesc, .enhlinks { margin:8px 0 0; font:13px/1.45 var(--mono) }
   .enhlinks a { margin-right:8px }
@@ -1048,13 +1053,17 @@ function starBtn(id, name) {
   const on = starSet().has(id);
   return `<button type="button" class="star${on ? ' on' : ''}" data-star="${esc(id)}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${on ? 'Remove' : 'Add'} ${esc(name || id)} ${on ? 'from' : 'to'} watchlist">${on ? '★' : '☆'}</button>`;
 }
-const enhBadge = (t) => t?.enhanced ? '<span class="pill enh">Enhanced</span>' : '';
+let promoIds = new Set();
+const PAID = 'Paid promotion. Not a recommendation or endorsement by NOID Scan.';
+const enhBadge = (t) => t?.enhanced ? `<span class="pill enh" title="${esc(PAID)}">Enhanced</span>` : '';
+const promoBadge = () => `<span class="pill promo" title="${esc(PAID)}">Promoted</span>`;
+const paidMarks = (t) => `${enhBadge(t)}${promoIds.has(t?.id) ? promoBadge() : ''}`;
 const httpsLink = (url, label) => url && /^https:\/\//.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : '';
 function tokenTable(list, sort, dir, window, page, pageSize) {
   const head = `<tr><th></th><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('makers', 'Makers', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${sortTh('fdv', 'FDV', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th>Launch</th><th class="opt">Backing</th></tr>`;
   const body = list.map((t, i) => `<tr>
       <td>${starBtn(t.id, t.name)}</td>
-      <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b> ${enhBadge(t)}<small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
+      <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b> ${paidMarks(t)}<small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
       <td>${sparkSvg(t.spark)}${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
       <td>${esc(ageLabel(t))}</td><td class="num">${n0(t.txns)}</td><td class="num">${n0(t.makers)}</td>
       ${numCell(t.volume_micronoid)}${numCell(t.liquidity_micronoid)}${numCell(t.mcap_micronoid)}${numCell(t.fdv_micronoid)}
@@ -1065,7 +1074,7 @@ function tokenTable(list, sort, dir, window, page, pageSize) {
 }
 function tokenCards(list) {
   return `<div class="narrow">${list.map((t) => `<a class="mcard" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>
-      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${enhBadge(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
+      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${paidMarks(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
       <span class="px">${starBtn(t.id, t.name)}${esc(fmtNoid(t.price_micronoid))}<small>${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</small></span>
       <span class="chgs">${sparkSvg(t.spark)} 5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</span>
       <span class="meta">Liq ${esc(fmtNoid(t.liquidity_micronoid))} · Vol ${esc(fmtNoid(t.volume_micronoid))} · MCap ${esc(fmtNoid(t.mcap_micronoid))} · FDV ${esc(fmtNoid(t.fdv_micronoid))}</span>
@@ -1076,14 +1085,14 @@ function nftTable(list, sort, dir) {
   const head = `<tr><th></th><th>Collection</th>${sortTh('floor', 'Floor', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('items', 'Items', sort, dir)}${sortTh('owners', 'Owners', sort, dir)}${sortTh('age', 'Age', sort, dir)}</tr>`;
   const body = list.map((c) => `<tr>
       <td>${starBtn(c.id, c.name)}</td>
-      <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a> ${enhBadge(c)}</td>
+      <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a> ${paidMarks(c)}</td>
       ${numCell(c.floor_micronoid)}${numCell(c.volume_micronoid)}
       <td class="num">${n0(c.items)}</td><td class="num">${n0(c.owners)}</td><td>${esc(c.created_ts ? ago(c.created_ts) : ageShort(c.age_s))}</td></tr>`).join('');
   return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function nftCards(list) {
   return `<div class="narrow">${list.map((c) => `<a class="mcard" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>
-      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${enhBadge(c)}<small>${esc(ageShort(c.age_s))}</small></span>
+      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${paidMarks(c)}<small>${esc(ageShort(c.age_s))}</small></span>
       <span class="px">${starBtn(c.id, c.name)}${esc(fmtNoid(c.floor_micronoid))}<small>floor</small></span>
       <span class="meta">Vol ${esc(fmtNoid(c.volume_micronoid))} · ${n0(c.items)} items · ${n0(c.owners)} owners</span></a>`).join('')}</div>`;
 }
@@ -1109,7 +1118,7 @@ function exploreShell(tab, params) {
       <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
       <div id="exchips"></div>
     </div>
-    <div id="exbanner"></div><div id="exlist" aria-live="polite" aria-busy="true"><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>`;
+    <div id="exbanner"></div><div id="promobox"></div><div id="exlist" aria-live="polite" aria-busy="true"><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>`;
 }
 function chipHtml(params) {
   const bits = [];
@@ -1133,11 +1142,42 @@ function syncExploreUrl() {
   for (const input of document.querySelectorAll('#extools [data-f]')) if (input.value.trim()) next.set(input.dataset.f, input.value.trim());
   history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next : ''));
 }
+function promoSection(promo) {
+  const rows = promo?.boosts || [];
+  if (!rows.length) return '';
+  const cards = rows.map((b) => {
+    const a = b.asset || {};
+    const href = b.kind === 'collection'
+      ? demoHref('/collection/' + encodeURIComponent(b.asset_id))
+      : demoHref('/token/' + encodeURIComponent(b.asset_id));
+    const sub = a.ticker ? esc(a.ticker) : (a.floor_micronoid != null ? `${esc(fmtNoid(a.floor_micronoid))} floor` : '');
+    return `<a class="pcard" href="${href}" data-link><b>${esc(a.name || b.asset_id)}</b> ${promoBadge()} ${enhBadge(a)}<small>${sub}</small><span class="muted">until ${esc(when(b.until))}</span></a>`;
+  }).join('');
+  return `<section class="promo" aria-label="Promoted"><h2>Promoted <small>paid slots</small></h2><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
+}
+async function loadPromo(tab, demo, gen) {
+  const box = $('promobox');
+  if (!box) return;
+  const q = new URLSearchParams({ kind: tab === 'nfts' ? 'collection' : 'token' });
+  if (demo) q.set('demo', '1');
+  try {
+    const promo = await api('boosts?' + q.toString());
+    if (gen !== exGen) return;
+    promoIds = new Set((promo.boosts || []).map((b) => b.asset_id));
+    box.innerHTML = promoSection(promo);
+  } catch {
+    if (gen !== exGen) return;
+    promoIds = new Set();
+    box.innerHTML = '';
+  }
+}
 async function fillExplore() {
   await ensureStars();
   const gen = ++exGen;
   const params = new URLSearchParams(location.search);
   const tab = params.get('tab') === 'nfts' ? 'nfts' : 'tokens';
+  await loadPromo(tab, params.get('demo') === '1', gen);
+  if (gen !== exGen || !$('exlist')) return;
   const req = new URLSearchParams(params);
   if (params.get('preset') === 'watch') {
     await ensureStars();
@@ -1174,7 +1214,7 @@ async function fillExplore() {
   }
   const win = data.window || params.get('window') || '24h';
   const note = `<p class="muted" style="font-size:12px">${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'}${tab === 'tokens' ? ` · volume, txns, buys and sells are the last ${esc(win)}` : ''}</p>`;
-  const sig = rows.map((t) => `${t.id}:${t.price_micronoid}:${t.txns}:${t.makers}`).join('|') + data.page + data.sort + data.dir + win;
+  const sig = rows.map((t) => `${t.id}:${t.price_micronoid}:${t.txns}:${t.makers}`).join('|') + data.page + data.sort + data.dir + win + [...promoIds].join(',');
   if ($('exlist').dataset.sig === sig && $('exlist').querySelector('table, .mcard, .empty')) return;
   $('exlist').dataset.sig = sig;
   const table = tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows) : tokenTable(rows, data.sort, data.dir, win, data.page, data.page_size) + tokenCards(rows);
@@ -1379,6 +1419,7 @@ function enhanceCard(d, demo) {
     ? '<p class="fine">Sample page. Payment is not taken.</p>'
     : '<p class="fine">Log in with the API key from API &amp; Credits. USDC is watched on chain. Card and NOID also work. The profile stays hidden until an admin approves it.</p>';
   return `<div class="card" id="enhform"><h2>Enhanced Token Info <small>${usdc} USDC</small></h2>
+    <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
     <p>A banner, an icon, a short description, and https links for a website and X. Unpaid profiles show none of these.</p>
     ${note}
     <form>
@@ -1433,6 +1474,49 @@ function wireEnhance(d, t, demo) {
   });
 }
 
+function boostCard(kind, id, promo, demo) {
+  const live = (promo?.boosts || [])[0];
+  const packs = promo?.packs || [];
+  const note = demo
+    ? '<p class="fine">Sample page. Payment is not taken.</p>'
+    : '<p class="fine">Log in with the API key from API &amp; Credits. USDC is watched on chain. The slot stays hidden until an admin approves it, then it ends on its own.</p>';
+  const body = live
+    ? `<p>This listing is in the Promoted section until ${esc(when(live.until))}.</p>`
+    : `<div class="row">${packs.map((p) => `<button type="button" data-boost="${esc(p.id)}">${esc(p.label)} · ${p.usdc} USDC</button>`).join('')}</div>`;
+  return `<div class="card" id="boostform"><h2>Promoted slot</h2>
+    <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
+    <p>A separate highlighted slot on Explore for a set time. It does not change the organic list order.</p>
+    ${note}${body}<p id="boostmsg" class="muted"></p></div>`;
+}
+function wireBoost(kind, id, demo) {
+  const form = $('boostform');
+  if (!form) return;
+  form.addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-boost]');
+    if (!b) return;
+    const msg = $('boostmsg');
+    if (demo) { msg.textContent = 'Sample page. Payment is not taken.'; return; }
+    if (!myKey()) { msg.textContent = 'Log in with the API key from API & Credits, then choose a pack.'; return; }
+    b.disabled = true;
+    try {
+      const made = await api('boost', { asset_id: id, kind, pack: b.dataset.boost });
+      const pay = await api('boost-pay', { id: made.id, method: 'usdc' });
+      msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b>. The slot stays hidden until an admin approves it, then it ends on its own.`;
+      clearInterval(usdcTimer);
+      usdcTimer = setInterval(async () => {
+        try {
+          const st = await api('usdc-order/' + pay.id);
+          if (!st?.paid || !$('boostmsg')) return;
+          clearInterval(usdcTimer);
+          $('boostmsg').textContent = 'USDC payment confirmed. The slot stays hidden until an admin approves it, then it ends on its own.';
+        } catch {}
+      }, 5000);
+    } catch (err) {
+      msg.textContent = err.message;
+      b.disabled = false;
+    }
+  });
+}
 function exploreCard(demo) {
   const href = demo ? '/explore?demo=1' : '/explore';
   return `<a class="card entry" href="${href}" data-link>
@@ -1447,10 +1531,10 @@ function homeStrip(tokens, cols) {
     <p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>
     <div class="tabs" data-tabs="homekind"><button type="button" data-v="tokens" class="on">Tokens</button><button type="button" data-v="nfts">NFTs</button></div>
     <div id="homestrip-tokens">${tok.slice(0, 5).map((t) => `<a class="mcard" style="display:grid" href="/token/${encodeURIComponent(t.id)}?demo=1" data-link>
-      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${enhBadge(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
+      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${paidMarks(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
       <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}</div>
     <div id="homestrip-nfts" hidden>${nft.slice(0, 5).map((c) => `<a class="mcard" style="display:grid" href="/collection/${encodeURIComponent(c.id)}?demo=1" data-link>
-      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${enhBadge(c)}<small>${esc(ageShort(c.age_s))}</small></span>
+      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${paidMarks(c)}<small>${esc(ageShort(c.age_s))}</small></span>
       <span class="px">${esc(fmtNoid(c.floor_micronoid))}<small>floor</small></span></a>`).join('')}</div>
     <p id="homestrip-more"><a href="/explore?demo=1" data-link>All sample tokens →</a></p></div>`;
 }
@@ -1683,16 +1767,20 @@ function statHead(t) {
 const pages = {
   async home() {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
-    const [s0, b0, t0, hi0, net0, mi0, preview, colsPreview] = await Promise.all([
+    const [s0, b0, t0, hi0, net0, mi0, preview, colsPreview, boost0] = await Promise.all([
       part('stats'), part('blocks?limit=15'), part('txs'), part('history?window=24h'), part('network'), part('miners?window=24h'),
       demo ? part('tokens?demo=1') : Promise.resolve(null),
       demo ? part('collections?demo=1') : Promise.resolve(null),
+      demo ? part('boosts?demo=1') : part('boosts'),
     ]);
     const s = s0._err ? null : s0, b = b0._err ? null : b0, t = t0._err ? null : t0, hi = hi0._err ? null : hi0, net = net0._err ? null : net0, mi = mi0._err ? null : mi0;
+    const boostPage = boost0 && !boost0._err ? boost0 : null;
+    promoIds = new Set((boostPage?.boosts || []).map((row) => row.asset_id));
+    const promoHtml = promoSection(boostPage);
     const strip = homeStrip(preview && !preview._err ? preview.tokens : null, colsPreview && !colsPreview._err ? colsPreview.collections : null);
     if (!s || !b?.blocks?.length) {
       app.innerHTML = `<div class="livebar"><span class="dot off"></span><span>Node unavailable. Live blocks, price and the globe need the Parano1d node. Explore still opens.</span></div>
-        ${exploreCard(demo)}${strip}
+        ${exploreCard(demo)}${promoHtml}${strip}
         <div class="card"><h2>Node unavailable</h2><p class="muted">This explorer could not reach its node, so chain stats are hidden until it answers. ${demo ? 'The token rows above are sample data and are not on chain.' : 'Add <span class="mono">?demo=1</span> to preview sample tokens without a node.'}</p></div>`;
       wireHomeStrip();
       return;
@@ -1713,6 +1801,7 @@ const pages = {
         <div class="event" id="gevent"></div>
         <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
       ${exploreCard(demo)}
+      ${promoHtml}
       ${strip}
       <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
@@ -2136,8 +2225,14 @@ const pages = {
     await ensureStars();
     const demo = new URLSearchParams(location.search).get('demo') === '1';
     const q = demo ? '?demo=1' : '';
-    const d = await api(`tokens/${encodeURIComponent(id)}${q}`);
+    const promoQ = new URLSearchParams({ kind: 'token', asset: id });
+    if (demo) promoQ.set('demo', '1');
+    const [d, promo] = await Promise.all([
+      api(`tokens/${encodeURIComponent(id)}${q}`),
+      api('boosts?' + promoQ).catch(() => ({ boosts: [], packs: [] })),
+    ]);
     const t = d.token;
+    const livePromo = (promo.boosts || [])[0];
     const tradeOn = !!(d.demo || d.swap?.live);
     const e = t.enhanced;
     const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
@@ -2151,7 +2246,7 @@ const pages = {
         <button type="button" id="sharebtn">Share</button>
         <button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy address">Copy address</button></p>
       <div class="split pair"><div>
-        <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${enhBadge(t)} ${launchHtml(t)}</h2>
+        <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${enhBadge(t)} ${livePromo ? promoBadge() : ''} ${launchHtml(t)}</h2>
           ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
           ${links ? `<p class="enhlinks">${links}</p>` : ''}
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
@@ -2181,6 +2276,7 @@ const pages = {
         </div>
       </div><div class="sidecol">
         ${tradeOn ? '<div id="swappane"></div>' : tradeLocked(d.swap)}
+        ${boostCard('token', t.id, promo, demo)}
         ${e ? '' : enhanceCard(d, demo)}
         ${warns}
         <div class="card"><h2>Stats</h2><div class="kvl">
@@ -2289,6 +2385,7 @@ const pages = {
     await openTokenChart(id, demo, '15m');
     if (tradeOn && $('swappane')) mountSwap(d, id);
     wireEnhance(d, t, demo);
+    wireBoost('token', t.id, demo);
     const paintBook = async () => {
       const el = $('bookbody');
       if (!el) return;
@@ -2354,8 +2451,14 @@ const pages = {
     await ensureStars();
     const demo = new URLSearchParams(location.search).get('demo') === '1';
     const q = demo ? '?demo=1' : '';
-    const d = await api(`collection/${encodeURIComponent(id)}${q}`);
+    const promoQ = new URLSearchParams({ kind: 'collection', asset: id });
+    if (demo) promoQ.set('demo', '1');
+    const [d, promo] = await Promise.all([
+      api(`collection/${encodeURIComponent(id)}${q}`),
+      api('boosts?' + promoQ).catch(() => ({ boosts: [], packs: [] })),
+    ]);
     const c = d.collection;
+    const livePromo = (promo.boosts || [])[0];
     const e = c.enhanced;
     const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
     const chartOpts = () => ({ path: `collections/${encodeURIComponent(id)}/candles`, kind: nftKind, note: 'sales volume', label: nftKind === 'floor' ? 'Floor price and sales volume' : 'Sale price and sales volume', empty: 'Not enough sales for a chart yet.' });
@@ -2370,7 +2473,7 @@ const pages = {
         <button type="button" id="sharebtn">Share</button>
         <button type="button" class="copy" data-copy="${esc(c.id)}" aria-label="Copy address">Copy address</button></p>
       <div class="split pair"><div>
-        <div class="card"><h2 style="margin:0;border:0;background:none;padding:0">${esc(c.name)} ${enhBadge(c)}</h2>
+        <div class="card"><h2 style="margin:0;border:0;background:none;padding:0">${esc(c.name)} ${enhBadge(c)} ${livePromo ? promoBadge() : ''}</h2>
           ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
           ${links ? `<p class="enhlinks">${links}</p>` : ''}
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(c.floor_micronoid))}</b> <span class="muted">floor${c.floor_usd == null ? '' : ' · ' + esc(usd4(c.floor_usd))}</span>
@@ -2401,6 +2504,7 @@ const pages = {
         </div>
         <div class="card"><h2>Items</h2>${itemGrid ? `<div class="items">${itemGrid}</div>` : '<p class="muted">No items published for this collection yet.</p>'}</div>
       </div><div class="sidecol">
+        ${boostCard('collection', c.id, promo, demo)}
         ${e ? '' : enhanceCard(d, demo)}
         <div class="card"><h2>Stats</h2><div class="kvl">
           <small>Floor</small><span>${esc(fmtNoid(c.floor_micronoid))}</span>
@@ -2483,6 +2587,7 @@ const pages = {
         ${b.bids?.length || b.asks?.length ? '' : '<p class="muted">No listings yet.</p>'}`;
     };
     wireEnhance(d, c, demo);
+    wireBoost('collection', c.id, demo);
     await Promise.all([open(), loadActivity().catch((err) => { if ($('tape')) $('tape').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; }), paintBook().catch((err) => { if ($('bookbody')) $('bookbody').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; })]);
     clearInterval(tokenTimer);
     tokenTimer = setInterval(() => {
@@ -2496,6 +2601,7 @@ const pages = {
       <p>NOID Scan is a block explorer. It does not hold NOID, tokens, NFTs or wallet keys, and it cannot move funds on your behalf.</p>
       <p>A swap quote, when the panel is shown, lists the front-end fee as a rate and an amount before you sign. That fee is a separate output to the explorer's published address when the Parano1d transaction can carry one. Until then the fee is only a line on the quote. You sign and submit from your own wallet. This site does not match orders and does not take custody of either side.</p>
       <p>Nothing here is investment, financial or trading advice. Listings are whatever the connected node reports. A demo banner means the rows are sample data and are not on chain.</p>
+      <p id="promotion">Paid promotion. Not a recommendation or endorsement by NOID Scan. A Promoted slot and an Enhanced profile are paid placements. They sit apart from the organic list and do not change its order. A Promoted slot ends when its time is up.</p>
       <p class="muted">The swap panel stays hidden unless the operator turns it on, sets a fee address, and the node exposes the v2.1 DEX and wallet interface. <code>?demo=1</code> shows a mock quote that cannot be submitted.</p></div>`;
   },
 
@@ -2568,7 +2674,7 @@ const pages = {
   },
   async admin() {
     app.innerHTML = `<div class="card" id="admin"><h2>Profile review</h2>
-      <p class="muted">Pending enhanced profiles. This page is not linked from the public site.</p>
+      <p class="muted">Pending enhanced profiles and promoted slots. This page is not linked from the public site.</p>
       <form id="adminkey"><label>Admin token<input id="admintok" type="password" autocomplete="off"></label><button>Open queue</button></form>
       <div id="adminq"></div></div>`;
     const tok = () => { try { return sessionStorage.getItem('admin_token') || ''; } catch { return ''; } };
@@ -2582,8 +2688,15 @@ const pages = {
         return;
       }
       const data = await r.json();
-      if (!data.pending?.length) { $('adminq').innerHTML = '<p class="muted">Nothing waiting.</p>'; return; }
-      $('adminq').innerHTML = data.pending.map((p) => `<article class="card" data-id="${esc(p.id)}">
+      const pending = data.pending || [];
+      const waiting = data.boosts || [];
+      if (!pending.length && !waiting.length) { $('adminq').innerHTML = '<p class="muted">Nothing waiting.</p>'; return; }
+      const boostCards = waiting.map((p) => `<article class="card" data-id="${esc(p.id)}" data-kind="boost">
+        <h2>${esc(p.asset_id)} ${promoBadge()} <small>${esc(p.kind)} · ${esc(p.pack)} · ${p.usdc} USDC</small></h2>
+        <p class="paidnote">${esc(PAID)}</p>
+        <div class="row"><button type="button" data-act="approve">Approve</button><button type="button" data-act="reject">Reject</button></div>
+      </article>`).join('');
+      $('adminq').innerHTML = boostCards + pending.map((p) => `<article class="card" data-id="${esc(p.id)}">
         <h2>${esc(p.token_id)} <small>${esc(p.id)}</small></h2>
         <img class="banner" alt="" data-kind="banner">
         <p>${esc(p.description)}</p>
@@ -2606,9 +2719,12 @@ const pages = {
     $('adminq').onclick = async (e) => {
       const b = e.target.closest('button[data-act]');
       if (!b) return;
-      const id = b.closest('[data-id]').dataset.id;
+      const card = b.closest('[data-id]');
+      const id = card.dataset.id;
       b.disabled = true;
-      const r = await fetch('/api/admin', { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': tok() }, body: JSON.stringify({ id, action: b.dataset.act }) });
+      const body = { id, action: b.dataset.act };
+      if (card.dataset.kind) body.kind = card.dataset.kind;
+      const r = await fetch('/api/admin', { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': tok() }, body: JSON.stringify(body) });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         $('adminq').insertAdjacentHTML('afterbegin', `<p class="msg err">${esc(j.error || 'refused')}</p>`);

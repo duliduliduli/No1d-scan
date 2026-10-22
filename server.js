@@ -733,8 +733,17 @@ function labelFor(address) {
 }
 
 const profiles = require('./profiles.js')(db);
-const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip, profiles);
 const assets = require('./assets.js')(db, rpc, () => price.now);
+const boosts = require('./boosts.js')(db, (kind, id, demo) => {
+  const params = new URLSearchParams(demo ? 'demo=1' : '');
+  if (kind === 'collection') {
+    const c = assets.collection(id, params)?.collection;
+    return c ? { id: c.id, name: c.name, kind: 'collection', floor_micronoid: c.floor_micronoid } : null;
+  }
+  const t = assets.token(id, params)?.token;
+  return t ? { id: t.id, name: t.name, ticker: t.ticker, kind: 'token', price_micronoid: t.price_micronoid } : null;
+});
+const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip, profiles, boosts);
 
 // One quick_check at startup (DB_QUICK_CHECK=0 skips it). Logs either way; never rewrites the file.
 let dbCheck = { ok: true, result: 'skipped' };
@@ -1087,6 +1096,12 @@ const routes = {
   wallet: async (id, params) => assets.wallet(id, params),
   collections: async (...a) => profiles.decorate(await assets.collections(...a)),
   collection: async (...a) => profiles.decorate(await assets.collection(...a)),
+  boosts: async (_, params) => {
+    const page = boosts.list(params);
+    const decorated = profiles.decorate({ demo: page.demo, tokens: page.boosts.map((b) => b.asset) });
+    page.boosts.forEach((b, i) => { b.asset = decorated.tokens[i]; });
+    return page;
+  },
   swap: async (...a) => assets.swap(...a),
 
   async search(_, params) {
@@ -1112,7 +1127,7 @@ setInterval(() => hits.clear(), 60_000).unref();
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
 const inflight = new Map();
-const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids',
+const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids', 'asset',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
   'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
@@ -1205,10 +1220,10 @@ async function handle(req, res) {
         res.writeHead(200, { 'content-type': img.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
         return res.end(img.bytes);
       }
-      if (req.method === 'GET') return send(200, { pending: profiles.adminList() }, { 'cache-control': 'no-store' });
+      if (req.method === 'GET') return send(200, { pending: profiles.adminList(), boosts: boosts.adminList() }, { 'cache-control': 'no-store' });
       if (req.method === 'POST') {
         const body = parseJson(await readBody(req));
-        const out = profiles.review(body.id, body.action);
+        const out = body.kind === 'boost' ? boosts.review(body.id, body.action) : profiles.review(body.id, body.action);
         return out ? send(200, out, { 'cache-control': 'no-store' }) : send(404, { error: 'not in review' });
       }
       return send(405, { error: 'GET or POST' });
