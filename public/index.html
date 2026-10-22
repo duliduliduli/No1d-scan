@@ -146,6 +146,12 @@
   .mcard .px button.star { margin:0 0 4px; display:inline-block }
   .tape td.side { font-weight:700 }
   .swap .fine { color:var(--muted); font:12px/1.5 var(--mono); margin:10px 0 0 } .swap .kvl { margin-top:12px }
+  .swap input { width:100%; box-sizing:border-box; margin-top:6px }
+  .swap .kvl b { font:700 15px var(--mono); color:var(--fg) }
+  .swap .risk { margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-left:3px solid var(--gold); border-radius:3px; font:12px/1.45 var(--mono); color:var(--fg) }
+  .swap .risk b { display:block; margin-bottom:6px; color:var(--gold); letter-spacing:.06em; text-transform:uppercase; font-size:11px }
+  .swap .risk ul { margin:0; padding-left:1.1em } .swap .risk li { margin:4px 0 }
+  .swap.off p { margin:0 0 8px } .swap.off p:last-child { margin:0 }
   .pill { display:inline-block; padding:1px 6px; border:1px solid var(--line); border-radius:3px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
   .items { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
   .item { border:1px solid var(--line); border-radius:4px; padding:10px; background:var(--head) }
@@ -1213,21 +1219,34 @@ function wireExplore() {
   clearInterval(exploreTimer);
   exploreTimer = setInterval(() => { if (document.hidden || document.activeElement === $('exq')) return; fillExplore().catch(showExErr); }, 15_000);
 }
+function tradeLocked(swap) {
+  const pct = Number(swap?.fee_pct ?? 0.5).toFixed(2);
+  return `<div class="card swap off"><h2>Trade <small>off until v2.1</small></h2>
+    <p>Buy and sell stay off until a Parano1d node exposes token trades and this explorer sets <span class="mono">SWAP_ENABLED</span> and <span class="mono">SWAP_FEE_ADDRESS</span>. The fee would be ${esc(pct)}% of the NOID side, shown with the total before anyone signs.</p>
+    <p class="fine">When it is on, you sign in your own wallet. This site never holds keys or funds.</p></div>`;
+}
 async function mountSwap(d, id) {
-  const feePct = d.swap.fee_pct.toFixed(2);
+  const feePct = Number(d.swap.fee_pct).toFixed(2);
   const box = $('swappane');
-  box.innerHTML = `<div class="card swap"><h2>Swap ${d.demo ? '<small>demo · not a transaction</small>' : ''}</h2>
+  const paidTo = d.swap.fee_address ? ` Fee outputs go to <span class="mono">${esc(d.swap.fee_address)}</span>.` : '';
+  box.innerHTML = `<div class="card swap"><h2>Trade ${d.demo ? '<small>demo · cannot submit</small>' : ''}</h2>
       <div class="tabs" data-tabs="side"><button type="button" data-v="buy" class="on">Buy</button><button type="button" data-v="sell">Sell</button></div>
-      <label class="muted" id="swlab" style="display:block;margin-top:12px;font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase">You pay (NOID)</label>
+      <label class="muted" id="swlab" for="swamt" style="display:block;margin-top:12px;font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase">You pay (NOID)</label>
       <input id="swamt" inputmode="decimal" value="100" aria-label="Amount" autocomplete="off">
-      <div class="tabs" data-tabs="slip" style="margin-top:10px">${[['0.5', '0.5%'], ['1', '1%'], ['3', '3%']].map(([v, l]) => `<button type="button" data-v="${v}" class="${v === '1' ? 'on' : ''}" aria-label="${l} slippage">${l} slip</button>`).join('')}</div>
+      <div class="tabs" data-tabs="slip" style="margin-top:10px">${[['0.5', '0.5%'], ['1', '1%'], ['3', '3%']].map(([v, l]) => `<button type="button" data-v="${v}" class="${v === '1' ? 'on' : ''}" aria-label="${l} slippage">${l}</button>`).join('')}</div>
       <label class="muted" for="swslip" style="display:block;margin-top:8px;font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase">Slippage %</label>
       <input id="swslip" inputmode="decimal" value="1" aria-describedby="swsliperr" autocomplete="off">
       <p id="swsliperr" class="down" style="min-height:1.2em;margin:4px 0 0;font:12px var(--mono)"></p>
-      <p class="fee" id="swfee">Fee ${esc(feePct)}% of the NOID side. The NOID amount is shown here before you sign.</p>
-      <div class="kvl" id="swquote"><small>Quote</small><span class="muted">Updating…</span></div>
+      <p class="fee" id="swfee">Fee ${esc(feePct)}% of the NOID side. The total below is what you pay or receive before you sign.</p>
+      <div class="kvl" id="swquote" aria-live="polite"><small>Quote</small><span class="muted">Updating…</span></div>
       <button type="button" id="swsign" disabled style="margin-top:12px;width:100%">${d.demo ? 'Demo · cannot submit' : 'Sign in wallet'}</button>
-      <p class="fine">Non-custodial: you sign with your own Parano1d wallet. NOID Scan never holds your funds or keys. The fee above (${esc(feePct)}%) is disclosed before signing${d.swap.fee_address ? ` and is paid to <span class="mono">${esc(d.swap.fee_address)}</span>` : ''}. Not investment advice. <a href="/terms" data-link>Terms</a></p></div>`;
+      <div class="risk" role="note"><b>Before you sign</b><ul>
+        <li>You can lose the full amount. A token price can go to zero.</li>
+        <li>The fee and the total above are the amounts you are agreeing to. This site cannot reverse a trade.</li>
+        <li>NOID Scan never holds your wallet, keys, or funds. You sign in your own wallet, or not at all.</li>
+        <li>This is not investment, financial, or trading advice.</li>
+      </ul></div>
+      <p class="fine">Non-custodial. Fee ${esc(feePct)}% is disclosed with the total before signing.${paidTo} <a href="/terms" data-link>Terms</a></p></div>`;
   let side = 'buy', q = null;
   const slipValue = () => {
     const raw = $('swslip').value.trim();
@@ -1235,43 +1254,66 @@ async function mountSwap(d, id) {
     const n = Number(raw);
     return n >= 0 && n <= 50 ? raw : null;
   };
+  const paintChips = () => {
+    const raw = $('swslip')?.value.trim();
+    for (const b of document.querySelectorAll('[data-tabs="slip"] button')) b.classList.toggle('on', b.dataset.v === raw);
+  };
+  const armSign = (ok) => {
+    const btn = $('swsign');
+    if (!btn) return;
+    if (d.demo || !ok) {
+      btn.disabled = true;
+      btn.textContent = d.demo ? 'Demo · cannot submit' : (WalletDex.ready() ? 'Sign in wallet' : 'Connect a Parano1d wallet to sign');
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Sign in wallet';
+  };
   const refresh = async () => {
     const amount = $('swamt').value.trim();
-    $('swlab').textContent = side === 'buy' ? 'You pay (NOID)' : `You sell (${d.token.ticker}, whole tokens)`;
+    $('swlab').textContent = side === 'buy' ? 'You pay (NOID), fee included' : `You sell (${d.token.ticker}, whole tokens)`;
     const slip = slipValue();
+    paintChips();
     if (!slip) {
       $('swsliperr').textContent = 'Slippage must be a number from 0 to 50.';
-      $('swsign').disabled = true;
+      armSign(false);
       return;
     }
     $('swsliperr').textContent = '';
     if (!/^\d+(\.\d{1,6})?$/.test(amount) || Number(amount) <= 0) {
       $('swquote').innerHTML = `<small>Amount</small><span class="down">Enter a positive amount.</span>`;
-      $('swsign').disabled = true;
+      armSign(false);
       return;
     }
     try {
       q = await api(`swap/quote?token=${encodeURIComponent(id)}&side=${side}&amount=${encodeURIComponent(amount)}&slippage=${encodeURIComponent(slip)}${d.demo ? '&demo=1' : ''}`);
       if (!$('swquote')) return;
-      if (!q.quotable) { $('swquote').innerHTML = `<small>Quote</small><span>${esc(q.note || 'No quote')}</span>`; $('swsign').disabled = true; return; }
-      const out = side === 'buy' ? `${Number(q.expected_out.token).toLocaleString()} ${esc(d.token.ticker)}` : fmtNoid(q.expected_out.noid_micronoid);
-      const min = side === 'buy' ? `${Number(q.min_out.token).toLocaleString()} ${esc(d.token.ticker)}` : fmtNoid(q.min_out.noid_micronoid);
-      const feeLine = `${esc(fmtNoid(q.fee.micronoid))} (${Number(q.fee.pct).toFixed(2)}%)`;
-      $('swfee').textContent = `Fee ${feeLine} of the NOID side, disclosed before you sign.`;
+      if (!q.quotable) { $('swquote').innerHTML = `<small>Quote</small><span>${esc(q.note || 'No quote')}</span>`; armSign(false); return; }
+      const ticker = esc(d.token.ticker);
+      const total = side === 'buy' ? fmtNoid(q.in.noid_micronoid) : `${Number(q.in.token).toLocaleString()} ${d.token.ticker}`;
+      const receive = side === 'buy' ? `${Number(q.expected_out.token).toLocaleString()} ${d.token.ticker}` : fmtNoid(q.expected_out.noid_micronoid);
+      const min = side === 'buy' ? `${Number(q.min_out.token).toLocaleString()} ${d.token.ticker}` : fmtNoid(q.min_out.noid_micronoid);
+      const feeLine = `${fmtNoid(q.fee.micronoid)} (${Number(q.fee.pct).toFixed(2)}%)`;
+      $('swfee').textContent = `Fee ${feeLine} of the NOID side. It is already inside the total below.`;
       const impact = q.price_impact_pct;
       const impactHtml = impact == null ? '–' : `${impact.toFixed(2)}%`;
       const warn = impact >= 15 ? '<small>Warning</small><span class="down">Very high price impact. Reduce the amount before you sign.</span>'
-        : impact >= 5 ? '<small>Warning</small><span class="warn">High price impact. Check the amount before you sign.</span>' : '';
-      $('swquote').innerHTML = `<small>Fee</small><span>${feeLine}${q.fee_in_tx ? ' · separate output in the transaction you sign' : ' · itemized on this quote'}</span>
+        : impact >= 5 ? '<small>Warning</small><span class="warn">High price impact. Check the total before you sign.</span>' : '';
+      const toPool = side === 'buy' && q.to_venue_micronoid != null ? `<small>To the ${esc(q.venue || 'market')}</small><span>${esc(fmtNoid(q.to_venue_micronoid))} after the fee</span>` : '';
+      const gross = side === 'sell' && q.expected_out.noid_micronoid != null
+        ? `<small>NOID before fee</small><span>${esc(fmtNoid((BigInt(q.expected_out.noid_micronoid) + BigInt(q.fee.micronoid)).toString()))}</span>` : '';
+      const totalLabel = side === 'buy' ? 'Total you pay' : 'Total you sell';
+      $('swquote').innerHTML = `<small>${totalLabel}</small><span><b>${esc(total)}</b></span>
+        <small>Fee</small><span>${esc(feeLine)}${q.fee_in_tx ? ' · its own output in the transaction' : ''}</span>
+        ${toPool}${gross}
+        <small>You receive</small><span><b>${esc(receive)}</b></span>
+        <small>Minimum after ${esc(String(q.slippage_pct))}% slippage</small><span>${esc(min)}</span>
         <small>Price impact</small><span>${esc(impactHtml)}</span>
         ${warn}
-        <small>Slippage</small><span>${esc(q.slippage_pct)}%</span>
-        <small>Expected</small><span>${out}</span>
-        <small>Min received</small><span>${min}</span>
-        <small>Route</small><span>${esc(q.venue || '')} · NOID / ${esc(d.token.ticker)}</span>
-        ${d.demo ? '<small>Mode</small><span>Demo quote. No transaction can be created or sent.</span>' : ''}`;
-      $('swsign').disabled = d.demo || !q.signable || !WalletDex.ready();
-    } catch (e) { if ($('swquote')) $('swquote').innerHTML = `<small>Quote</small><span class="down">${esc(e.message)}</span>`; $('swsign').disabled = true; }
+        <small>Route</small><span>${esc(q.venue || '')} · NOID / ${ticker}</span>
+        ${d.demo ? '<small>Mode</small><span>Sample quote. Signing is off and nothing is sent.</span>' : ''}`;
+      armSign(q.signable && WalletDex.ready());
+    } catch (e) { if ($('swquote')) $('swquote').innerHTML = `<small>Quote</small><span class="down">${esc(e.message)}</span>`; armSign(false); }
   };
   onTabs('side', (v) => { side = v; refresh(); });
   onTabs('slip', (v) => { $('swslip').value = v; refresh(); });
@@ -1939,7 +1981,7 @@ const pages = {
     const q = demo ? '?demo=1' : '';
     const d = await api(`tokens/${encodeURIComponent(id)}${q}`);
     const t = d.token;
-    const show = d.demo || (d.swap?.live && WalletDex.ready());
+    const tradeOn = !!(d.demo || d.swap?.live);
     const share = location.origin + location.pathname + location.search;
     const links = t.links ? [
       t.links.website ? `<a href="${esc(t.links.website)}" target="_blank" rel="noopener">Website</a>` : '',
@@ -1963,6 +2005,7 @@ const pages = {
         <div class="card"><h2>Trades <small class="muted">auto-refresh 15s</small></h2><div id="tape"></div></div>
         <div class="card"><h2>Holders <small class="muted">${n0(t.holders_n)} · top 10 hold ${esc(t.top10_pct)}%</small></h2>${d.holders.length ? `<div class="bars">${d.holders.map((h) => `<a class="bar" href="/address/${encodeURIComponent(h.address)}" data-link><span class="name">${esc(h.address)}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Top holders are not published for this token yet.</p>'}</div>
       </div><div class="sidecol">
+        ${tradeOn ? '<div id="swappane"></div>' : tradeLocked(d.swap)}
         ${warns}
         <div class="card"><h2>Stats</h2><div class="kvl">
           <small>Price</small><span>${esc(fmtNoid(t.price_micronoid))}${t.price_usd == null ? '' : ` <span class="muted">${esc(usd4(t.price_usd))}</span>`}</span>
@@ -1981,7 +2024,6 @@ const pages = {
         ${t.graduated && t.pool ? `<p>Pool reserves ${esc(fmtNoid(t.pool.reserve_noid_micronoid))} and ${esc(Number(t.pool.reserve_token).toLocaleString())} ${esc(t.ticker)}.</p>` : ''}
         ${!t.graduated && t.curve ? `<p>Launchpad curve. ${curveHtml(t)} Graduation target ${esc(fmtNoid(t.curve.target_micronoid))}.</p>` : ''}
         </div>
-        ${show ? '<div id="swappane"></div>' : ''}
       </div></div>`;
     growBars();
     const paintTape = (trades) => {
@@ -1995,7 +2037,7 @@ const pages = {
     if (fitBtn) fitBtn.onclick = () => tokenChart?.fit?.();
     onTabs('tf', (tf) => { openTokenChart(id, demo, tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
     await openTokenChart(id, demo, '15m');
-    if (show && $('swappane')) mountSwap(d, id);
+    if (tradeOn && $('swappane')) mountSwap(d, id);
     clearInterval(tokenTimer);
     tokenTimer = setInterval(async () => {
       if (document.hidden || !$('tape')) return;

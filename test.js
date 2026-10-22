@@ -531,6 +531,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /data-star/);
   assert.match(homeHtml, /1W/);
   assert.match(homeHtml, /tokenchart/);
+  assert.match(homeHtml, /Total you pay/);
+  assert.match(homeHtml, /Before you sign/);
+  assert.match(homeHtml, /never holds your wallet/);
+  assert.match(homeHtml, /off until v2\.1/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -641,6 +645,8 @@ test('indexer + api', async (t) => {
   assert.strictEqual(qte.fee_in_tx, false);
   assert.strictEqual(qte.fee.bps, 50);
   assert.strictEqual(qte.fee.micronoid, '500000');
+  assert.strictEqual(qte.in.noid_micronoid, '100000000', 'the total the buyer pays includes the fee');
+  assert.strictEqual(qte.to_venue_micronoid, '99500000');
   assert.ok(Math.abs(qte.price_impact_pct - 0.398) < 0.02);
   assert.ok(BigInt(qte.min_out.token) < BigInt(qte.expected_out.token));
   const [, sell] = await get('swap/quote?demo=1&token=gcat&side=sell&amount=1000&slippage=1');
