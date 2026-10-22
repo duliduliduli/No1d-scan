@@ -2,6 +2,7 @@
 // A different amount does not match. One transaction can settle only one order. Card and NOID stay separate.
 // EVM chains read native Circle USDC Transfer logs that are already USDC_<CHAIN>_CONFIRMATIONS behind the head.
 // Solana reads a finalized balance increase for the wallet owner, or a transfer into the token account.
+// The pay wallet is only read from the environment. This process never creates a key or a wallet.
 // shortcut: each poll looks back USDC_LOOKBACK blocks (default 2000) and 20 Solana signatures. Raise the lookback if a quote can outlive a process restart.
 const { randomBytes, randomInt } = require('node:crypto');
 
@@ -16,17 +17,92 @@ const CHAINS = [
   { id: 'avalanche', label: 'Avalanche', env: 'AVALANCHE', kind: 'evm', mint: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', confirmations: 1 },
   { id: 'solana', label: 'Solana', env: 'SOLANA', kind: 'solana', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', confirmations: 0 },
 ];
-const ADDR = {
-  evm: /^0x[a-fA-F0-9]{40}$/,
-  solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
-};
+// shortcut: keccak256 lives here for the EIP-55 check. Node's crypto has no keccak. Replace it if another hash needs it.
+const KECCAK_RC = [
+  0x0000000000000001n, 0x0000000000008082n, 0x800000000000808an, 0x8000000080008000n,
+  0x000000000000808bn, 0x0000000080000001n, 0x8000000080008081n, 0x8000000000008009n,
+  0x000000000000008an, 0x0000000000000088n, 0x0000000080008009n, 0x000000008000000an,
+  0x000000008000808bn, 0x800000000000008bn, 0x8000000000008089n, 0x8000000000008003n,
+  0x8000000000008002n, 0x8000000000000080n, 0x000000000000800an, 0x800000008000000an,
+  0x8000000080008081n, 0x8000000000008080n, 0x0000000080000001n, 0x8000000080008008n,
+];
+const KECCAK_MASK = (1n << 64n) - 1n;
+const rotl64 = (x, n) => { const s = BigInt(n); return ((x << s) | (x >> (64n - s))) & KECCAK_MASK; };
+function keccakf(a) {
+  for (let round = 0; round < 24; round++) {
+    const c = [0, 1, 2, 3, 4].map((x) => a[x] ^ a[x + 5] ^ a[x + 10] ^ a[x + 15] ^ a[x + 20]);
+    const d = c.map((_, x) => c[(x + 4) % 5] ^ rotl64(c[(x + 1) % 5], 1));
+    for (let i = 0; i < 25; i++) a[i] = (a[i] ^ d[i % 5]) & KECCAK_MASK;
+    let x = 1, y = 0, current = a[1];
+    for (let t = 0; t < 24; t++) {
+      const ny = (2 * x + 3 * y) % 5, nx = y, idx = nx + 5 * ny, tmp = a[idx];
+      a[idx] = rotl64(current, ((t + 1) * (t + 2) / 2) % 64);
+      current = tmp; x = nx; y = ny;
+    }
+    for (let j = 0; j < 5; j++) {
+      const row = [0, 1, 2, 3, 4].map((i) => a[i + 5 * j]);
+      for (let i = 0; i < 5; i++) a[i + 5 * j] = (row[i] ^ ((~row[(i + 1) % 5] & KECCAK_MASK) & row[(i + 2) % 5])) & KECCAK_MASK;
+    }
+    a[0] = (a[0] ^ KECCAK_RC[round]) & KECCAK_MASK;
+  }
+}
+function keccak256(bytes) {
+  const a = Array(25).fill(0n);
+  const rate = 136;
+  const absorb = (block) => {
+    for (let i = 0; i < rate; i++) a[i >> 3] ^= BigInt(block[i]) << BigInt((i & 7) * 8);
+    keccakf(a);
+  };
+  let off = 0;
+  while (bytes.length - off >= rate) { absorb(bytes.subarray(off, off + rate)); off += rate; }
+  const last = Buffer.alloc(rate);
+  bytes.subarray(off).copy(last);
+  last[bytes.length - off] ^= 0x01;
+  last[rate - 1] ^= 0x80;
+  absorb(last);
+  const out = Buffer.alloc(32);
+  for (let i = 0; i < 32; i++) out[i] = Number((a[i >> 3] >> BigInt((i & 7) * 8)) & 0xffn);
+  return out;
+}
+function evmOk(address) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return false;
+  const hex = address.slice(2).toLowerCase();
+  const hash = keccak256(Buffer.from(hex));
+  let out = '0x';
+  for (let i = 0; i < 40; i++) {
+    const byte = hash[i >> 1];
+    const nib = (i & 1) === 0 ? byte >> 4 : byte & 0xf;
+    out += nib >= 8 ? hex[i].toUpperCase() : hex[i];
+  }
+  return out === address;
+}
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function solanaOk(address) {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return false;
+  let n = 0n;
+  for (const ch of address) n = n * 58n + BigInt(B58.indexOf(ch));
+  const bytes = [];
+  while (n > 0n) { bytes.push(Number(n & 255n)); n >>= 8n; }
+  let zeros = 0;
+  for (const ch of address) { if (ch === '1') zeros++; else break; }
+  return zeros + bytes.length === 32;
+}
 
 function priceUsdc() {
   const n = Number(process.env.ENHANCED_PROFILE_USDC ?? 100);
   return Number.isInteger(n) && n >= 1 && n <= 1_000_000 ? n : 100;
 }
+function rawAddress(spec) {
+  const own = String(process.env[`USDC_${spec.env}_ADDRESS`] || '').trim();
+  if (own) return own;
+  if (spec.kind === 'evm') return String(process.env.USDC_EVM_ADDRESS || '').trim();
+  return '';
+}
+function addressOk(spec, address) {
+  return spec.kind === 'evm' ? evmOk(address) : solanaOk(address);
+}
 function chainState(spec) {
-  const address = String(process.env[`USDC_${spec.env}_ADDRESS`] || '').trim();
+  const address = rawAddress(spec);
   const rpc = String(process.env[`USDC_${spec.env}_RPC_URL`] || '').trim();
   const raw = process.env[`USDC_${spec.env}_CONFIRMATIONS`];
   let confirmations = spec.confirmations;
@@ -34,8 +110,19 @@ function chainState(spec) {
     const n = Number(raw);
     if (Number.isInteger(n) && n >= 0 && n <= 1000) confirmations = n;
   }
-  const enabled = !!address && ADDR[spec.kind].test(address);
+  const enabled = !!address && addressOk(spec, address);
   return { ...spec, address, rpc, confirmations, enabled };
+}
+// Read once when the server builds the payer. A bad address is logged and that chain stays off.
+function report() {
+  const lines = [];
+  const shared = String(process.env.USDC_EVM_ADDRESS || '').trim();
+  if (shared && !evmOk(shared)) lines.push('USDC_EVM_ADDRESS is not a checksummed 0x address; EVM chains without a valid override stay off');
+  for (const spec of CHAINS) {
+    const own = String(process.env[`USDC_${spec.env}_ADDRESS`] || '').trim();
+    if (own && !addressOk(spec, own)) lines.push(`USDC_${spec.env}_ADDRESS is not a valid ${spec.kind === 'evm' ? 'checksummed 0x' : 'base58'} address; ${spec.label} stays off`);
+  }
+  return lines;
 }
 function enabled() {
   return CHAINS.map(chainState).filter((c) => c.enabled);
@@ -81,6 +168,7 @@ function solanaCredits(tx, cfg) {
 }
 
 function usdc(db, profiles, boosts = null) {
+  for (const line of report()) console.error(`usdc: ${line}`);
   db.exec(`
     create table if not exists usdc_orders (
       id text primary key, account text not null, profile_id text not null,
@@ -110,7 +198,7 @@ function usdc(db, profiles, boosts = null) {
 
   function quote(acct, subjectId, usdcWhole, chainId) {
     const list = enabled();
-    if (!list.length) throw Object.assign(new Error('USDC is off until a USDC_<CHAIN>_ADDRESS is set'), { status: 503 });
+    if (!list.length) throw Object.assign(new Error('USDC is off until USDC_EVM_ADDRESS or USDC_SOLANA_ADDRESS is a valid address'), { status: 503 });
     const cfg = list.find((c) => c.id === chainId) || (chainId == null && list.length === 1 ? list[0] : null);
     if (!cfg) throw Object.assign(new Error('pick an enabled USDC chain'), { status: 400 });
     if (!cfg.rpc) throw Object.assign(new Error(`USDC_${cfg.env}_RPC_URL is not set`), { status: 503 });
@@ -218,5 +306,6 @@ function usdc(db, profiles, boosts = null) {
 
 usdc.solanaCredits = solanaCredits;
 usdc.priceUsdc = priceUsdc;
+usdc.report = report;
 usdc.mints = Object.fromEntries(CHAINS.map((c) => [c.id, c.mint]));
 module.exports = usdc;
