@@ -336,17 +336,23 @@ module.exports = function assets(db, rpc, priceNow) {
 
   function windowStats(trades, now, sec) {
     const cutoff = now - sec;
-    let txns = 0, buys = 0, sells = 0, vol = 0n;
-    const makers = new Set();
+    let txns = 0, buys = 0, sells = 0, vol = 0n, buyVol = 0n, sellVol = 0n;
+    const makers = new Set(), buyers = new Set(), sellers = new Set();
     for (const tr of trades) {
       if (tr.ts < cutoff) continue;
       txns++;
-      if (tr.side === 'sell') sells++; else buys++;
-      vol += tr.noid;
+      const amt = tr.noid || 0n;
+      if (tr.side === 'sell') { sells++; sellVol += amt; if (tr.trader) sellers.add(tr.trader); }
+      else { buys++; buyVol += amt; if (tr.trader) buyers.add(tr.trader); }
+      vol += amt;
       if (tr.trader) makers.add(tr.trader);
     }
     const last = [...trades].reverse().find((tr) => tr.price != null)?.price ?? null;
-    return { txns, buys, sells, vol, makers: makers.size, change: pct(last, priceAt(trades, cutoff)) };
+    return {
+      txns, buys, sells, vol, buy_vol: buyVol, sell_vol: sellVol,
+      buyers: buyers.size, sellers: sellers.size, makers: makers.size,
+      change: pct(last, priceAt(trades, cutoff)),
+    };
   }
 
   function presentToken(raw, trades, now, usd) {
@@ -418,6 +424,19 @@ module.exports = function assets(db, rpc, priceNow) {
   function publicToken(row) {
     const { stats, _pool, _curve, _last, ...rest } = row;
     return rest;
+  }
+  function pubWindows(stats) {
+    const out = {};
+    for (const [k, w] of Object.entries(stats || {})) {
+      out[k] = {
+        txns: w.txns, buys: w.buys, sells: w.sells, makers: w.makers,
+        buyers: w.buyers || 0, sellers: w.sellers || 0, change: w.change,
+        volume_micronoid: (w.vol || 0n).toString(),
+        buy_vol_micronoid: (w.buy_vol || 0n).toString(),
+        sell_vol_micronoid: (w.sell_vol || 0n).toString(),
+      };
+    }
+    return out;
   }
 
   function sortRows(rows, key, dir) {
@@ -577,6 +596,7 @@ module.exports = function assets(db, rpc, priceNow) {
       demo, live: demo ? false : !!status.available,
       token: {
         ...publicToken(row), pool, holders_n: demo ? holders.length : q.holderCount.get(id).n, top10_pct: top10,
+        windows: pubWindows(row.stats),
         backing_note: '0.001 NOID of the creation reserve per whole token, when the token was minted at the preview rate.',
       },
       chart, trades, holders, warnings, swap: swapInfo(demo),

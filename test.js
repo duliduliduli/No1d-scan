@@ -549,6 +549,21 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Top holders/);
   assert.match(homeHtml, /Copy address/);
   assert.match(homeHtml, /id="sharebtn"/);
+  assert.match(homeHtml, /Screener/);
+  assert.match(homeHtml, /Chart\+Txns/);
+  assert.match(homeHtml, /Price alerts are not on this explorer yet/);
+  assert.match(homeHtml, /₀₁₂₃₄₅₆₇₈₉/);
+  {
+    const fn = homeHtml.match(/function subUsd\(x\) \{\n[\s\S]*?\n\}/);
+    assert.ok(fn, 'subUsd is in the page');
+    const money = (x, d = 2) => '$' + Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const usd4 = (x) => money(x, x < 1 ? 4 : 2);
+    const subUsd = new Function('money', 'usd4', `${fn[0]}; return subUsd;`)(money, usd4);
+    assert.strictEqual(subUsd(0.000003239), '$0.0₅3239');
+    assert.strictEqual(subUsd(0.00002), '$0.0₄2');
+    assert.strictEqual(subUsd(0.032), usd4(0.032));
+    assert.strictEqual(subUsd(null), '–');
+  }
   assert.match(homeHtml, />\$100/);
   assert.match(homeHtml, />\$1k/);
   assert.match(homeHtml, /Pair age/);
@@ -666,6 +681,8 @@ test('indexer + api', async (t) => {
   assert.ok(screen.token.makers >= 1);
   assert.ok(screen.warnings.some((w) => w.code === 'dev_hold'));
   assert.ok(screen.token.top10_pct >= 40);
+  assert.equal(typeof screen.token.windows['24h'].buy_vol_micronoid, 'string');
+  assert.ok(screen.token.windows['5m'].txns >= 0 && screen.token.windows['24h'].buys >= screen.token.windows['24h'].buyers);
   assert.strictEqual((await get('tokens/crown?demo=1'))[1].token.launch, 'direct');
   assert.ok((await get('tokens/crown?demo=1'))[1].warnings.some((w) => w.code === 'low_liq'));
   const [, candles] = await get('tokens/gcat/candles?demo=1&tf=5m');

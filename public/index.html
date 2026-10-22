@@ -192,7 +192,7 @@
   .traits { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px }
   .traits span { font:10px var(--mono); border:1px solid var(--line); border-radius:99px; padding:2px 6px; color:var(--muted) }
   .menu > button { padding:7px 11px; font-size:16px; line-height:1 }
-  .menu nav { display:none; position:absolute; right:0; top:calc(100% + 8px); z-index:10; min-width:220px; flex-direction:column; gap:0; background:var(--card); border:1px solid var(--line); border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,.35) }
+  .menu nav { display:none; position:absolute; right:0; top:calc(100% + 8px); z-index:40; min-width:220px; flex-direction:column; gap:0; background:var(--card); border:1px solid var(--line); border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,.35) }
   .menu.open nav { display:flex }
   .menu nav a, .menu nav button { display:block; width:100%; text-align:left; padding:12px 16px; border:0; border-bottom:1px solid var(--line); border-radius:0; background:none; color:var(--accent) }
   .menu nav a:last-child, .menu nav button:last-child { border-bottom:0 }
@@ -265,6 +265,95 @@
   .bar .track { grid-column:1 / -1; height:8px; background:var(--head); border-radius:4px; overflow:hidden }
   .bar .fill { display:block; height:100%; width:0; border-radius:4px; background:linear-gradient(90deg, color-mix(in srgb, var(--accent) 30%, transparent), var(--accent)); box-shadow:var(--glow); transition:width 1.2s cubic-bezier(.2,.7,.2,1) }
   .bar:hover .name { color:var(--accent) } .bar:hover .fill { filter:brightness(1.25) }
+  /* Phone chrome. Desktop keeps the tables and the stacked token page. */
+  .mob { display:none }
+  .sprout, .lock { width:12px; height:12px; display:inline-block; vertical-align:-2px; color:var(--accent) }
+  .bolt { color:var(--gold); letter-spacing:0; font-style:normal }
+  button.funnel { padding:0 2px; border:0; color:var(--muted); letter-spacing:0; text-transform:none; box-shadow:none }
+  .narrow .mcard { grid-template-columns:auto 28px minmax(0,1fr) auto; align-items:start; gap:2px 8px; padding:8px 0 }
+  .narrow .mcard .logo { width:28px; height:28px }
+  .narrow .mcard .who { display:block; min-width:0 }
+  .narrow .mcard .l1 { display:flex; gap:6px; align-items:center; font:700 13px var(--mono); min-width:0 }
+  .narrow .mcard .l1 b { overflow:hidden; text-overflow:ellipsis }
+  .narrow .mcard .l2 { display:block; color:var(--muted); font:11px var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .narrow .mcard .px { display:flex; flex-direction:column; align-items:flex-end; gap:2px; text-align:right }
+  .narrow .mcard .subpx { font:700 14px var(--mono); letter-spacing:0 }
+  .narrow .mcard .chgpair { display:flex; gap:6px; font:11px var(--mono) }
+  .narrow .mcard .chipsline { display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; max-width:168px }
+  .narrow .mcard .pill { margin:0 }
+  .narrow .mcard button.star { margin:0; padding:0 2px }
+  .mtabs { gap:6px; align-items:center; margin:0 0 8px }
+  .mtabs button { flex:1 }
+  .mtabs select { flex:0 0 auto; max-width:42%; padding:8px }
+  .tiles3 { grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin:0 0 10px }
+  .tile { border:1px solid var(--line); border-radius:4px; padding:8px; background:var(--card); min-width:0 }
+  .tile small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.06em; text-transform:uppercase }
+  .tile b { display:block; font:700 14px var(--mono); overflow-wrap:anywhere }
+  .mobmeta { margin:0 0 8px; color:var(--muted); font:12px var(--mono) }
+  .mobfilters, .pairnav, .dock { position:fixed; left:0; right:0; z-index:30; background:var(--card); border-top:1px solid var(--line) }
+  .mobfilters, .pairnav { bottom:56px; gap:6px; padding:8px 10px; align-items:center }
+  .mobfilters select, .mobfilters button, .pairnav button { flex:1 }
+  .dock { bottom:0; justify-content:space-around; padding:6px 4px 8px }
+  .dock a, .dock button { flex:1; border:0; background:none; color:var(--muted); font:600 10px var(--mono); letter-spacing:.04em; text-align:center; padding:4px 2px; box-shadow:none }
+  .dock a.on, .dock button.on, .pairnav button.on { color:var(--accent) }
+  .pairtools { display:flex; gap:8px; align-items:center }
+  .pairtools .pairname { flex:1; text-align:center; font:700 14px var(--mono); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .idline { gap:8px; align-items:center; flex-wrap:wrap; margin:4px 0 8px; font:12px var(--mono) }
+  .linkbtns { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 }
+  .linkbtns a { border:1px solid var(--line); border-radius:99px; padding:4px 10px; color:var(--fg) }
+  .tilegrid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px }
+  .tilegrid .span2 { grid-column:1 / -1 }
+  .winbox { border:1px solid var(--line); border-radius:4px; padding:8px; margin:8px 0 }
+  .winpct { font:700 22px var(--mono) }
+  .winnums { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:6px; margin:8px 0 }
+  .winnums small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.06em; text-transform:uppercase }
+  .winnums b { font:700 13px var(--mono) }
+  .splitbar { margin:6px 0 }
+  .splitlab { display:flex; justify-content:space-between; gap:8px; font:11px var(--mono) }
+  .splitbar .track { height:6px; background:#ff6b6b; border-radius:4px; overflow:hidden; margin-top:3px }
+  .splitbar .track > span { display:block; height:100%; background:var(--accent) }
+  .pairactions { grid-template-columns:1fr 1fr; gap:8px; margin:10px 0 }
+  .pairactions .tradebtn { grid-column:1 / -1 }
+  .infolist { border-top:1px solid var(--line) }
+  .infolist div { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); font:13px var(--mono) }
+  .infolist small { color:var(--muted) }
+  .more { position:relative }
+  .more summary { list-style:none; cursor:pointer; border:1px solid var(--line); border-radius:3px; padding:6px 8px; color:var(--accent) }
+  .more summary::-webkit-details-marker { display:none }
+  .more div { position:absolute; right:0; top:calc(100% + 6px); z-index:12; min-width:180px; background:var(--card); border:1px solid var(--line); border-radius:4px; padding:8px }
+  .scalebtns { display:inline-flex; gap:4px }
+  .tape-mob { display:none }
+  @media (max-width:899px) {
+    .mob { display:block }
+    .mob.flex { display:flex }
+    .mob.grid { display:grid }
+    body { padding-bottom:76px }
+    body.widepage { padding-bottom:128px }
+    #exsort, #exwin, [data-tabs="preset"], .desknote, .deskbit, .paircard { display:none }
+    #extools .filters { display:none }
+    #extools .filters.open { display:block }
+    a.explore { display:none }
+    .dock { display:flex }
+    body.pair main { display:flex; flex-direction:column }
+    body.pair .pairtools { order:0 }
+    body.pair .idline { order:1 }
+    body.pair .banner { order:2 }
+    body.pair .pane-info { order:3 }
+    body.pair .split { order:4 }
+    body.pair .demo-banner, body.pair .msg { order:-1 }
+    body.pair:not([data-pane="info"]) .pane-info,
+    body.pair:not([data-pane="info"]) .idline,
+    body.pair:not([data-pane="info"]) .banner,
+    body.pair:not([data-pane="info"]) .sidecol,
+    body.pair[data-pane="info"] .pane-chart, body.pair[data-pane="info"] .pane-book, body.pair[data-pane="info"] .pane-feed,
+    body.pair[data-pane="chart"] .pane-feed, body.pair[data-pane="chart"] .pane-items,
+    body.pair[data-pane="both"] .pane-book, body.pair[data-pane="both"] .pane-items,
+    body.pair[data-pane="tx"] .pane-chart, body.pair[data-pane="tx"] .pane-book, body.pair[data-pane="tx"] .pane-items { display:none }
+    .mtabs button.on, .pairnav button.on { background:var(--accent); color:var(--bg) }
+    .tape-mob { display:block }
+    .tape-desk:has(+ .tape-mob) { display:none }
+    header, main, footer { padding-left:12px; padding-right:12px }
+  }
 </style>
 </head>
 <body>
@@ -292,6 +381,13 @@
   </div>
 </header>
 <main id="app" aria-live="polite"></main>
+<nav class="dock mob flex" aria-label="Mobile">
+  <a href="/explore" data-link data-dock="screener">Screener</a>
+  <button type="button" id="docksearch">Search</button>
+  <a href="/explore?preset=watch" data-link data-dock="watch">Watchlist</a>
+  <a href="/alerts" data-link data-dock="alerts">Alerts</a>
+  <button type="button" id="dockmenu">Menu</button>
+</nav>
 <footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them. <a href="/terms" data-link>Terms</a> · <a href="/privacy" data-link>Privacy</a><span class="entity">© 2026 Duli Media LLC</span></footer>
 <script>
 const app = document.getElementById('app');
@@ -383,6 +479,22 @@ function setNum(id, n) {
 const ago = (ts) => { const s = Math.max(0, Math.round(Date.now() / 1000 - (ts > 1e12 ? ts / 1000 : ts))); return s < 120 ? `${s}s ago` : s < 7200 ? `${Math.round(s / 60)}m ago` : s < 172800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`; };
 const money = (x, d = 2) => x == null ? '–' : '$' + Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const usd4 = (x) => money(x, x < 1 ? 4 : 2);
+// $0.0₅3239 means five zeros after the decimal, then those digits. One leading zero stays a normal price.
+function subUsd(x) {
+  const n = Number(x);
+  if (x == null || x === '' || !Number.isFinite(n)) return '–';
+  const sign = n < 0 ? '-' : '';
+  const a = Math.abs(n);
+  if (a === 0) return '$0';
+  if (a >= 1) return sign + money(a, a >= 100 ? 0 : 2);
+  const zeros = -Math.floor(Math.log10(a)) - 1;
+  if (zeros < 2) return sign + usd4(a);
+  const sig = (a * 10 ** (zeros + 4)).toFixed(0).replace(/0+$/, '').slice(0, 4);
+  if (!sig) return sign + usd4(a);
+  const sub = '₀₁₂₃₄₅₆₇₈₉';
+  const z = String(zeros).replace(/[0-9]/g, (d) => sub[d]);
+  return `${sign}$0.0${z}${sig}`;
+}
 const FMT = {
   num: (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }),
   usd: (v) => usd4(v),
@@ -1007,6 +1119,7 @@ function paintStars() {
     const name = b.getAttribute('aria-label')?.replace(/^(Add|Remove) /, '').replace(/ (to|from) watchlist$/, '') || b.dataset.star;
     b.setAttribute('aria-label', `${on ? 'Remove' : 'Add'} ${name} ${on ? 'from' : 'to'} watchlist`);
   }
+  paintWatch();
 }
 function dropApiCache(prefix) {
   for (const k of [...apiCache.keys()]) if (k === prefix || k.startsWith(prefix + '?')) apiCache.delete(k);
@@ -1060,8 +1173,86 @@ const PAID = 'Paid promotion. Not a recommendation or endorsement by NOID Scan.'
 const SOLD = 'Sold by Duli Media LLC';
 const enhBadge = (t) => t?.enhanced ? `<span class="pill enh" title="${esc(PAID)}">Enhanced</span>` : '';
 const promoBadge = () => `<span class="pill promo" title="${esc(PAID)}">Promoted</span>`;
-const paidMarks = (t) => `${enhBadge(t)}${promoIds.has(t?.id) ? promoBadge() : ''}`;
+const paidMarks = (t) => [enhBadge(t), promoIds.has(t?.id) ? promoBadge() : ''].filter(Boolean).join(' ');
 const httpsLink = (url, label) => url && /^https:\/\//.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : '';
+const sprout = () => '<svg class="sprout" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14V7M8 7C8 4 5 3 3 4c2 2 3 3 5 3zm0 0c0-3 3-5 5-3-2 2-3 3-5 3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const lockIco = () => '<svg class="lock" viewBox="0 0 16 16" aria-label="Locked in a pool"><rect x="3.5" y="7" width="9" height="6.5" rx="1" fill="none" stroke="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor"/></svg>';
+// shortcut: a live boost has no count, so the bolt is 1 or absent until the API publishes one.
+const bolt = (id) => promoIds.has(id) ? '<span class="bolt" title="Promoted">⚡ 1</span>' : '';
+let showRank = true, mobTab = '';
+function splitBar(lName, lVal, rName, rVal, lRaw, rRaw) {
+  let l = 0n, r = 0n;
+  try { l = BigInt(String(lRaw ?? 0).split('.')[0] || '0'); r = BigInt(String(rRaw ?? 0).split('.')[0] || '0'); } catch { l = 0n; r = 0n; }
+  const pct = l + r > 0n ? Number(l * 10000n / (l + r)) / 100 : 50;
+  return `<div class="splitbar"><div class="splitlab"><span class="up">${esc(lName)} <b>${esc(lVal)}</b></span><span class="down"><b>${esc(rVal)}</b> ${esc(rName)}</span></div><div class="track"><span style="width:${pct}%"></span></div></div>`;
+}
+function winBox(t, key) {
+  const w = (t.windows && t.windows[key]) || {};
+  return `<div class="winbox"><div class="winpct">${chgHtml(t.change?.[key])}</div><div class="winnums">
+      <span><small>Txns</small><b>${n0(w.txns ?? t.txns)}</b></span>
+      <span><small>Volume</small><b>${esc(fmtNoid(w.volume_micronoid ?? t.volume_micronoid))}</b></span>
+      <span><small>Traders</small><b>${n0(w.makers ?? t.makers)}</b></span>
+    </div>
+    ${splitBar('Buys', n0(w.buys ?? t.buys), 'Sells', n0(w.sells ?? t.sells), w.buys ?? t.buys, w.sells ?? t.sells)}
+    ${splitBar('Buy vol', fmtNoid(w.buy_vol_micronoid), 'Sell vol', fmtNoid(w.sell_vol_micronoid), w.buy_vol_micronoid, w.sell_vol_micronoid)}
+    ${splitBar('Buyers', n0(w.buyers), 'Sellers', n0(w.sellers), w.buyers, w.sellers)}
+  </div>`;
+}
+function pairActions(id) {
+  const on = starSet().has(id);
+  return `<div class="pairactions mob grid"><button type="button" id="watchjump" data-id="${esc(id)}">${on ? 'Watching' : 'Watchlist'}</button><a href="${demoHref('/alerts')}" data-link>Alerts</a><button type="button" id="tradejump" class="tradebtn">Trade</button></div>`;
+}
+function pairNav() {
+  return `<nav class="pairnav mob flex" aria-label="Pair sections"><button type="button" data-pane-btn="info" class="on">Info</button><button type="button" data-pane-btn="both">Chart+Txns</button><button type="button" data-pane-btn="chart">Chart</button><button type="button" data-pane-btn="tx">Txns</button></nav>`;
+}
+function paintWatch() {
+  const b = $('watchjump');
+  if (!b) return;
+  const on = starSet().has(b.dataset.id);
+  b.classList.toggle('on', on);
+  b.textContent = on ? 'Watching' : 'Watchlist';
+}
+function wirePair(redraw) {
+  document.body.dataset.pane = 'info';
+  for (const b of document.querySelectorAll('[data-pane-btn]')) b.onclick = () => {
+    document.body.dataset.pane = b.dataset.paneBtn;
+    document.querySelectorAll('[data-pane-btn]').forEach((x) => x.classList.toggle('on', x === b));
+    if (b.dataset.paneBtn !== 'info') { window.scrollTo(0, 0); requestAnimationFrame(() => tokenChart?.fit?.()); }
+  };
+  const w = $('watchjump');
+  if (w) w.onclick = () => toggleStar(w.dataset.id);
+  const jump = $('tradejump');
+  if (jump) jump.onclick = () => {
+    const swap = $('swappane') || document.querySelector('.swap');
+    const pane = swap ? 'info' : 'both';
+    document.body.dataset.pane = pane;
+    document.querySelectorAll('[data-pane-btn]').forEach((x) => x.classList.toggle('on', x.dataset.paneBtn === pane));
+    (swap || $('book'))?.scrollIntoView({ block: 'start' });
+    if (!swap) requestAnimationFrame(() => tokenChart?.fit?.());
+  };
+  const mount = $('winmount');
+  if (mount && redraw) {
+    mount._redraw = redraw;
+    for (const b of document.querySelectorAll('[data-tabs="chgwin"] button')) b.onclick = () => {
+      b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      mount.innerHTML = redraw(b.dataset.v);
+    };
+  }
+}
+// shortcut: rank is the volume order of the first page only. A token past that page gets no number.
+async function listRank(id, demo, kind) {
+  const q = new URLSearchParams({ sort: 'volume', dir: 'desc' });
+  if (demo) q.set('demo', '1');
+  try {
+    const data = await api((kind === 'collection' ? 'collections?' : 'tokens?') + q);
+    const rows = data.collections || data.tokens || [];
+    const i = rows.findIndex((r) => r.id === id);
+    if (i < 0 || data.page !== 1) return null;
+    return i + 1;
+  } catch { return null; }
+}
+const chartTools = `<button type="button" id="charttype">Candles</button><button type="button" id="chartind" title="20-candle average">SMA</button><span class="scalebtns"><button type="button" data-scale="pct">%</button><button type="button" data-scale="log">log</button><button type="button" data-scale="auto" class="on">auto</button></span><span id="chartclock" class="muted"></span>`;
+const chgTabs = `<div class="tfs" data-tabs="chgwin">${['5m', '1h', '6h', '24h'].map((w) => `<button type="button" data-v="${w}" class="${w === '24h' ? 'on' : ''}">${w.toUpperCase()}</button>`).join('')}</div>`;
 function tokenTable(list, sort, dir, window, page, pageSize) {
   const head = `<tr><th></th><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('makers', 'Makers', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${sortTh('fdv', 'FDV', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th>Launch</th><th class="opt">Backing</th></tr>`;
   const body = list.map((t, i) => `<tr>
@@ -1075,14 +1266,14 @@ function tokenTable(list, sort, dir, window, page, pageSize) {
       <td class="num opt" title="${esc(fmtNoid(t.backing_per_token_micronoid))} per token">${esc(compactNoid(t.backing_per_token_micronoid))}</td></tr>`).join('');
   return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
-function tokenCards(list) {
-  return `<div class="narrow">${list.map((t) => `<a class="mcard" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>
-      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${paidMarks(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
-      <span class="px">${starBtn(t.id, t.name)}${esc(fmtNoid(t.price_micronoid))}<small>${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</small></span>
-      <span class="chgs">${sparkSvg(t.spark)} 5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</span>
-      <span class="meta">Liq ${esc(fmtNoid(t.liquidity_micronoid))} · Vol ${esc(fmtNoid(t.volume_micronoid))} · MCap ${esc(fmtNoid(t.mcap_micronoid))} · FDV ${esc(fmtNoid(t.fdv_micronoid))}</span>
-      <span class="meta">${n0(t.txns)} txns · ${n0(t.makers)} makers · Backing ${esc(fmtNoid(t.backing_per_token_micronoid))} · ${t.launch === 'direct' ? 'Direct issue' : t.launch === 'launchpad' ? 'Launchpad' : ''}</span>
-      ${!t.graduated && t.curve ? `<span class="chgs">${curveHtml(t)}</span>` : ''}</a>`).join('') || ''}</div>`;
+function tokenCards(list, page, pageSize) {
+  return `<div class="narrow">${list.map((t, i) => `<a class="mcard" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>
+      ${showRank ? `<span class="rank">${(page - 1) * pageSize + i + 1}</span>` : ''}${logoHtml(t)}
+      <span class="who"><span class="l1"><b>${esc(t.ticker)}</b> <span class="muted">${sprout()}${esc(ageShort(t.age_s))}</span> ${bolt(t.id)} ${starBtn(t.id, t.name)}</span>
+        <span class="l2">${esc(t.name)} ${paidMarks(t)}</span></span>
+      <span class="px"><b class="subpx">${esc(t.price_usd == null ? '–' : subUsd(t.price_usd))}</b>
+        <span class="chgpair"><span>1H ${chgHtml(t.change?.['1h'])}</span><span>24H ${chgHtml(t.change?.['24h'])}</span></span>
+        <span class="chipsline"><span class="pill">Liq ${esc(compactNoid(t.liquidity_micronoid))}</span><span class="pill">Vol ${esc(compactNoid(t.volume_micronoid))}</span><span class="pill">MCap ${esc(compactNoid(t.mcap_micronoid))}</span></span></span></a>`).join('')}</div>`;
 }
 function nftTable(list, sort, dir) {
   const head = `<tr><th></th><th>Collection</th>${sortTh('floor', 'Floor', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('items', 'Items', sort, dir)}${sortTh('owners', 'Owners', sort, dir)}${sortTh('age', 'Age', sort, dir)}</tr>`;
@@ -1093,11 +1284,14 @@ function nftTable(list, sort, dir) {
       <td class="num">${n0(c.items)}</td><td class="num">${n0(c.owners)}</td><td>${esc(c.created_ts ? ago(c.created_ts) : ageShort(c.age_s))}</td></tr>`).join('');
   return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
-function nftCards(list) {
-  return `<div class="narrow">${list.map((c) => `<a class="mcard" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>
-      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${paidMarks(c)}<small>${esc(ageShort(c.age_s))}</small></span>
-      <span class="px">${starBtn(c.id, c.name)}${esc(fmtNoid(c.floor_micronoid))}<small>floor</small></span>
-      <span class="meta">Vol ${esc(fmtNoid(c.volume_micronoid))} · ${n0(c.items)} items · ${n0(c.owners)} owners</span></a>`).join('')}</div>`;
+function nftCards(list, page, pageSize) {
+  return `<div class="narrow">${list.map((c, i) => `<a class="mcard" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>
+      ${showRank ? `<span class="rank">${(page - 1) * pageSize + i + 1}</span>` : ''}<span class="logo">${esc(c.name.slice(0, 2))}</span>
+      <span class="who"><span class="l1"><b>${esc(c.name.split(' ')[0])}</b> <span class="muted">${sprout()}${esc(ageShort(c.age_s))}</span> ${bolt(c.id)} ${starBtn(c.id, c.name)}</span>
+        <span class="l2">${esc(c.name)} ${paidMarks(c)}</span></span>
+      <span class="px"><b class="subpx">${esc(c.floor_usd == null ? '–' : subUsd(c.floor_usd))}</b>
+        <span class="chgpair"><span>1H ${chgHtml(null)}</span><span>24H ${chgHtml(null)}</span></span>
+        <span class="chipsline"><span class="pill">Vol ${esc(compactNoid(c.volume_micronoid))}</span><span class="pill">Items ${n0(c.items)}</span><span class="pill">Owners ${n0(c.owners)}</span></span></span></a>`).join('')}</div>`;
 }
 const rangeInputs = (label, a, b, params) => `<label>${label}<span class="pair"><input data-f="${a}" value="${esc(params.get(a) || '')}" placeholder="min" inputmode="decimal" aria-label="${esc(label)} minimum"><input data-f="${b}" value="${esc(params.get(b) || '')}" placeholder="max" inputmode="decimal" aria-label="${esc(label)} maximum"></span></label>`;
 let exGen = 0, exploreTimer = null, tokenTimer = null, usdcTimer = null, tokenChart = null;
@@ -1109,17 +1303,36 @@ function exploreShell(tab, params) {
     ? rangeInputs('Volume (NOID)', 'min_vol', 'max_vol', params) + rangeInputs('Floor (NOID)', 'min_floor', 'max_floor', params) + rangeInputs('Items', 'min_items', 'max_items', params) + rangeInputs('Owners', 'min_owners', 'max_owners', params) + rangeInputs('Age (hours)', 'min_age', 'max_age', params)
     : rangeInputs('Liquidity (NOID)', 'min_liq', 'max_liq', params) + rangeInputs('Volume (NOID)', 'min_vol', 'max_vol', params) + rangeInputs('Age (hours)', 'min_age', 'max_age', params) + rangeInputs('Market cap (NOID)', 'min_mcap', 'max_mcap', params) + rangeInputs('Txns', 'min_txns', 'max_txns', params) + rangeInputs('Buys', 'min_buys', 'max_buys', params) + rangeInputs('Sells', 'min_sells', 'max_sells', params);
   const nFilt = [...params.keys()].filter((k) => k.startsWith('min_') || k.startsWith('max_')).length;
+  const picks = tab === 'nfts'
+    ? [['volume:desc', 'Top volume'], ['floor:asc', 'Floor'], ['items:desc', 'Items'], ['owners:desc', 'Owners'], ['age:asc', 'New']]
+    : [['preset:trending', 'Trending'], ['preset:new', 'New'], ['volume:desc', 'Top volume'], ['preset:gainers', 'Top gainers'], ['preset:graduating', 'Graduating soon']].concat(sorts.filter(([k]) => k !== 'volume').map(([k, l]) => [`${k}:desc`, l]));
+  const curPick = params.get('preset') && tab !== 'nfts' ? `preset:${params.get('preset')}` : `${sort}:${dir}`;
+  const win = params.get('window') || '24h';
   return `${tabs('extab', [['tokens', 'Tokens'], ['nfts', 'NFTs']], tab)}
     <div id="extools">
+      <div class="mob flex mtabs" data-tabs="mobtab">
+        <button type="button" data-v="trending">Trending</button>
+        <button type="button" data-v="new">New</button>
+        <button type="button" data-v="volume">Top volume</button>
+        <select id="mobpick" aria-label="Sort">${picks.map(([v, l]) => `<option value="${v}"${v === curPick ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      </div>
+      <p class="mob mobmeta" id="mobmeta"></p>
+      <div class="mob grid tiles3" id="mobtiles"></div>
       <div class="exbar">
         <input id="exq" value="${esc(params.get('q') || '')}" placeholder="${tab === 'nfts' ? 'Collection name or id' : 'Name, ticker or token id'}" aria-label="Search listings" autocomplete="off">
         <select id="exsort" aria-label="Sort">${sorts.flatMap(([k]) => [['desc', '↓'], ['asc', '↑']].map(([d, arrow]) => `<option value="${k}:${d}"${sort === k && dir === d ? ' selected' : ''}>${sorts.find((s) => s[0] === k)[1]} ${arrow}</option>`)).join('')}</select>
-        ${tab === 'tokens' ? `<select id="exwin" aria-label="Stats window">${['5m', '1h', '6h', '24h'].map((w) => `<option${(params.get('window') || '24h') === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
+        ${tab === 'tokens' ? `<select id="exwin" aria-label="Stats window">${['5m', '1h', '6h', '24h'].map((w) => `<option${win === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
       </div>
       ${tabs('preset', tab === 'nfts' ? [['', 'All'], ['watch', 'Watchlist']] : [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Watchlist']], params.get('preset') || '')}
-      ${tab === 'tokens' ? '<p class="muted" style="margin:8px 0 0;font:11px var(--mono)">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
+      ${tab === 'tokens' ? '<p class="muted desknote" style="margin:8px 0 0;font:11px var(--mono)">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
       <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
       <div id="exchips"></div>
+      <div class="mob flex mobfilters">
+        ${tab === 'tokens' ? `<select id="mobwin" aria-label="Timeframe">${['5m', '1h', '6h', '24h'].map((w) => `<option${win === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
+        <button type="button" id="mobsort">Sort</button>
+        <button type="button" id="mobrank" aria-pressed="${showRank}">Rank</button>
+        <button type="button" id="mobmore">Filters</button>
+      </div>
     </div>
     <div id="exbanner"></div><div id="promobox"></div><div id="exlist" aria-live="polite" aria-busy="true"><div class="skel"></div><div class="skel"></div><div class="skel short"></div></div>`;
 }
@@ -1217,11 +1430,38 @@ async function fillExplore() {
   }
   const win = data.window || params.get('window') || '24h';
   const note = `<p class="muted" style="font-size:12px">${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'}${tab === 'tokens' ? ` · volume, txns, buys and sells are the last ${esc(win)}` : ''}</p>`;
-  const sig = rows.map((t) => `${t.id}:${t.price_micronoid}:${t.txns}:${t.makers}`).join('|') + data.page + data.sort + data.dir + win + [...promoIds].join(',');
+  paintMobChrome(rows, data, tab, params);
+  const sig = rows.map((t) => `${t.id}:${t.price_micronoid}:${t.txns}:${t.makers}`).join('|') + data.page + data.sort + data.dir + win + (showRank ? 'r' : '') + [...promoIds].join(',');
   if ($('exlist').dataset.sig === sig && $('exlist').querySelector('table, .mcard, .empty')) return;
   $('exlist').dataset.sig = sig;
-  const table = tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows) : tokenTable(rows, data.sort, data.dir, win, data.page, data.page_size) + tokenCards(rows);
+  const table = tab === 'nfts' ? nftTable(rows, data.sort, data.dir) + nftCards(rows, data.page, data.page_size) : tokenTable(rows, data.sort, data.dir, win, data.page, data.page_size) + tokenCards(rows, data.page, data.page_size);
   $('exlist').innerHTML = note + table + pagerHtml(data);
+}
+function paintMobChrome(rows, data, tab, params) {
+  const win = data.window || params.get('window') || '24h';
+  const preset = params.get('preset') || '';
+  let on = mobTab;
+  if (!on) {
+    if (tab !== 'nfts' && preset === 'trending') on = 'trending';
+    else if (tab !== 'nfts' && preset === 'new') on = 'new';
+    else if (tab === 'nfts' && data.sort === 'age' && data.dir === 'asc') on = 'new';
+    else if (!preset && data.sort === 'volume' && data.dir !== 'asc') on = 'volume';
+  }
+  document.querySelectorAll('[data-tabs="mobtab"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === on));
+  const label = on === 'trending' ? 'Trending' : on === 'new' ? 'New' : on === 'volume' ? 'Top volume' : (data.sort || 'List');
+  if ($('mobmeta')) $('mobmeta').textContent = `${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'} · ${label}${tab === 'tokens' ? ' · ' + win : ''}`;
+  if ($('mobtiles')) {
+    const full = data.count === rows.length;
+    const volUsd = rows.reduce((s, r) => s + (Number(r.volume_usd) || 0), 0);
+    const tx = rows.reduce((s, r) => s + (Number(r.txns) || 0), 0);
+    const volName = tab === 'nfts' ? (full ? 'Volume' : 'Page volume') : (full && win === '24h' ? '24h volume' : (full ? `${win} volume` : `Page ${win} volume`));
+    const txName = tab === 'nfts' ? 'Items' : (full && win === '24h' ? '24h txns' : (full ? `${win} txns` : `Page ${win} txns`));
+    const txVal = tab === 'nfts' ? n0(rows.reduce((s, r) => s + (Number(r.items) || 0), 0)) : n0(tx);
+    $('mobtiles').innerHTML = `<div class="tile"><small>${esc(volName)}</small><b>${esc(money(volUsd, 0))}</b></div><div class="tile"><small>${esc(txName)}</small><b>${txVal}</b></div><div class="tile"><small>Latest block</small><b id="mobblock">–</b></div>`;
+    api('stats').then((s) => { const b = $('mobblock'); if (b && s?.chain?.height != null) b.textContent = n0(s.chain.height); }).catch(() => {});
+  }
+  if ($('mobwin') && $('exwin')) $('mobwin').value = $('exwin').value;
+  $('mobrank')?.setAttribute('aria-pressed', showRank ? 'true' : 'false');
 }
 const showExErr = (e) => { if ($('exlist')) { $('exlist').removeAttribute('aria-busy'); $('exlist').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; } };
 function wireExplore() {
@@ -1229,6 +1469,7 @@ function wireExplore() {
   const refill = () => { clearTimeout(timer); timer = setTimeout(() => { syncExploreUrl(); fillExplore().catch(showExErr); }, 250); };
   $('exq').addEventListener('input', refill);
   $('exsort').addEventListener('change', () => {
+    mobTab = '';
     const [sort, dir] = $('exsort').value.split(':');
     const u = new URL(location.href);
     u.searchParams.set('sort', sort); u.searchParams.set('dir', dir); u.searchParams.delete('preset'); u.searchParams.delete('page');
@@ -1241,6 +1482,46 @@ function wireExplore() {
     u.searchParams.delete('page');
     history.replaceState(null, '', u.pathname + u.search);
     fillExplore().catch(showExErr);
+  });
+  $('mobwin')?.addEventListener('change', () => { if ($('exwin')) { $('exwin').value = $('mobwin').value; $('exwin').dispatchEvent(new Event('change')); } });
+  $('mobpick')?.addEventListener('change', () => {
+    mobTab = '';
+    const u = new URL(location.href);
+    const [a, b] = $('mobpick').value.split(':');
+    u.searchParams.delete('page');
+    if (a === 'preset') { u.searchParams.set('preset', b); u.searchParams.delete('sort'); u.searchParams.delete('dir'); }
+    else {
+      u.searchParams.delete('preset');
+      u.searchParams.set('sort', a); u.searchParams.set('dir', b || 'desc');
+      const opt = `${a}:${b || 'desc'}`;
+      if ($('exsort')?.querySelector(`[value="${opt}"]`)) $('exsort').value = opt;
+    }
+    history.replaceState(null, '', u.pathname + u.search);
+    fillExplore().catch(showExErr);
+  });
+  for (const b of document.querySelectorAll('[data-tabs="mobtab"] button')) b.onclick = () => {
+    const u = new URL(location.href);
+    const v = b.dataset.v;
+    const nft = new URLSearchParams(location.search).get('tab') === 'nfts';
+    mobTab = v;
+    u.searchParams.delete('page');
+    if (v === 'new') {
+      if (nft) { u.searchParams.delete('preset'); u.searchParams.set('sort', 'age'); u.searchParams.set('dir', 'asc'); }
+      else { u.searchParams.set('preset', 'new'); u.searchParams.delete('sort'); u.searchParams.delete('dir'); }
+    } else if (v === 'trending') {
+      if (nft) { u.searchParams.delete('preset'); u.searchParams.set('sort', 'volume'); u.searchParams.set('dir', 'desc'); }
+      else { u.searchParams.set('preset', 'trending'); u.searchParams.delete('sort'); u.searchParams.delete('dir'); }
+    } else { u.searchParams.delete('preset'); u.searchParams.set('sort', 'volume'); u.searchParams.set('dir', 'desc'); }
+    history.replaceState(null, '', u.pathname + u.search);
+    fillExplore().catch(showExErr);
+  };
+  $('mobsort')?.addEventListener('click', () => $('mobpick')?.focus());
+  $('mobrank')?.addEventListener('click', () => { showRank = !showRank; if ($('exlist')) delete $('exlist').dataset.sig; fillExplore().catch(showExErr); });
+  $('mobmore')?.addEventListener('click', () => {
+    const f = document.querySelector('#extools .filters');
+    if (!f) return;
+    f.classList.toggle('open');
+    f.open = f.classList.contains('open');
   });
   for (const input of document.querySelectorAll('#extools [data-f]')) input.addEventListener('input', refill);
   onTabs('extab', (v) => {
@@ -1614,26 +1895,70 @@ async function openTokenChart(id, demo, tf, opts = {}) {
   const theme = chartTheme();
   const chart = LightweightCharts.createChart(box, theme.options);
   chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.28 } });
+  chart.applyOptions({ localization: { timeFormatter: (time) => new Date(time * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) } });
   box.append(tip);
+  const pxFmt = { type: 'price', precision: 6, minMove: 0.000001 };
   const series = chart.addCandlestickSeries({
     upColor: theme.up, downColor: theme.down, borderVisible: false, wickUpColor: theme.up, wickDownColor: theme.down,
-    priceFormat: { type: 'price', precision: 6, minMove: 0.000001 },
+    priceFormat: pxFmt,
   });
+  const line = chart.addLineSeries({ color: theme.accent, lineWidth: 2, visible: false, priceFormat: pxFmt, priceLineVisible: false });
+  const sma = chart.addLineSeries({ color: '#f7b733', lineWidth: 1, visible: false, priceFormat: pxFmt, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
   const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol', base: 0 });
   chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
   const byTime = new Map();
   const state = { bars: page.bars, more: page.more, loading: false, quiet: 0, dead: false, w: 0, h: 0, tf };
+  const view = { type: 'candles', sma: false, scale: 0 };
   const volBar = (b, th) => ({ time: b.time, value: b.vol, color: b.close >= b.open ? th.upSoft : th.downSoft });
+  // shortcut: SMA length stays 20. Add a period control if traders ask for more than one average.
+  const smaPoints = () => {
+    const p = 20, out = [];
+    let sum = 0;
+    for (let i = 0; i < state.bars.length; i++) {
+      sum += state.bars[i].close;
+      if (i >= p) sum -= state.bars[i - p].close;
+      if (i >= p - 1) out.push({ time: state.bars[i].time, value: sum / p });
+    }
+    return out;
+  };
+  const sync = (th) => {
+    series.setData(state.bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+    line.setData(state.bars.map((b) => ({ time: b.time, value: b.close })));
+    sma.setData(view.sma ? smaPoints() : []);
+    vol.setData(state.bars.map((b) => volBar(b, th)));
+  };
+  const applyView = (th) => {
+    const on = view.type === 'line';
+    series.applyOptions(on
+      ? { upColor: 'rgba(0,0,0,0)', downColor: 'rgba(0,0,0,0)', wickUpColor: 'rgba(0,0,0,0)', wickDownColor: 'rgba(0,0,0,0)' }
+      : { upColor: th.up, downColor: th.down, wickUpColor: th.up, wickDownColor: th.down });
+    line.applyOptions({ visible: on, color: th.accent });
+    sma.applyOptions({ visible: view.sma });
+    chart.priceScale('right').applyOptions({ mode: view.scale });
+    const typeBtn = $('charttype');
+    if (typeBtn) typeBtn.textContent = on ? 'Line' : 'Candles';
+    $('chartind')?.classList.toggle('on', view.sma);
+  };
   const paint = (th) => {
     byTime.clear();
     for (const b of state.bars) byTime.set(b.time, b);
     state.quiet++;
-    series.setData(state.bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
-    vol.setData(state.bars.map((b) => volBar(b, th)));
+    sync(th);
+    applyView(th);
     state.quiet--;
   };
+  const paintClock = () => {
+    const el = $('chartclock');
+    if (!el) return;
+    let tz = '';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch {}
+    el.textContent = `${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${tz ? ' ' + tz : ''}`;
+  };
   const writeNote = () => {
-    note.textContent = `${state.bars.length.toLocaleString()} candles · ${opts.note || 'volume from trades'}${state.more ? ' · zoom or pan left for older candles' : ''}`;
+    const a = state.bars[0] ? tokenWhen(state.bars[0].time, tf) : '';
+    const b = state.bars.at(-1) ? tokenWhen(state.bars.at(-1).time, tf) : '';
+    note.textContent = `${a} – ${b} · ${state.bars.length.toLocaleString()} candles · ${opts.note || 'volume from trades'}${state.more ? ' · zoom or pan left for older candles' : ''}`;
+    paintClock();
   };
   const fit = () => {
     if (state.dead) return;
@@ -1677,8 +2002,7 @@ async function openTokenChart(id, demo, tf, opts = {}) {
       for (const b of older) byTime.set(b.time, b);
       const th = chartTheme();
       state.quiet++;
-      series.setData(state.bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
-      vol.setData(state.bars.map((b) => volBar(b, th)));
+      sync(th);
       chart.timeScale().setVisibleLogicalRange({ from: range.from + older.length, to: range.to + older.length });
       state.quiet--;
       writeNote();
@@ -1718,10 +2042,11 @@ async function openTokenChart(id, demo, tf, opts = {}) {
         byTime.set(b.time, b);
         const th = chartTheme();
         series.update({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close });
+        line.update({ time: b.time, value: b.close });
         vol.update(volBar(b, th));
         changed = true;
       }
-      if (changed) writeNote();
+      if (changed) { if (view.sma) sma.setData(smaPoints()); writeNote(); }
     } catch {}
   }, 5000);
   tokenChart = {
@@ -1732,10 +2057,19 @@ async function openTokenChart(id, demo, tf, opts = {}) {
       if (state.dead) return;
       const th = chartTheme();
       chart.applyOptions(th.options);
-      series.applyOptions({ upColor: th.up, downColor: th.down, wickUpColor: th.up, wickDownColor: th.down });
       paint(th);
     },
   };
+  const typeBtn = $('charttype');
+  if (typeBtn) typeBtn.onclick = () => { view.type = view.type === 'line' ? 'candles' : 'line'; applyView(chartTheme()); };
+  const indBtn = $('chartind');
+  if (indBtn) indBtn.onclick = () => { view.sma = !view.sma; applyView(chartTheme()); sync(chartTheme()); };
+  for (const b of document.querySelectorAll('[data-scale]')) b.onclick = () => {
+    view.scale = b.dataset.scale === 'log' ? 1 : b.dataset.scale === 'pct' ? 2 : 0;
+    document.querySelectorAll('[data-scale]').forEach((x) => x.classList.toggle('on', x === b));
+    applyView(chartTheme());
+  };
+  paintClock();
 }
 function walletHref(addr, tokenId, demo) {
   const q = new URLSearchParams();
@@ -1744,9 +2078,15 @@ function walletHref(addr, tokenId, demo) {
   const s = q.toString();
   return `/wallet/${encodeURIComponent(addr)}${s ? '?' + s : ''}`;
 }
-function tradeTable(trades, demo, tokenId) {
+function tradePx(tr) {
+  const noid = Number(tr.noid_micronoid), px = Number(tr.price_micronoid);
+  if (tr.usd != null && noid > 0 && px > 0) return subUsd((px / 1e6) * (tr.usd / (noid / 1e6)));
+  return fmtNoid(tr.price_micronoid);
+}
+function tradeTable(trades, demo, tokenId, dense) {
   if (!trades?.length) return '<p class="muted">No trades match.</p>';
-  const rows = trades.slice(0, 80).map((tr) => `<tr>
+  const list = trades.slice(0, 80);
+  const rows = list.map((tr) => `<tr>
     <td>${esc(ago(tr.ts))}</td>
     <td class="side ${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td>
     <td>${tr.usd == null ? '<span class="muted">–</span>' : esc(money(tr.usd, tr.usd < 1 ? 4 : 2))}</td>
@@ -1756,7 +2096,16 @@ function tradeTable(trades, demo, tokenId) {
     <td>${tr.trader ? `<a class="mono" href="${walletHref(tr.trader, tokenId || tr.token_id, demo)}" data-link>${esc(short(tr.trader))}</a>` : '<span class="muted">–</span>'}</td>
     <td>${tr.txid ? `<a href="/tx/${encodeURIComponent(tr.txid)}" data-link>tx</a>` : '<span class="muted">–</span>'}</td>
   </tr>`).join('');
-  return `<div class="scroller"><table class="list tape"><tr><th>Age</th><th>Type</th><th>USD</th><th>Token</th><th>NOID</th><th>Price</th><th>Maker</th><th>Tx</th></tr>${rows}</table></div>`;
+  const desk = `<div class="scroller tape-desk"><table class="list tape"><tr><th>Age</th><th>Type</th><th>USD</th><th>Token</th><th>NOID</th><th>Price</th><th>Maker</th><th>Tx</th></tr>${rows}</table></div>`;
+  if (!dense) return desk;
+  const mob = list.map((tr) => `<tr>
+    <td class="${tr.side === 'sell' ? 'down' : 'up'}">${tr.side === 'sell' ? '▼' : '▲'} ${esc(ago(tr.ts))}</td>
+    <td>${tr.usd == null ? '<span class="muted">–</span>' : esc(money(tr.usd, tr.usd < 1 ? 4 : 2))}</td>
+    <td>${esc(tradePx(tr))}</td>
+    <td>${tr.trader ? `<a class="mono" href="${walletHref(tr.trader, tokenId || tr.token_id, demo)}" data-link>${esc(short(tr.trader))}</a>` : '<span class="muted">–</span>'}</td>
+  </tr>`).join('');
+  const fun = (k, label) => `<button type="button" class="funnel" data-funnel="${k}" aria-label="${label}">▾</button>`;
+  return desk + `<div class="scroller tape-mob"><table class="list tape"><tr><th>Txn ${fun('side', 'Filter side')}</th><th>USD ${fun('usd', 'Filter USD')}</th><th>Price ${fun('price', 'Filter by USD')}</th><th>Trader ${fun('trader', 'Filter trader')}</th></tr>${mob}</table></div>`;
 }
 function statHead(t) {
   const cell = (k, v) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`;
@@ -2224,6 +2573,9 @@ const pages = {
     };
   },
 
+  alerts() {
+    app.innerHTML = `<div class="card"><h2>Alerts</h2><p>Price alerts are not on this explorer yet. Star a listing to keep it on your watchlist.</p><p><a href="${demoHref('/explore?preset=watch')}" data-link>Watchlist</a></p></div>`;
+  },
   async explore() {
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab') === 'nfts' ? 'nfts' : 'tokens';
@@ -2246,29 +2598,56 @@ const pages = {
     const tradeOn = !!(d.demo || d.swap?.live);
     const e = t.enhanced;
     const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
+    const linkBtns = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join('') : '';
+    if (livePromo) promoIds.add(t.id);
     const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
       ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.<br><span class="muted">${esc(SOLD)}</span></p>` : '';
+    const where = t.pool ? `Pooled · ${fmtNoid(t.pool.reserve_noid_micronoid)}` : (t.curve ? `Launchpad · ${t.curve.progress}%` : (t.launch === 'direct' ? 'Direct issue' : 'Not published'));
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}${paidBack}
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
-      <p><a href="${demoHref('/explore')}" data-link>← Tokens</a>
-        ${starBtn(t.id, t.name)}
+      <p class="pairtools"><a href="${demoHref('/explore')}" data-link>← Tokens</a>
+        <b class="pairname mob">${esc(t.name)}</b>
+        <span class="deskbit">${starBtn(t.id, t.name)}</span>
         <button type="button" id="sharebtn">Share</button>
-        <button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy address">Copy address</button></p>
+        <span class="deskbit"><button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy address">Copy address</button></span>
+        <details class="more mob"><summary aria-label="More">⋯</summary><div>${starBtn(t.id, t.name)}<button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy address">Copy address</button></div></details></p>
+      <p class="idline mob flex"><b>${esc(t.ticker)}/NOID</b>${copyBtn(t.id)}<span class="muted">${sprout()}${esc(ageShort(t.age_s))}</span><span class="pill" id="pairrank"></span>${paidMarks(t)}</p>
+      <div class="pane-info mob">
+        ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
+        ${linkBtns ? `<p class="linkbtns">${linkBtns}</p>` : ''}
+        <div class="tilegrid">
+          <div class="tile"><small>Price USD</small><b>${esc(t.price_usd == null ? '–' : subUsd(t.price_usd))}</b></div>
+          <div class="tile"><small>Price in NOID</small><b>${esc(fmtNoid(t.price_micronoid))}</b></div>
+          <div class="tile"><small>Liquidity ${t.graduated ? lockIco() : ''}</small><b>${esc(fmtNoid(t.liquidity_micronoid))}</b></div>
+          <div class="tile"><small>FDV</small><b>${esc(t.fdv_usd == null ? fmtNoid(t.fdv_micronoid) : money(t.fdv_usd, 0))}</b></div>
+          <div class="tile span2"><small>Market cap</small><b>${esc(t.mcap_usd == null ? fmtNoid(t.mcap_micronoid) : money(t.mcap_usd, 0))}</b></div>
+        </div>
+        ${chgTabs}<div id="winmount">${winBox(t, '24h')}</div>
+        ${pairActions(t.id)}
+        <div class="infolist">
+          <div><small>Pair created</small><b>${esc(ageLabel(t))}</b></div>
+          <div><small>${t.pool ? 'Pooled' : 'Where'}</small><b>${esc(where)}</b></div>
+          <div><small>Supply</small><b>${esc(Number(t.supply).toLocaleString())}</b></div>
+          <div><small>Holders</small><b>${n0(t.holders_n)}</b></div>
+          <div><small>Backing / token</small><b>${esc(fmtNoid(t.backing_per_token_micronoid))}</b></div>
+          <div><small>Creator</small><b>${t.creator ? link('address', t.creator, short(t.creator)) : 'not published'}</b></div>
+        </div>
+      </div>
       <div class="split pair"><div>
-        <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${enhBadge(t)} ${livePromo ? promoBadge() : ''} ${launchHtml(t)}</h2>
+        <div class="card paircard"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${enhBadge(t)} ${livePromo ? promoBadge() : ''} ${launchHtml(t)}</h2>
           ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
           ${links ? `<p class="enhlinks">${links}</p>` : ''}
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
           ${statHead(t)}
         </div></div></div>
         <div class="bookrow">
-        <div class="card"><h2>Price <small>NOID per token</small></h2>
-          <div class="tfs" data-tabs="tf">${[['1m', '1m'], ['5m', '5m'], ['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']].map(([tf, label]) => `<button type="button" data-v="${tf}" class="${tf === '15m' ? 'on' : ''}">${label}</button>`).join('')}<button type="button" class="fit" id="tvfit" title="Fit the loaded candles in the card">Fit</button></div>
+        <div class="card pane-chart"><h2>Price <small>NOID per token</small></h2>
+          <div class="tfs" data-tabs="tf">${[['1m', '1m'], ['5m', '5m'], ['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']].map(([tf, label]) => `<button type="button" data-v="${tf}" class="${tf === '15m' ? 'on' : ''}">${label}</button>`).join('')}<button type="button" class="fit" id="tvfit" title="Fit the loaded candles in the card">Fit</button>${chartTools}</div>
           <div id="tv"><p class="muted">Loading chart…</p></div></div>
-        <div class="card book" id="book"><h2>Book <small id="booksrc">Open orders or derived from pool reserves</small></h2><div id="bookbody"><p class="muted">Loading book…</p></div></div>
+        <div class="card book pane-book" id="book"><h2>Book <small id="booksrc">Open orders or derived from pool reserves</small></h2><div id="bookbody"><p class="muted">Loading book…</p></div></div>
         </div>
-        <div class="card" id="feedcard"><h2>Transactions <small class="muted">auto-refresh 5s</small></h2>
+        <div class="card pane-feed" id="feedcard"><h2>Transactions <small class="muted">auto-refresh 5s</small></h2>
           <div class="tfs" data-tabs="feed"><button type="button" data-v="tx" class="on">Txns</button><button type="button" data-v="traders">Top traders</button><button type="button" data-v="holders">Top holders <span class="muted">${n0(t.holders_n)}</span></button></div>
           <div class="txfilters" id="txfilters">
             <button type="button" data-preset="100">>$100</button>
@@ -2306,7 +2685,9 @@ const pages = {
         ${t.graduated && t.pool ? `<p>Pool reserves ${esc(fmtNoid(t.pool.reserve_noid_micronoid))} and ${esc(Number(t.pool.reserve_token).toLocaleString())} ${esc(t.ticker)}.</p>` : ''}
         ${!t.graduated && t.curve ? `<p>Launchpad curve. ${curveHtml(t)} Graduation target ${esc(fmtNoid(t.curve.target_micronoid))}.</p>` : ''}
         </div>
-      </div></div>`;
+      </div></div>${pairNav()}`;
+    wirePair((key) => winBox(t, key));
+    listRank(t.id, demo, 'token').then((n) => { const el = $('pairrank'); if (el && n) el.textContent = `Rank #${n}`; });
     const txf = { preset: '', min: '', max: '', side: '', maker: '', mine: false };
     const holderHtml = (holders, n, top) => holders?.length
       ? `<p class="muted">${n0(n)} holders · top 10 hold ${esc(top)}%</p><div class="bars">${holders.map((h) => `<a class="bar" href="${walletHref(h.address, id, demo)}" data-link><span class="name">${esc(short(h.address))}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>`
@@ -2330,7 +2711,7 @@ const pages = {
       const el = $('tape');
       if (!el) return;
       if (txf.mine && !($('txwallet')?.value || '').trim()) { el.innerHTML = '<p class="muted">Add the wallet you trade from, then My trades can filter to it.</p>'; return; }
-      el.innerHTML = tradeTable((trades || []).filter(passTrade), demo, id);
+      el.innerHTML = tradeTable((trades || []).filter(passTrade), demo, id, true);
     };
     paintTape(d.trades);
     if (!myKey()) $('mytrades')?.remove();
@@ -2344,7 +2725,17 @@ const pages = {
       try { await navigator.clipboard.writeText(url); $('sharebtn').textContent = 'Link copied'; } catch { $('sharebtn').textContent = 'Copy the address bar'; }
     };
     const filters = $('txfilters');
+    const focusFunnel = (e) => {
+      const f = e.target.closest('button.funnel');
+      if (!f) return false;
+      $('txfilters').hidden = false;
+      const map = { side: 'txtype', usd: 'txmin', price: 'txmin', trader: 'txmaker' };
+      $(map[f.dataset.funnel] || 'txmin')?.focus();
+      return true;
+    };
+    $('feedcard').addEventListener('click', focusFunnel);
     filters.onclick = (e) => {
+      if (focusFunnel(e)) return;
       const b = e.target.closest('button[data-preset]');
       if (!b) return;
       txf.preset = txf.preset === b.dataset.preset ? '' : b.dataset.preset;
@@ -2471,6 +2862,8 @@ const pages = {
     const livePromo = (promo.boosts || [])[0];
     const e = c.enhanced;
     const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
+    const linkBtns = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join('') : '';
+    if (livePromo) promoIds.add(c.id);
     const chartOpts = () => ({ path: `collections/${encodeURIComponent(id)}/candles`, kind: nftKind, note: 'sales volume', label: nftKind === 'floor' ? 'Floor price and sales volume' : 'Sale price and sales volume', empty: 'Not enough sales for a chart yet.' });
     let nftKind = 'sale', tf = '15m';
     const itemGrid = (d.items || []).map((n) => `<div class="item"><b>${esc(n.name || n.id)}</b>
@@ -2478,14 +2871,51 @@ const pages = {
       <div class="muted mono" style="font-size:12px">${n.owner ? `<a href="${walletHref(n.owner, '', demo)}" data-link>${esc(short(n.owner))}</a>` : '–'}</div></div>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
       ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.<br><span class="muted">${esc(SOLD)}</span></p>` : '';
+    const colPanel = (evs) => {
+      const sales = (evs || []).filter((ev) => ev.kind === 'sale');
+      const xf = (evs || []).filter((ev) => ev.kind === 'transfer');
+      const buyers = new Set(sales.map((ev) => ev.wallet).filter(Boolean));
+      const sellers = new Set(sales.map((ev) => ev.other).filter(Boolean));
+      const saleUsd = sales.reduce((s, ev) => s + (Number(ev.usd) || 0), 0);
+      return `<div class="winbox"><div class="winpct">${chgHtml(null)}</div><div class="winnums">
+          <span><small>Sales</small><b>${n0(c.sales_n)}</b></span>
+          <span><small>Volume</small><b>${esc(fmtNoid(c.volume_micronoid))}</b></span>
+          <span><small>Owners</small><b>${n0(c.owners)}</b></span>
+        </div>
+        ${splitBar('Sales', n0(sales.length), 'Transfers', n0(xf.length), sales.length, xf.length)}
+        ${splitBar('Sale vol', money(saleUsd, saleUsd < 1 ? 2 : 0), 'Transfer vol', '–', saleUsd, 0)}
+        ${splitBar('Buyers', n0(buyers.size), 'Sellers', n0(sellers.size), buyers.size, sellers.size)}
+        <p class="muted">No 5m, 1h, 6h or 24h change is published for collections. The bars use the loaded sales and transfers.</p></div>`;
+    };
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample collection for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}${paidBack}
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
-      <p><a href="${demoHref('/explore?tab=nfts')}" data-link>← NFTs</a>
-        ${starBtn(c.id, c.name)}
+      <p class="pairtools"><a href="${demoHref('/explore?tab=nfts')}" data-link>← NFTs</a>
+        <b class="pairname mob">${esc(c.name)}</b>
+        <span class="deskbit">${starBtn(c.id, c.name)}</span>
         <button type="button" id="sharebtn">Share</button>
-        <button type="button" class="copy" data-copy="${esc(c.id)}" aria-label="Copy address">Copy address</button></p>
+        <span class="deskbit"><button type="button" class="copy" data-copy="${esc(c.id)}" aria-label="Copy address">Copy address</button></span>
+        <details class="more mob"><summary aria-label="More">⋯</summary><div>${starBtn(c.id, c.name)}<button type="button" class="copy" data-copy="${esc(c.id)}" aria-label="Copy address">Copy address</button></div></details></p>
+      <p class="idline mob flex"><b>${esc(c.name)}</b>${copyBtn(c.id)}<span class="muted">${sprout()}${esc(ageShort(c.age_s))}</span><span class="pill" id="pairrank"></span>${paidMarks(c)}</p>
+      <div class="pane-info mob">
+        ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
+        ${linkBtns ? `<p class="linkbtns">${linkBtns}</p>` : ''}
+        <div class="tilegrid">
+          <div class="tile"><small>Floor USD</small><b>${esc(c.floor_usd == null ? '–' : subUsd(c.floor_usd))}</b></div>
+          <div class="tile"><small>Floor in NOID</small><b>${esc(fmtNoid(c.floor_micronoid))}</b></div>
+          <div class="tile"><small>Volume</small><b>${esc(fmtNoid(c.volume_micronoid))}</b></div>
+          <div class="tile"><small>Items</small><b>${n0(c.items)}</b></div>
+          <div class="tile span2"><small>Owners</small><b>${n0(c.owners)}</b></div>
+        </div>
+        ${chgTabs}<div id="winmount">${colPanel([])}</div>
+        ${pairActions(c.id)}
+        <div class="infolist">
+          <div><small>Created</small><b>${esc(c.created_ts ? ago(c.created_ts) : ageShort(c.age_s))}</b></div>
+          <div><small>Sales</small><b>${n0(c.sales_n)}</b></div>
+          <div><small>Creator</small><b>${c.creator ? short(c.creator) : 'not published'}</b></div>
+        </div>
+      </div>
       <div class="split pair"><div>
-        <div class="card"><h2 style="margin:0;border:0;background:none;padding:0">${esc(c.name)} ${enhBadge(c)} ${livePromo ? promoBadge() : ''}</h2>
+        <div class="card paircard"><h2 style="margin:0;border:0;background:none;padding:0">${esc(c.name)} ${enhBadge(c)} ${livePromo ? promoBadge() : ''}</h2>
           ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
           ${links ? `<p class="enhlinks">${links}</p>` : ''}
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(c.floor_micronoid))}</b> <span class="muted">floor${c.floor_usd == null ? '' : ' · ' + esc(usd4(c.floor_usd))}</span>
@@ -2498,13 +2928,13 @@ const pages = {
           </div>
         </div>
         <div class="bookrow">
-          <div class="card"><h2>Price <small>NOID</small></h2>
+          <div class="card pane-chart"><h2>Price <small>NOID</small></h2>
             <div class="tfs" data-tabs="nftkind"><button type="button" data-v="sale" class="on">Sale</button><button type="button" data-v="floor">Floor</button></div>
-            <div class="tfs" data-tabs="tf">${[['1m', '1m'], ['5m', '5m'], ['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']].map(([k, label]) => `<button type="button" data-v="${k}" class="${k === '15m' ? 'on' : ''}">${label}</button>`).join('')}<button type="button" class="fit" id="tvfit" title="Fit the loaded candles in the card">Fit</button></div>
+            <div class="tfs" data-tabs="tf">${[['1m', '1m'], ['5m', '5m'], ['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']].map(([k, label]) => `<button type="button" data-v="${k}" class="${k === '15m' ? 'on' : ''}">${label}</button>`).join('')}<button type="button" class="fit" id="tvfit" title="Fit the loaded candles in the card">Fit</button>${chartTools}</div>
             <div id="tv"><p class="muted">Loading chart…</p></div></div>
-          <div class="card book" id="book"><h2>Book <small id="booksrc">Listings and floor depth</small></h2><div id="bookbody"><p class="muted">Loading book…</p></div></div>
+          <div class="card book pane-book" id="book"><h2>Book <small id="booksrc">Listings and floor depth</small></h2><div id="bookbody"><p class="muted">Loading book…</p></div></div>
         </div>
-        <div class="card" id="feedcard"><h2>Sales and transfers <small class="muted">auto-refresh 5s</small></h2>
+        <div class="card pane-feed" id="feedcard"><h2>Sales and transfers <small class="muted">auto-refresh 5s</small></h2>
           <div class="txfilters" id="txfilters">
             <button type="button" data-preset="100">>$100</button>
             <button type="button" data-preset="1000">>$1k</button>
@@ -2514,7 +2944,7 @@ const pages = {
           </div>
           <div id="tape"></div>
         </div>
-        <div class="card"><h2>Items</h2>${itemGrid ? `<div class="items">${itemGrid}</div>` : '<p class="muted">No items published for this collection yet.</p>'}</div>
+        <div class="card pane-items"><h2>Items</h2>${itemGrid ? `<div class="items">${itemGrid}</div>` : '<p class="muted">No items published for this collection yet.</p>'}</div>
       </div><div class="sidecol">
         ${boostCard('collection', c.id, promo, demo)}
         ${e ? '' : enhanceCard(d, demo)}
@@ -2527,7 +2957,9 @@ const pages = {
           <small>Creator</small><span>${c.creator ? `<a class="mono" href="${walletHref(c.creator, '', demo)}" data-link>${esc(short(c.creator))}</a>` : '<span class="muted">not published</span>'}</span>
           ${links ? `<small>Links</small><span>${links}</span>` : ''}
         </div></div>
-      </div></div>`;
+      </div></div>${pairNav()}`;
+    wirePair(() => colPanel(events));
+    listRank(c.id, demo, 'collection').then((n) => { const el = $('pairrank'); if (el && n) el.textContent = `Rank #${n}`; });
     const txf = { preset: '', min: '', max: '', kind: '' };
     const passEv = (ev) => {
       if (txf.kind && ev.kind !== txf.kind) return false;
@@ -2544,8 +2976,7 @@ const pages = {
       if (!el) return;
       const rows = (events || []).filter(passEv).slice(0, 80);
       if (!rows.length) { el.innerHTML = '<p class="muted">No sales or transfers match.</p>'; return; }
-      el.innerHTML = `<div class="scroller"><table class="list tape"><tr><th>Age</th><th>Type</th><th>Item</th><th>USD</th><th>Price</th><th>Wallet</th><th>Tx</th></tr>
-        ${rows.map((ev) => `<tr>
+      const body = rows.map((ev) => `<tr>
           <td>${esc(ago(ev.ts))}</td>
           <td class="side ${ev.kind === 'sale' ? 'up' : ''}">${esc(ev.kind)}</td>
           <td>${esc(ev.item_name || ev.item_id || '–')}</td>
@@ -2553,7 +2984,17 @@ const pages = {
           <td>${ev.price_micronoid ? esc(fmtNoid(ev.price_micronoid)) : '<span class="muted">–</span>'}</td>
           <td>${ev.wallet ? `<a class="mono" href="${walletHref(ev.wallet, '', demo)}" data-link>${esc(short(ev.wallet))}</a>` : '<span class="muted">–</span>'}</td>
           <td>${ev.txid ? `<a href="/tx/${encodeURIComponent(ev.txid)}" data-link>tx</a>` : '<span class="muted">–</span>'}</td>
-        </tr>`).join('')}</table></div>`;
+        </tr>`).join('');
+      const fun = (k, label) => `<button type="button" class="funnel" data-funnel="${k}" aria-label="${label}">▾</button>`;
+      const mob = rows.map((ev) => `<tr>
+          <td class="${ev.kind === 'sale' ? 'up' : ''}">${ev.kind === 'sale' ? '▲' : '▼'} ${esc(ago(ev.ts))}</td>
+          <td>${ev.usd == null ? '<span class="muted">–</span>' : esc(money(ev.usd, ev.usd < 1 ? 4 : 2))}</td>
+          <td>${ev.usd != null ? esc(subUsd(ev.usd)) : '<span class="muted">–</span>'}</td>
+          <td>${ev.wallet ? `<a class="mono" href="${walletHref(ev.wallet, '', demo)}" data-link>${esc(short(ev.wallet))}</a>` : '<span class="muted">–</span>'}</td>
+        </tr>`).join('');
+      el.innerHTML = `<div class="scroller tape-desk"><table class="list tape"><tr><th>Age</th><th>Type</th><th>Item</th><th>USD</th><th>Price</th><th>Wallet</th><th>Tx</th></tr>${body}</table></div>
+        <div class="scroller tape-mob"><table class="list tape"><tr><th>Txn ${fun('side', 'Filter side')}</th><th>USD ${fun('usd', 'Filter USD')}</th><th>Price ${fun('price', 'Filter by USD')}</th><th>Trader ${fun('trader', 'Filter side')}</th></tr>${mob}</table></div>`;
+      if ($('winmount')) $('winmount').innerHTML = colPanel(events);
     };
     let events = [];
     const loadActivity = async () => {
@@ -2566,7 +3007,16 @@ const pages = {
       try { await navigator.clipboard.writeText(url); $('sharebtn').textContent = 'Link copied'; } catch { $('sharebtn').textContent = 'Copy the address bar'; }
     };
     const filters = $('txfilters');
+    const focusFunnel = (ev) => {
+      const f = ev.target.closest('button.funnel');
+      if (!f) return false;
+      const map = { side: 'txtype', usd: 'txmin', price: 'txmin', trader: 'txtype' };
+      $(map[f.dataset.funnel] || 'txmin')?.focus();
+      return true;
+    };
+    $('feedcard').addEventListener('click', focusFunnel);
     filters.onclick = (ev) => {
+      if (focusFunnel(ev)) return;
       const b = ev.target.closest('button[data-preset]');
       if (!b) return;
       txf.preset = txf.preset === b.dataset.preset ? '' : b.dataset.preset;
@@ -2785,9 +3235,22 @@ async function render() {
   document.body.classList.toggle('widepage', onEx);
   const demoOn = new URLSearchParams(location.search).get('demo') === '1';
   for (const a of document.querySelectorAll('header a.explore, #menunav a[href^="/explore"]')) a.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
+  const screener = document.querySelector('[data-dock="screener"]');
+  const watch = document.querySelector('[data-dock="watch"]');
+  const alerts = document.querySelector('[data-dock="alerts"]');
+  if (screener) screener.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
+  if (watch) watch.setAttribute('href', '/explore?preset=watch' + (demoOn ? '&demo=1' : ''));
+  if (alerts) alerts.setAttribute('href', demoOn ? '/alerts?demo=1' : '/alerts');
+  const preset = new URLSearchParams(location.search).get('preset');
+  screener?.classList.toggle('on', type === 'explore' && preset !== 'watch');
+  watch?.classList.toggle('on', type === 'explore' && preset === 'watch');
+  alerts?.classList.toggle('on', type === 'alerts');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
+    const named = ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin'];
+    document.body.classList.toggle('pair', type === 'token' || type === 'collection');
+    if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
+    await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>${e.status === 404 ? 'Not found' : 'Unavailable'}</h2><p class="muted">${esc(e.message)}</p></div>`;
   }
@@ -2807,6 +3270,8 @@ setTheme((() => { try { return localStorage.getItem('theme'); } catch {} })() ||
 $('theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
 const menu = (open) => { $('menu').classList.toggle('open', open); $('menubtn').setAttribute('aria-expanded', open); };
 $('menubtn').onclick = (e) => { e.stopPropagation(); menu(!$('menu').classList.contains('open')); };
+$('dockmenu').onclick = (e) => { e.stopPropagation(); menu(true); };
+$('docksearch').onclick = () => { document.querySelector('#search input')?.focus(); window.scrollTo(0, 0); };
 addEventListener('keydown', (e) => e.key === 'Escape' && menu(false));
 
 async function copy(text, btn) {
