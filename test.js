@@ -535,6 +535,11 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Before you sign/);
   assert.match(homeHtml, /never holds your wallet/);
   assert.match(homeHtml, /off until v2\.1/);
+  assert.match(homeHtml, /pill enh/);
+  assert.match(homeHtml, /Enhanced Token Info/);
+  assert.match(homeHtml, /id="enhform"/);
+  assert.match(homeHtml, /Profile review/);
+  assert.match(homeHtml, /Sample page\. Payment is not taken/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -726,6 +731,119 @@ test('indexer + api', async (t) => {
   tip = tipBefore;
   await tick();
   delete process.env.ASSET_PROBE_MS;
+
+  // Enhanced profile: images, https links, payment without credits, then admin approval.
+  const images = require('./images.js');
+  const png = images.solidPng(8, 8, [12, 40, 48]);
+  const b64 = png.toString('base64');
+  assert.throws(() => images.prepare(images.solidPng(1501, 10, [1, 1, 1]), 'banner'), /1500/);
+  assert.throws(() => images.prepare(Buffer.concat([png, Buffer.alloc(1_000_000)]), 'banner'), /1 MB/);
+  const text = Buffer.from('Comment\0secret-gps');
+  const textLen = Buffer.alloc(4);
+  textLen.writeUInt32BE(text.length);
+  const dirtyPng = Buffer.concat([png.subarray(0, png.indexOf('IEND') - 4), textLen, Buffer.from('tEXt'), text, Buffer.alloc(4), png.subarray(png.indexOf('IEND') - 4)]);
+  const cleaned = images.prepare(dirtyPng, 'icon');
+  assert.strictEqual(cleaned.type, 'image/png');
+  assert.ok(!cleaned.bytes.includes(Buffer.from('secret-gps')));
+  const exif = Buffer.from('Exif\0\0SECRET');
+  const app1Len = Buffer.alloc(2);
+  app1Len.writeUInt16BE(exif.length + 2);
+  const jpeg = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe1]), app1Len, exif,
+    Buffer.from([0xff, 0xc0, 0x00, 0x08, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01]),
+    Buffer.from([0xff, 0xda, 0x00, 0x02, 0x00, 0xff, 0xd9]),
+  ]);
+  const jpg = images.prepare(jpeg, 'icon');
+  assert.strictEqual(jpg.type, 'image/jpeg');
+  assert.ok(!jpg.bytes.includes(Buffer.from('SECRET')));
+  const vp8x = Buffer.alloc(18);
+  vp8x.write('VP8X', 0); vp8x.writeUInt32LE(10, 4); vp8x.writeUIntLE(7, 12, 3); vp8x.writeUIntLE(7, 15, 3);
+  const secret = Buffer.from('EXIFSECRET');
+  const exifChunk = Buffer.alloc(8 + secret.length);
+  exifChunk.write('EXIF', 0); exifChunk.writeUInt32LE(secret.length, 4); secret.copy(exifChunk, 8);
+  const webpBody = Buffer.concat([vp8x, exifChunk]);
+  const webp = Buffer.alloc(12 + webpBody.length);
+  webp.write('RIFF', 0); webp.writeUInt32LE(4 + webpBody.length, 4); webp.write('WEBP', 8); webpBody.copy(webp, 12);
+  const web = images.prepare(webp, 'icon');
+  assert.strictEqual(web.type, 'image/webp');
+  assert.ok(!web.bytes.includes(secret));
+  const profileBody = (over) => ({ token_id: 'live1', description: 'A live coin with a night market.', website: 'https://example.com/live', twitter: 'https://twitter.com/livecoin', icon: b64, banner: b64, ...over });
+  assert.strictEqual((await post('profile', profileBody(), {}))[0], 401);
+  assert.match((await post('profile', profileBody({ website: 'http://example.com/live' }), K))[1].error, /https/);
+  assert.strictEqual((await post('profile', profileBody({ website: 'javascript:alert(1)' }), K))[0], 400);
+  assert.strictEqual((await post('profile', profileBody({ website: 'https://user:pass@example.com/live' }), K))[0], 400);
+  const [, made] = await post('profile', profileBody(), K);
+  assert.strictEqual(made.status, 'unpaid');
+  assert.strictEqual(made.usd, 299);
+  const [, updated] = await post('profile', profileBody({ description: 'Updated night market coin.' }), K);
+  assert.strictEqual(updated.id, made.id);
+  const creditsBefore = await credits();
+  const [, pay] = await post('profile-pay', { id: made.id, method: 'noid' }, K);
+  assert.strictEqual(pay.kind, 'profile');
+  assert.strictEqual(pay.usd, 299);
+  const microP = Math.round(Number(pay.amount_noid) * 1e6);
+  assert.ok(microP > 1495e6 && microP < 1495e6 + 10000, pay.amount_noid);
+  const taken = new Set(db.prepare('select dust from noid_topups where paid_ref is null and id != ?').all(pay.id).map((r) => r.dust));
+  let dust = 4242;
+  while (taken.has(dust)) dust++;
+  const amount = 1_495_000_000 + dust;
+  db.prepare('update noid_topups set amount = ?, dust = ? where id = ?').run(amount, dust, pay.id);
+  paySlots = [{ slot_index: 40, value: String(amount), creation_id: 'prof1' }];
+  await tick();
+  await mine(18);
+  paySlots = [];
+  assert.strictEqual(await credits(), creditsBefore, 'a profile payment does not add credits');
+  assert.strictEqual((await get(`profile/${made.id}`, { headers: K }))[1].status, 'pending');
+  assert.strictEqual((await get('token/live1?window=1h'))[1].token.enhanced, null);
+  assert.strictEqual((await fetch(base + '/api/profile-media/live1/icon', { headers: { 'sec-fetch-site': 'same-origin' } })).status, 404);
+  assert.strictEqual((await get('admin', { headers: { 'x-admin-token': 'adm-test' } }))[0], 404, 'review stays hidden until ADMIN_TOKEN is set');
+  process.env.ADMIN_TOKEN = 'adm-test';
+  try {
+    assert.strictEqual((await get('admin'))[0], 401);
+    assert.strictEqual((await get('admin', { headers: { 'x-admin-token': 'nope' } }))[0], 401);
+    const [, queue] = await get('admin', { headers: { 'x-admin-token': 'adm-test' } });
+    assert.ok(queue.pending.some((p) => p.id === made.id && p.description === 'Updated night market coin.'));
+    const preview = await fetch(base + `/api/admin-media/${made.id}/banner`, { headers: { 'x-admin-token': 'adm-test', 'sec-fetch-site': 'same-origin' } });
+    assert.strictEqual(preview.status, 200);
+    assert.match(preview.headers.get('content-type'), /image\/png/);
+    assert.ok((await preview.arrayBuffer()).byteLength > 20);
+    assert.strictEqual((await post('admin', { id: made.id, action: 'approve' }, { 'x-admin-token': 'adm-test' }))[1].status, 'approved');
+    const [, shown] = await get('token/live1?window=5m');
+    assert.strictEqual(shown.token.enhanced.description, 'Updated night market coin.');
+    assert.strictEqual(shown.token.enhanced.website, 'https://example.com/live');
+    assert.strictEqual(shown.token.enhanced.twitter, 'https://x.com/livecoin');
+    assert.match(shown.token.logo, /profile-media\/live1\/icon/);
+    const listed = (await get('tokens?window=5m'))[1].tokens.find((t) => t.id === 'live1');
+    assert.strictEqual(listed.enhanced.twitter, 'https://x.com/livecoin');
+    const pub = await fetch(base + '/api/profile-media/live1/banner', { headers: { 'sec-fetch-site': 'same-origin' } });
+    assert.strictEqual(pub.status, 200);
+    assert.match(pub.headers.get('content-type'), /image\/png/);
+    assert.strictEqual((await post('profile', profileBody({ description: 'again' }), K))[0], 400);
+    const [, second] = await post('profile', profileBody({ token_id: 'live2', description: 'Second listing.', twitter: '' }), K);
+    const wrong = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_prof_bad', payment_status: 'paid', client_reference_id: acct.id, amount_total: 100, currency: 'usd', metadata: { kind: 'profile', profile_id: second.id } } } });
+    assert.strictEqual((await post('stripe-webhook', wrong, { 'stripe-signature': sign(wrong) }))[0], 200);
+    assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'unpaid');
+    assert.strictEqual(await credits(), creditsBefore, 'a short card payment does not buy the profile or credits');
+    const good = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_prof', payment_status: 'paid', client_reference_id: acct.id, amount_total: 29900, currency: 'usd', metadata: { kind: 'profile', profile_id: second.id } } } });
+    assert.strictEqual((await post('stripe-webhook', good, { 'stripe-signature': sign(good) }))[0], 200);
+    assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'pending');
+    assert.strictEqual(await credits(), creditsBefore);
+    assert.strictEqual((await post('admin', { id: second.id, action: 'reject' }, { 'x-admin-token': 'adm-test' }))[1].status, 'rejected');
+    assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'rejected');
+    assert.ok(!(await get('admin', { headers: { 'x-admin-token': 'adm-test' } }))[1].pending.some((p) => p.id === second.id));
+  } finally {
+    delete process.env.ADMIN_TOKEN;
+  }
+  assert.strictEqual((await get('admin', { headers: { 'x-admin-token': 'adm-test' } }))[0], 404);
+  const [, gcat] = await get('tokens/gcat?demo=1');
+  assert.match(gcat.token.enhanced.banner, /demo=1/);
+  assert.strictEqual(gcat.token.enhanced.twitter, 'https://x.com/ghostcat');
+  assert.strictEqual((await get('tokens/qsun?demo=1'))[1].token.enhanced, null);
+  assert.strictEqual((await get('tokens?demo=1'))[1].enhance_usd, 299);
+  const demoImg = await fetch(base + '/api/profile-media/gcat/banner?demo=1');
+  assert.strictEqual(demoImg.status, 200);
+  assert.match(demoImg.headers.get('content-type'), /image\/png/);
+  assert.strictEqual((await fetch(base + '/api/profile-media/qsun/icon?demo=1')).status, 404);
 
   const [, whale] = await get('address/o1whalewhale');
   assert.strictEqual(whale.label.entity, 'Test Whale');

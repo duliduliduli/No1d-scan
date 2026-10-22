@@ -153,6 +153,18 @@
   .swap .risk ul { margin:0; padding-left:1.1em } .swap .risk li { margin:4px 0 }
   .swap.off p { margin:0 0 8px } .swap.off p:last-child { margin:0 }
   .pill { display:inline-block; padding:1px 6px; border:1px solid var(--line); border-radius:3px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
+  .pill.enh { color:var(--gold); border-color:var(--gold); margin-left:6px; vertical-align:1px }
+  .banner { display:block; width:100%; aspect-ratio:3/1; max-height:220px; object-fit:cover; border:1px solid var(--line); border-radius:4px; margin:0 0 12px }
+  .enhdesc, .enhlinks { margin:8px 0 0; font:13px/1.45 var(--mono) }
+  .enhlinks a { margin-right:8px }
+  #enhform { min-width:0 }
+  #enhform form, #adminkey { display:flex; flex-direction:column; align-items:stretch; flex:none; min-width:0 }
+  #enhform p, #admin p { margin:0 0 8px }
+  #enhform label, #adminkey label { display:block; margin:10px 0 0; color:var(--muted); font:12px var(--mono) }
+  #enhform input, #enhform textarea, #adminkey input { width:100%; box-sizing:border-box; display:block; flex:none; min-width:0; margin-top:4px }
+  #enhform .row { margin-top:12px }
+  #enhform textarea { min-height:64px; padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono) }
+  #admin img.logo { width:48px; height:48px }
   .items { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
   .item { border:1px solid var(--line); border-radius:4px; padding:10px; background:var(--head) }
   .menu > button { padding:7px 11px; font-size:16px; line-height:1 }
@@ -1019,11 +1031,13 @@ function starBtn(id, name) {
   const on = starSet().has(id);
   return `<button type="button" class="star${on ? ' on' : ''}" data-star="${esc(id)}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${on ? 'Remove' : 'Add'} ${esc(name || id)} ${on ? 'from' : 'to'} watchlist">${on ? '★' : '☆'}</button>`;
 }
+const enhBadge = (t) => t?.enhanced ? '<span class="pill enh">Enhanced</span>' : '';
+const httpsLink = (url, label) => url && /^https:\/\//.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : '';
 function tokenTable(list, sort, dir, window, page, pageSize) {
   const head = `<tr><th></th><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('makers', 'Makers', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${sortTh('fdv', 'FDV', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th>Launch</th><th class="opt">Backing</th></tr>`;
   const body = list.map((t, i) => `<tr>
       <td>${starBtn(t.id, t.name)}</td>
-      <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b><small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
+      <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b> ${enhBadge(t)}<small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
       <td>${sparkSvg(t.spark)}${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
       <td>${esc(ageLabel(t))}</td><td class="num">${n0(t.txns)}</td><td class="num">${n0(t.makers)}</td>
       ${numCell(t.volume_micronoid)}${numCell(t.liquidity_micronoid)}${numCell(t.mcap_micronoid)}${numCell(t.fdv_micronoid)}
@@ -1034,7 +1048,7 @@ function tokenTable(list, sort, dir, window, page, pageSize) {
 }
 function tokenCards(list) {
   return `<div class="narrow">${list.map((t) => `<a class="mcard" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>
-      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
+      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${enhBadge(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
       <span class="px">${starBtn(t.id, t.name)}${esc(fmtNoid(t.price_micronoid))}<small>${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</small></span>
       <span class="chgs">${sparkSvg(t.spark)} 5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</span>
       <span class="meta">Liq ${esc(fmtNoid(t.liquidity_micronoid))} · Vol ${esc(fmtNoid(t.volume_micronoid))} · MCap ${esc(fmtNoid(t.mcap_micronoid))} · FDV ${esc(fmtNoid(t.fdv_micronoid))}</span>
@@ -1333,6 +1347,60 @@ async function mountSwap(d, id) {
   };
   refresh();
 }
+function fileB64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = () => reject(new Error('could not read that image'));
+    fr.readAsDataURL(file);
+  });
+}
+function enhanceCard(d, demo) {
+  const usd = Number(d.enhance_usd || 299);
+  const note = demo
+    ? '<p class="fine">Sample page. Payment is not taken.</p>'
+    : '<p class="fine">Log in with the API key from API &amp; Credits. After payment the profile waits for review and stays hidden until it is approved.</p>';
+  return `<div class="card" id="enhform"><h2>Enhanced Token Info <small>$${usd}</small></h2>
+    <p>A banner, an icon, a short description, and https links for a website and X. Unpaid profiles show none of these.</p>
+    ${note}
+    <form>
+      <label>Description<textarea name="description" maxlength="200" required placeholder="Up to 200 characters"></textarea></label>
+      <label>Website<input name="website" inputmode="url" placeholder="https://example.com" autocomplete="off"></label>
+      <label>X<input name="twitter" inputmode="url" placeholder="https://x.com/name" autocomplete="off"></label>
+      <label>Icon <span class="muted">PNG, JPG or WebP · 512×512 max · 256 KB</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp" required></label>
+      <label>Banner <span class="muted">PNG, JPG or WebP · 1500×500 max · under 1 MB</span><input name="banner" type="file" accept="image/png,image/jpeg,image/webp" required></label>
+      <p class="fee">One-time $${usd}. Card or NOID.</p>
+      <div class="row"><button type="button" data-enh="card">Pay by card</button><button type="button" data-enh="noid">Pay with NOID</button></div>
+      <p id="enhmsg" class="muted"></p>
+    </form></div>`;
+}
+function wireEnhance(d, t, demo) {
+  const form = document.querySelector('#enhform form');
+  if (!form) return;
+  form.addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-enh]');
+    if (!b) return;
+    const msg = $('enhmsg');
+    if (demo) { msg.textContent = 'Sample page. Payment is not taken.'; return; }
+    if (!myKey()) { msg.textContent = 'Log in with the API key from API & Credits, then submit.'; return; }
+    const icon = form.icon.files[0], banner = form.banner.files[0];
+    if (!String(form.description.value || '').trim() || !icon || !banner) { msg.textContent = 'Add a description, an icon and a banner.'; return; }
+    if (icon.size > 256_000 || banner.size > 1_000_000) { msg.textContent = 'Icon must be under 256 KB and the banner under 1 MB.'; return; }
+    b.disabled = true;
+    try {
+      const made = await api('profile', {
+        token_id: t.id, description: form.description.value, website: form.website.value, twitter: form.twitter.value,
+        icon: await fileB64(icon), banner: await fileB64(banner),
+      });
+      const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh });
+      if (pay.url) { location.href = pay.url; return; }
+      msg.innerHTML = `Send exactly <b>${esc(pay.amount_noid)} NOID</b> to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_noid)} It stays in review until an admin approves it.`;
+    } catch (err) {
+      msg.textContent = err.message;
+      b.disabled = false;
+    }
+  });
+}
 
 function exploreCard(demo) {
   const href = demo ? '/explore?demo=1' : '/explore';
@@ -1346,7 +1414,7 @@ function homeStrip(list) {
   return `<div class="card"><h2>Sample tokens <small>not on chain</small></h2>
     <p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>
     ${list.slice(0, 5).map((t) => `<a class="mcard" style="display:grid" href="/token/${encodeURIComponent(t.id)}?demo=1" data-link>
-      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
+      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${enhBadge(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
       <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}
     <p><a href="/explore?demo=1" data-link>All sample tokens →</a></p></div>`;
 }
@@ -1983,19 +2051,21 @@ const pages = {
     const t = d.token;
     const tradeOn = !!(d.demo || d.swap?.live);
     const share = location.origin + location.pathname + location.search;
-    const links = t.links ? [
-      t.links.website ? `<a href="${esc(t.links.website)}" target="_blank" rel="noopener">Website</a>` : '',
-      t.links.twitter ? `<a href="https://x.com/${esc(t.links.twitter)}" target="_blank" rel="noopener">X</a>` : '',
-      t.links.telegram ? `<a href="https://t.me/${esc(t.links.telegram)}" target="_blank" rel="noopener">Telegram</a>` : '',
-    ].filter(Boolean).join(' · ') : '';
+    const e = t.enhanced;
+    const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
     const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
-    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}
+    const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
+      ? '<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.</p>' : '';
+    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}${paidBack}
+      ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
       <p><a href="${demoHref('/explore')}" data-link>← Tokens</a>
         ${starBtn(t.id, t.name)}
         <button type="button" class="copy" data-copy="${esc(share)}" aria-label="Copy link to this token">Copy link</button>
         <button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy token id">Copy token id</button></p>
       <div class="split pair"><div>
-        <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${launchHtml(t)}</h2>
+        <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${enhBadge(t)} ${launchHtml(t)}</h2>
+          ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
+          ${links ? `<p class="enhlinks">${links}</p>` : ''}
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
           <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div>
         </div></div></div>
@@ -2006,6 +2076,7 @@ const pages = {
         <div class="card"><h2>Holders <small class="muted">${n0(t.holders_n)} · top 10 hold ${esc(t.top10_pct)}%</small></h2>${d.holders.length ? `<div class="bars">${d.holders.map((h) => `<a class="bar" href="/address/${encodeURIComponent(h.address)}" data-link><span class="name">${esc(h.address)}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Top holders are not published for this token yet.</p>'}</div>
       </div><div class="sidecol">
         ${tradeOn ? '<div id="swappane"></div>' : tradeLocked(d.swap)}
+        ${e ? '' : enhanceCard(d, demo)}
         ${warns}
         <div class="card"><h2>Stats</h2><div class="kvl">
           <small>Price</small><span>${esc(fmtNoid(t.price_micronoid))}${t.price_usd == null ? '' : ` <span class="muted">${esc(usd4(t.price_usd))}</span>`}</span>
@@ -2038,6 +2109,7 @@ const pages = {
     onTabs('tf', (tf) => { openTokenChart(id, demo, tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
     await openTokenChart(id, demo, '15m');
     if (tradeOn && $('swappane')) mountSwap(d, id);
+    wireEnhance(d, t, demo);
     clearInterval(tokenTimer);
     tokenTimer = setInterval(async () => {
       if (document.hidden || !$('tape')) return;
@@ -2135,6 +2207,59 @@ const pages = {
         <p>Parano1d contracts use a 16-instruction integer ABI. This page does not compile, simulate or verify one.</p>
         <p>The six templates are refundable payments, timelocked vaults, delegated allowance, budgets, recurring payments and gradual release. Verification is <code>parano1d-cli receipt</code> / <code>parano1d-cli verify</code>.</p></div>`;
   },
+  async admin() {
+    app.innerHTML = `<div class="card" id="admin"><h2>Profile review</h2>
+      <p class="muted">Pending enhanced profiles. This page is not linked from the public site.</p>
+      <form id="adminkey"><label>Admin token<input id="admintok" type="password" autocomplete="off"></label><button>Open queue</button></form>
+      <div id="adminq"></div></div>`;
+    const tok = () => { try { return sessionStorage.getItem('admin_token') || ''; } catch { return ''; } };
+    const paint = async () => {
+      const token = tok();
+      if (!token) { $('adminq').innerHTML = ''; return; }
+      const r = await fetch('/api/admin', { headers: { 'x-admin-token': token } });
+      if (r.status === 401 || r.status === 404) {
+        try { sessionStorage.removeItem('admin_token'); } catch {}
+        $('adminq').innerHTML = `<p class="msg err">${r.status === 404 ? 'Review is off on this explorer.' : 'That token was refused.'}</p>`;
+        return;
+      }
+      const data = await r.json();
+      if (!data.pending?.length) { $('adminq').innerHTML = '<p class="muted">Nothing waiting.</p>'; return; }
+      $('adminq').innerHTML = data.pending.map((p) => `<article class="card" data-id="${esc(p.id)}">
+        <h2>${esc(p.token_id)} <small>${esc(p.id)}</small></h2>
+        <img class="banner" alt="" data-kind="banner">
+        <p>${esc(p.description)}</p>
+        <p>${httpsLink(p.website, p.website || '') || '<span class="muted">no website</span>'} ${p.twitter ? '· ' + httpsLink(p.twitter, 'X') : ''}</p>
+        <img class="logo" alt="" data-kind="icon">
+        <div class="row"><button type="button" data-act="approve">Approve</button><button type="button" data-act="reject">Reject</button></div>
+      </article>`).join('');
+      for (const img of $('adminq').querySelectorAll('img[data-kind]')) {
+        const id = img.closest('[data-id]').dataset.id;
+        const ir = await fetch(`/api/admin-media/${encodeURIComponent(id)}/${img.dataset.kind}`, { headers: { 'x-admin-token': token } });
+        if (!ir.ok) continue;
+        img.src = URL.createObjectURL(await ir.blob());
+      }
+    };
+    $('adminkey').onsubmit = (e) => {
+      e.preventDefault();
+      try { sessionStorage.setItem('admin_token', $('admintok').value); } catch {}
+      paint().catch((err) => { $('adminq').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; });
+    };
+    $('adminq').onclick = async (e) => {
+      const b = e.target.closest('button[data-act]');
+      if (!b) return;
+      const id = b.closest('[data-id]').dataset.id;
+      b.disabled = true;
+      const r = await fetch('/api/admin', { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': tok() }, body: JSON.stringify({ id, action: b.dataset.act }) });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        $('adminq').insertAdjacentHTML('afterbegin', `<p class="msg err">${esc(j.error || 'refused')}</p>`);
+        b.disabled = false;
+        return;
+      }
+      paint().catch((err) => { $('adminq').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; });
+    };
+    if (tok()) paint().catch((err) => { $('adminq').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; });
+  },
 };
 
 function feePartsView(t) {
@@ -2165,7 +2290,7 @@ async function render() {
   for (const a of document.querySelectorAll('header a.explore, #menunav a[href^="/explore"]')) a.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms', 'economics', 'halving', 'orphans', 'receipts', 'contracts'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
+    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>${e.status === 404 ? 'Not found' : 'Unavailable'}</h2><p class="muted">${esc(e.message)}</p></div>`;
   }

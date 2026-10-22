@@ -14,6 +14,8 @@ Environment=TRUST_PROXY=1
 # Secrets (Stripe, OpenRouter) go in this root-only file, never in the repo: see README "Payments and AI".
 EnvironmentFile=-/etc/noid-scan.env
 # Environment=PAY_ADDRESS=o1...   # enables paid API keys (see README)
+# Environment=ENHANCED_PROFILE_USD=299
+# Environment=ADMIN_TOKEN=...     # /admin review; unset hides the route
 ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.js
 Restart=always
 StateDirectory=noid-scan

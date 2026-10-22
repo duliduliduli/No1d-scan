@@ -732,7 +732,8 @@ function labelFor(address) {
   return address ? labels.map[address] || null : null;
 }
 
-const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip);
+const profiles = require('./profiles.js')(db);
+const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip, profiles);
 const assets = require('./assets.js')(db, rpc, () => price.now);
 
 // One quick_check at startup (DB_QUICK_CHECK=0 skips it). Logs either way; never rewrites the file.
@@ -1081,8 +1082,8 @@ const routes = {
   },
 
   // Routes must return a promise: the handler shares in-flight calls with .finally.
-  tokens: async (...a) => assets.tokens(...a),
-  token: async (...a) => assets.token(...a),
+  tokens: async (...a) => profiles.decorate(await assets.tokens(...a)),
+  token: async (...a) => profiles.decorate(await assets.token(...a)),
   collections: async (...a) => assets.collections(...a),
   collection: async (...a) => assets.collection(...a),
   swap: async (...a) => assets.swap(...a),
@@ -1124,11 +1125,11 @@ const STATIC = {
   '/lightweight-charts.js': 'text/javascript; charset=utf-8',
 };
 
-function readBody(req) {
+function readBody(req, max = 64_000) {
   return new Promise((ok, fail) => {
     let s = '';
     req.setEncoding('utf8');
-    req.on('data', (c) => { s += c; if (s.length > 64_000) { fail(Object.assign(new Error('body too large'), { status: 413 })); req.destroy(); } });
+    req.on('data', (c) => { s += c; if (s.length > max) { fail(Object.assign(new Error('body too large'), { status: 413 })); req.destroy(); } });
     req.on('end', () => ok(s));
     req.on('error', fail);
   });
@@ -1148,7 +1149,7 @@ async function handle(req, res) {
       return res.end(fs.readFileSync(path.join(__dirname, 'public', url.pathname)));
     }
     if (!url.pathname.startsWith('/api/')) return req.method === 'GET' ? send(200, fs.readFileSync(INDEX)) : send(405, { error: 'GET only' });
-    if (req.method === 'OPTIONS') return send(204, '', { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-api-key' });
+    if (req.method === 'OPTIONS') return send(204, '', { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-api-key, x-admin-token' });
 
     // Behind Cloudflare the real client IP is in cf-connecting-ip; lock the droplet firewall to Cloudflare IPs so it cannot be spoofed.
     const ip = process.env.TRUST_PROXY ? req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
@@ -1183,6 +1184,33 @@ async function handle(req, res) {
         charge.refund();
         throw e;
       }
+    }
+    if (name === 'profile-media' && req.method === 'GET') {
+      const img = profiles.image(decodeURIComponent(id), sub, url.searchParams);
+      if (!img) return send(404, { error: 'not found' });
+      res.writeHead(200, { 'content-type': img.type, 'cache-control': 'private, max-age=60', 'x-content-type-options': 'nosniff', 'access-control-allow-origin': '*' });
+      return res.end(img.bytes);
+    }
+    if (name === 'profile' && req.method === 'POST') {
+      if (!acct) return send(401, { error: 'missing or unknown API key' });
+      return send(200, profiles.create(acct, parseJson(await readBody(req, 3_000_000))), { 'cache-control': 'no-store' });
+    }
+    if (name === 'admin' || name === 'admin-media') {
+      if (!process.env.ADMIN_TOKEN) return send(404, { error: 'not found' });
+      if (!profiles.adminOk(req.headers['x-admin-token'])) return send(401, { error: 'admin token required' });
+      if (name === 'admin-media' && req.method === 'GET') {
+        const img = profiles.adminImage(decodeURIComponent(id), sub);
+        if (!img) return send(404, { error: 'not found' });
+        res.writeHead(200, { 'content-type': img.type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        return res.end(img.bytes);
+      }
+      if (req.method === 'GET') return send(200, { pending: profiles.adminList() }, { 'cache-control': 'no-store' });
+      if (req.method === 'POST') {
+        const body = parseJson(await readBody(req));
+        const out = profiles.review(body.id, body.action);
+        return out ? send(200, out, { 'cache-control': 'no-store' }) : send(404, { error: 'not in review' });
+      }
+      return send(405, { error: 'GET or POST' });
     }
     const billRoute = bill.routes[`${req.method} ${name}`];
     if (billRoute) {
