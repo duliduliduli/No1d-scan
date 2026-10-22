@@ -257,7 +257,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
 
   const pricing = () => ({
     credits_per_usd: CREDITS_PER_USD, packs_usd: PACKS_USD, chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY,
-    requests_per_credit: REQUESTS_PER_CREDIT, enhanced_profile_usd: profiles ? profiles.priceUsd() : 100, enhanced_profile_usdc: profiles ? profiles.priceUsdc() : 100, support: process.env.SUPPORT_EMAIL || null,
+    requests_per_credit: REQUESTS_PER_CREDIT, enhanced_profile_usd: profiles ? profiles.priceUsd() : 100, enhanced_profile_usdc: profiles ? profiles.priceUsdc() : 100, usdc_chains: usdcPay.chains(), support: process.env.SUPPORT_EMAIL || null,
     card: !!STRIPE && cardActive, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: noid().live, confirmations: CONFIRMATIONS },
     noid_paused: process.env.PAY_ADDRESS && !noid() ? priceNow().paused : null,
   });
@@ -304,7 +304,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       const row = profiles?.ownedUnpaid(acct.id, body?.id);
       if (!row) return null;
       const usd = profiles.priceUsd();
-      if (body.method === 'usdc') return usdcPay.quote(acct, row.id);
+      if (body.method === 'usdc') return usdcPay.quote(acct, row.id, null, body.chain);
       if (body.method === 'card') {
         if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
         const form = new URLSearchParams({
@@ -353,7 +353,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       const row = boosts?.ownedUnpaid(acct.id, body?.id);
       if (!row) return null;
       if (body?.method && body.method !== 'usdc') throw bad('promoted slots are paid in USDC');
-      return usdcPay.quote(acct, row.id, row.usdc);
+      return usdcPay.quote(acct, row.id, row.usdc, body.chain);
     },
     'GET boost': (acct, _, id) => boosts ? boosts.view(acct, id) : null,
     'GET profile': (acct, _, id) => profiles ? profiles.view(acct, id) : null,
@@ -397,5 +397,5 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
   };
 
-  return { account, countRequest, chargeChat, settleNoid, stripeWebhook, routes, pricing, pollUsdc: () => usdcPay.poll() };
+  return { account, countRequest, chargeChat, settleNoid, stripeWebhook, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
 };

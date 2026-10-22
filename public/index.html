@@ -181,7 +181,8 @@
   #enhform form, #adminkey { display:flex; flex-direction:column; align-items:stretch; flex:none; min-width:0 }
   #enhform p, #admin p { margin:0 0 8px }
   #enhform label, #adminkey label { display:block; margin:10px 0 0; color:var(--muted); font:12px var(--mono) }
-  #enhform input, #enhform textarea, #adminkey input { width:100%; box-sizing:border-box; display:block; flex:none; min-width:0; margin-top:4px }
+  #enhform input, #enhform textarea, #enhform select, #boostform select, #adminkey input { width:100%; box-sizing:border-box; display:block; flex:none; min-width:0; margin-top:4px }
+  #enhform select, #boostform select { padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono) }
   #enhform .row { margin-top:12px }
   #enhform textarea { min-height:64px; padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono) }
   #admin img.logo { width:48px; height:48px }
@@ -1413,6 +1414,11 @@ function fileB64(file) {
     fr.readAsDataURL(file);
   });
 }
+function chainField(chains) {
+  const list = chains || [];
+  if (!list.length) return '<p class="fine">USDC is off until a pay address is set for a chain.</p>';
+  return `<label>Chain<select name="chain" aria-label="USDC chain">${list.map((c) => `<option value="${esc(c.id)}">${esc(c.label)}</option>`).join('')}</select></label>`;
+}
 function enhanceCard(d, demo) {
   const usdc = Number(d.enhance_usdc || 100);
   const note = demo
@@ -1423,6 +1429,8 @@ function enhanceCard(d, demo) {
     <p>A banner, an icon, a short description, and https links for a website and X. Unpaid profiles show none of these.</p>
     ${note}
     <form>
+      ${chainField(d.usdc_chains)}
+      <p class="fine">Pay with native USDC on the chain you pick. The exact amount includes a unique reference.</p>
       <label>Description<textarea name="description" maxlength="200" required placeholder="Up to 200 characters"></textarea></label>
       <label>Website<input name="website" inputmode="url" placeholder="https://example.com" autocomplete="off"></label>
       <label>X<input name="twitter" inputmode="url" placeholder="https://x.com/name" autocomplete="off"></label>
@@ -1451,7 +1459,7 @@ function wireEnhance(d, t, demo) {
         token_id: t.id, description: form.description.value, website: form.website.value, twitter: form.twitter.value,
         icon: await fileB64(icon), banner: await fileB64(banner),
       });
-      const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh });
+      const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh, chain: form.chain?.value });
       if (pay.url) { location.href = pay.url; return; }
       if (pay.method === 'usdc') {
         msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b> is the last digits. A different amount is not matched. This page watches the transfer.`;
@@ -1482,7 +1490,7 @@ function boostCard(kind, id, promo, demo) {
     : '<p class="fine">Log in with the API key from API &amp; Credits. USDC is watched on chain. The slot stays hidden until an admin approves it, then it ends on its own.</p>';
   const body = live
     ? `<p>This listing is in the Promoted section until ${esc(when(live.until))}.</p>`
-    : `<div class="row">${packs.map((p) => `<button type="button" data-boost="${esc(p.id)}">${esc(p.label)} · ${p.usdc} USDC</button>`).join('')}</div>`;
+    : `${chainField(promo?.usdc_chains)}<p class="fine">Pay with native USDC on the chain you pick. The exact amount includes a unique reference.</p><div class="row">${packs.map((p) => `<button type="button" data-boost="${esc(p.id)}">${esc(p.label)} · ${p.usdc} USDC</button>`).join('')}</div>`;
   return `<div class="card" id="boostform"><h2>Promoted slot</h2>
     <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
     <p>A separate highlighted slot on Explore for a set time. It does not change the organic list order.</p>
@@ -1500,7 +1508,7 @@ function wireBoost(kind, id, demo) {
     b.disabled = true;
     try {
       const made = await api('boost', { asset_id: id, kind, pack: b.dataset.boost });
-      const pay = await api('boost-pay', { id: made.id, method: 'usdc' });
+      const pay = await api('boost-pay', { id: made.id, method: 'usdc', chain: form.querySelector('[name="chain"]')?.value });
       msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b>. The slot stays hidden until an admin approves it, then it ends on its own.`;
       clearInterval(usdcTimer);
       usdcTimer = setInterval(async () => {

@@ -565,6 +565,8 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /data-boost=/);
   assert.match(homeHtml, /id="promotion"/);
   assert.match(homeHtml, /aria-label="Promoted"/);
+  assert.match(homeHtml, /aria-label="USDC chain"/);
+  assert.match(homeHtml, /native USDC on the chain you pick/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -1005,8 +1007,19 @@ test('indexer + api', async (t) => {
   assert.ok(liveWal.holdings.some((h) => h.token_id === 'live1' && h.balance === '400'));
   assert.ok(liveWal.trades.length >= 1 && liveWal.pnl.txns >= 1);
 
-  // USDC: off until the address is set. An exact base-unit amount marks the profile pending and does not add credits.
-  const { solanaCredits } = require('./usdc.js');
+  // USDC: a chain is off until its address is set. An exact base-unit amount marks the profile pending and does not add credits.
+  const { solanaCredits, mints } = require('./usdc.js');
+  assert.strictEqual(mints.ethereum, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+  assert.strictEqual(mints.base, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+  assert.strictEqual(mints.arbitrum, '0xaf88d065e77c8cC2239327C5EDb3A432268e5831');
+  assert.strictEqual(mints.optimism, '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85');
+  assert.strictEqual(mints.polygon, '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359');
+  assert.strictEqual(mints.avalanche, '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E');
+  assert.strictEqual(mints.solana, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+  const usdcSrc = fs.readFileSync(path.join(__dirname, 'usdc.js'), 'utf8').toLowerCase();
+  for (const bridged of ['0xff970a61a04b1ca14834a43f5de4533ebddb5cc8', '0x7f5c764cbc14f9669b88837ca1490cca17c31607', '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', '0xa7d7079b0fead91f3e65f86e8915cb59c1a4c664']) {
+    assert.ok(!usdcSrc.includes(bridged), bridged);
+  }
   const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const owner = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
   const solTx = {
@@ -1033,32 +1046,42 @@ test('indexer + api', async (t) => {
   }, { address: ata, mint }), []);
   const [, third] = await post('profile', profileBody({ token_id: 'live3', description: 'Waiting on USDC.' }), K);
   assert.strictEqual(third.status, 'unpaid');
-  assert.match((await post('profile-pay', { id: third.id, method: 'usdc' }, K))[1].error, /USDC_PAY_ADDRESS/);
-  process.env.USDC_CHAIN = 'solana';
-  process.env.USDC_PAY_ADDRESS = '0x' + '11'.repeat(20);
-  process.env.USDC_RPC_URL = 'http://127.0.0.1:1';
-  assert.match((await post('profile-pay', { id: third.id, method: 'usdc' }, K))[1].error, /does not match/);
-  process.env.USDC_CHAIN = 'base';
-  delete process.env.USDC_RPC_URL;
-  assert.match((await post('profile-pay', { id: third.id, method: 'usdc' }, K))[1].error, /USDC_RPC_URL/);
+  assert.match((await post('profile-pay', { id: third.id, method: 'usdc', chain: 'base' }, K))[1].error, /USDC_<CHAIN>_ADDRESS/);
+  const payAddr = '0x' + 'ab'.repeat(20);
+  process.env.USDC_BASE_ADDRESS = payAddr;
+  process.env.USDC_SOLANA_ADDRESS = '0x' + '11'.repeat(20);
+  process.env.USDC_SOLANA_RPC_URL = 'http://127.0.0.1:1';
+  assert.match((await post('profile-pay', { id: third.id, method: 'usdc', chain: 'solana' }, K))[1].error, /pick an enabled/);
+  delete process.env.USDC_SOLANA_ADDRESS;
+  delete process.env.USDC_SOLANA_RPC_URL;
+  assert.match((await post('profile-pay', { id: third.id, method: 'usdc', chain: 'base' }, K))[1].error, /USDC_BASE_RPC_URL/);
   let usdcLog = null;
   let usdcTx = '0x' + 'ab'.repeat(32);
+  let usdcLogs = null;
   const usdcRpc = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c)).on('end', () => {
       const call = JSON.parse(body || '{}');
-      const result = call.method === 'eth_blockNumber' ? '0x64'
-        : usdcLog ? [{ transactionHash: usdcTx, data: '0x' + BigInt(usdcLog).toString(16) }] : [];
+      const logs = usdcLogs || (usdcLog ? [{ transactionHash: usdcTx, data: '0x' + BigInt(usdcLog).toString(16) }] : []);
+      const result = call.method === 'eth_blockNumber' ? '0x64' : logs;
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
+    });
+  });
+  const emptyRpc = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c)).on('end', () => {
+      const call = JSON.parse(body || '{}');
+      const result = call.method === 'eth_blockNumber' ? '0x64' : [];
       res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
     });
   });
   await new Promise((r) => usdcRpc.listen(0, '127.0.0.1', r));
+  await new Promise((r) => emptyRpc.listen(0, '127.0.0.1', r));
   try {
-    const payAddr = '0x' + 'ab'.repeat(20);
-    process.env.USDC_CHAIN = 'base';
-    process.env.USDC_PAY_ADDRESS = payAddr;
-    process.env.USDC_RPC_URL = `http://127.0.0.1:${usdcRpc.address().port}`;
-    const [payStatus, order] = await post('profile-pay', { id: third.id, method: 'usdc' }, K);
+    process.env.USDC_BASE_RPC_URL = `http://127.0.0.1:${usdcRpc.address().port}`;
+    process.env.USDC_ETHEREUM_ADDRESS = payAddr;
+    process.env.USDC_ETHEREUM_RPC_URL = `http://127.0.0.1:${emptyRpc.address().port}`;
+    const [payStatus, order] = await post('profile-pay', { id: third.id, method: 'usdc', chain: 'base' }, K);
     assert.strictEqual(payStatus, 200);
     assert.strictEqual(order.chain, 'base');
     assert.strictEqual(order.address, payAddr);
@@ -1088,16 +1111,40 @@ test('indexer + api', async (t) => {
     const [, colBoost] = await post('boost', { asset_id: 'col1', kind: 'collection', pack: '6h' }, K);
     assert.strictEqual(colBoost.kind, 'collection');
     assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /USDC/);
-    const [boostPayStatus, boostOrder] = await post('boost-pay', { id: madeBoost.id, method: 'usdc' }, K);
+    process.env.USDC_POLYGON_ADDRESS = payAddr;
+    assert.strictEqual((await get('boosts?kind=token&window=poly1'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 128);
+    process.env.USDC_POLYGON_CONFIRMATIONS = '5';
+    assert.strictEqual((await get('boosts?kind=token&window=poly2'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 5);
+    assert.match((await post('boost-pay', { id: colBoost.id, method: 'usdc', chain: 'polygon' }, K))[1].error, /USDC_POLYGON_RPC_URL/);
+    delete process.env.USDC_POLYGON_ADDRESS;
+    delete process.env.USDC_POLYGON_CONFIRMATIONS;
+    const listed = (await get('boosts?kind=token&window=chains'))[1].usdc_chains.map((c) => c.id).sort();
+    assert.deepStrictEqual(listed, ['base', 'ethereum']);
+    const [ethStatus, ethOrder] = await post('boost-pay', { id: colBoost.id, method: 'usdc', chain: 'ethereum' }, K);
+    assert.strictEqual(ethStatus, 200);
+    assert.strictEqual(ethOrder.chain, 'ethereum');
+    usdcTx = '0x' + 'ee'.repeat(32);
+    usdcLog = ethOrder.amount_base;
+    assert.strictEqual(await pollUsdc(), 0, 'a Base log does not settle an Ethereum order');
+    assert.strictEqual((await get(`boost/${colBoost.id}`, { headers: K }))[1].status, 'unpaid');
+    const [boostPayStatus, boostOrder] = await post('boost-pay', { id: madeBoost.id, method: 'usdc', chain: 'base' }, K);
     assert.strictEqual(boostPayStatus, 200);
     assert.strictEqual(boostOrder.usdc, 12);
     assert.match(boostOrder.amount_usdc, /^12\./);
-    usdcLog = (BigInt(boostOrder.amount_base) + 1n).toString();
-    assert.strictEqual(await pollUsdc(), 0);
-    assert.strictEqual((await get(`boost/${madeBoost.id}`, { headers: K }))[1].status, 'unpaid');
-    usdcTx = '0x' + 'cd'.repeat(32);
-    usdcLog = boostOrder.amount_base;
-    assert.strictEqual(await pollUsdc(), 1);
+    const [colPayStatus, colOrder] = await post('boost-pay', { id: colBoost.id, method: 'usdc', chain: 'base' }, K);
+    assert.strictEqual(colPayStatus, 200);
+    usdcLog = null;
+    const sharedTx = '0x' + 'cd'.repeat(32);
+    usdcLogs = [
+      { transactionHash: sharedTx, data: '0x' + BigInt(boostOrder.amount_base).toString(16) },
+      { transactionHash: sharedTx, data: '0x' + BigInt(colOrder.amount_base).toString(16) },
+    ];
+    assert.strictEqual(await pollUsdc(), 1, 'one transaction settles one order');
+    assert.strictEqual((await get(`boost/${madeBoost.id}`, { headers: K }))[1].status, 'pending');
+    assert.strictEqual((await get(`boost/${colBoost.id}`, { headers: K }))[1].status, 'unpaid');
+    assert.strictEqual(await pollUsdc(), 0, 'the same transaction is not counted again');
+    assert.strictEqual((await get(`boost/${colBoost.id}`, { headers: K }))[1].status, 'unpaid');
+    usdcLogs = null;
     assert.strictEqual((await get(`boost/${madeBoost.id}`, { headers: K }))[1].status, 'pending');
     assert.strictEqual(await credits(), creditsBefore, 'a promoted slot does not add credits');
     assert.ok(!(await get('boosts?kind=token&window=1m'))[1].boosts.some((b) => b.asset_id === 'live1'));
@@ -1117,11 +1164,8 @@ test('indexer + api', async (t) => {
     assert.doesNotMatch(boostPlan, /TEMP B-TREE/);
   } finally {
     usdcRpc.close();
-    delete process.env.USDC_CHAIN;
-    delete process.env.USDC_PAY_ADDRESS;
-    delete process.env.USDC_RPC_URL;
-    delete process.env.BOOST_PACKS;
-    delete process.env.ADMIN_TOKEN;
+    emptyRpc.close();
+    for (const key of ['USDC_BASE_ADDRESS', 'USDC_BASE_RPC_URL', 'USDC_BASE_CONFIRMATIONS', 'USDC_ETHEREUM_ADDRESS', 'USDC_ETHEREUM_RPC_URL', 'USDC_SOLANA_ADDRESS', 'USDC_SOLANA_RPC_URL', 'USDC_POLYGON_ADDRESS', 'USDC_POLYGON_CONFIRMATIONS', 'BOOST_PACKS', 'ADMIN_TOKEN']) delete process.env[key];
   }
 
   const [, whale] = await get('address/o1whalewhale');

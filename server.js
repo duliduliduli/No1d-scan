@@ -854,6 +854,7 @@ function candlePage(iv, before, limit) {
   };
 }
 
+const payChains = (out) => out && typeof out === 'object' ? { ...out, usdc_chains: bill.usdcChains() } : out;
 const routes = {
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
@@ -1091,15 +1092,16 @@ const routes = {
   },
 
   // Routes must return a promise: the handler shares in-flight calls with .finally.
-  tokens: async (...a) => profiles.decorate(await assets.tokens(...a)),
-  token: async (...a) => profiles.decorate(await assets.token(...a)),
+  tokens: async (...a) => payChains(profiles.decorate(await assets.tokens(...a))),
+  token: async (...a) => payChains(profiles.decorate(await assets.token(...a))),
   wallet: async (id, params) => assets.wallet(id, params),
-  collections: async (...a) => profiles.decorate(await assets.collections(...a)),
-  collection: async (...a) => profiles.decorate(await assets.collection(...a)),
+  collections: async (...a) => payChains(profiles.decorate(await assets.collections(...a))),
+  collection: async (...a) => payChains(profiles.decorate(await assets.collection(...a))),
   boosts: async (_, params) => {
     const page = boosts.list(params);
     const decorated = profiles.decorate({ demo: page.demo, tokens: page.boosts.map((b) => b.asset) });
     page.boosts.forEach((b, i) => { b.asset = decorated.tokens[i]; });
+    page.usdc_chains = bill.usdcChains();
     return page;
   },
   swap: async (...a) => assets.swap(...a),
