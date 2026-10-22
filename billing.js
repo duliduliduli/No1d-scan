@@ -56,6 +56,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     create table if not exists usage (account text not null, day text not null, requests integer not null default 0, chats integer not null default 0, primary key (account, day));
     create table if not exists noid_topups (id text primary key, account text not null, amount integer not null, credits integer not null, created integer not null, paid_ref text unique);
     create table if not exists free_chat (who text not null, day text not null, n integer not null, primary key (who, day));
+    create table if not exists token_stars (account text not null, token_id text not null, created integer not null, primary key (account, token_id));
+    create index if not exists token_stars_acct on token_stars(account, created desc, token_id);
   `);
   // The last 4 digits (μNOID "dust") identify an order, so a buyer may send more than quoted and still match;
   // extra is credited at the same rate. Dust is unique among open orders.
@@ -98,6 +100,10 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     seenFor: db.prepare("select height from noid_seen where topup = ? and status = 'confirming'"),
     freeUsed: db.prepare('select n from free_chat where who = ? and day = ?'),
     freeUse: db.prepare('insert into free_chat (who, day, n) values (?, ?, 1) on conflict (who, day) do update set n = n + 1'),
+    starList: db.prepare('select token_id from token_stars where account = ? order by created desc, token_id'),
+    starAdd: db.prepare('insert into token_stars (account, token_id, created) values (?, ?, ?) on conflict (account, token_id) do nothing'),
+    starDel: db.prepare('delete from token_stars where account = ? and token_id = ?'),
+    starCount: db.prepare('select count(*) n from token_stars where account = ?'),
   };
 
   const tx = (fn) => { db.exec('begin'); try { const r = fn(); db.exec('commit'); return r; } catch (e) { db.exec('rollback'); throw e; } };
@@ -251,6 +257,23 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       const id = randomBytes(8).toString('hex');
       q.insertAccount.run(id, hashKey(key), Date.now());
       return { key, id, note: 'Save this key now. It is your login and is shown only once.' };
+    },
+    'GET stars': (acct) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      return { ids: q.starList.all(acct.id).map((r) => r.token_id) };
+    },
+    'POST stars': (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const okId = (id) => typeof id === 'string' && /^[A-Za-z0-9:_-]{1,80}$/.test(id);
+      const add = (id) => { if (q.starCount.get(acct.id).n >= 200) return; q.starAdd.run(acct.id, id, Date.now()); };
+      if (Array.isArray(body?.ids)) {
+        for (const id of [...new Set(body.ids.filter(okId))].slice(0, 200)) add(id);
+      } else {
+        if (!okId(body?.id)) throw bad('expected a token id');
+        if (body.on === false) q.starDel.run(acct.id, body.id);
+        else add(body.id);
+      }
+      return { ids: q.starList.all(acct.id).map((r) => r.token_id) };
     },
     'GET me': (acct) => {
       if (!acct) throw bad('missing or unknown API key', 401);

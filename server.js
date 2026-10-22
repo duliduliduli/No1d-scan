@@ -14,13 +14,19 @@ const RATE_LIMIT = Number(process.env.RATE_LIMIT || 120); // requests per IP per
 const PAID_RATE_LIMIT = Number(process.env.PAID_RATE_LIMIT || 3000); // per account with credits
 const CACHE_MS = Number(process.env.CACHE_MS ?? 5000); // API responses are reused this long; blocks change ~once a minute
 
-const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'noid.db'));
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'noid.db');
+// A GROUP BY that outgrows the in-memory sorter spills to etilqs in SQLITE_TMPDIR, /var/tmp, /tmp, then the
+// cwd. ProtectSystem=strict makes every one of those read-only, and SQLite reports the failed create as
+// "disk I/O error" (supply from 7d up; miners and history from 30d up). The db directory is the writable
+// StateDirectory. temp_store=memory skips the file; this is the fallback for anything that still spills.
+if (DB_PATH !== ':memory:' && !process.env.SQLITE_TMPDIR) process.env.SQLITE_TMPDIR = path.dirname(path.resolve(DB_PATH));
+const db = new DatabaseSync(DB_PATH);
 db.exec(`
   pragma journal_mode = wal;
-  -- Sorting/grouping big queries (miners or history over 7d+) needs temp space. The service runs with
-  -- ProtectSystem=strict, so /tmp is read-only and a temp file fails with "disk I/O error". Keep it in memory.
   pragma temp_store = memory;
   create table if not exists stats (height integer primary key, ts integer, data text not null);
+  create index if not exists stats_ts on stats(ts);
+  -- Every header since genesis (headers are never pruned): powers all-time hashrate, block time and miner stats.
   -- Our own price samples every 3 minutes (CoinPaprika's free history is hourly for 24 h, daily beyond).
   create table if not exists price_ticks (ts integer primary key, usd real not null, volume_24h real, supply integer);
   -- Live State sweeps: holders over time, and the current rich list.
@@ -145,8 +151,12 @@ const q = {
     from price_ticks where ts >= :since group by ts / cast(:b as integer) order by t`),
   firstTick: db.prepare('select min(ts) t from price_ticks'),
   tickRange: db.prepare('select ts, usd from price_ticks where ts >= ? order by ts'),
-  supplySeries: db.prepare(`select (ts / cast(:b as integer)) * cast(:b as integer) t, max(cast(json_extract(data, '$.circulating_supply_micronoid') as real)) supply
-    from stats where ts >= :since group by ts / cast(:b as integer) order by t`),
+  // ts is the integer primary key: a reverse index scan, no sort, no temp file (temp_store=memory).
+  ticksBefore: db.prepare('select ts, usd, volume_24h, supply from price_ticks where ts < ? order by ts desc limit cast(? as integer)'),
+  // Index scan, no GROUP BY: a temp b-tree here is what returns "disk I/O error" when the cwd is read-only.
+  // shortcut: bucketed in JS. Aggregate in SQL again if stats passes a few million rows.
+  supplySeries: db.prepare(`select ts, cast(json_extract(data, '$.circulating_supply_micronoid') as real) supply
+    from stats where ts >= ? order by ts`),
   addHolders: db.prepare('insert or replace into holders (ts, holders, supply, top10, top100, slots) values (?, ?, ?, ?, ?, ?)'),
   holdersSeries: db.prepare('select ts t, holders, supply, top10, top100, slots from holders where ts >= ? order by ts'),
   lastHolders: db.prepare('select ts, holders, supply, top10, top100, slots from holders order by ts desc limit 1'),
@@ -725,9 +735,114 @@ function labelFor(address) {
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip);
 const assets = require('./assets.js')(db, rpc, () => price.now);
 
-// Candle interval -> [seconds per candle, how far back to show].
+// One quick_check at startup (DB_QUICK_CHECK=0 skips it). Logs either way; never rewrites the file.
+let dbCheck = { ok: true, result: 'skipped' };
+function checkDb() {
+  if (process.env.DB_QUICK_CHECK === '0') return dbCheck;
+  try {
+    const rows = db.prepare('pragma quick_check').all().map((r) => String(Object.values(r)[0]));
+    const ok = rows.length === 1 && rows[0] === 'ok';
+    dbCheck = { ok, result: ok ? 'ok' : rows.slice(0, 20).join('\n') };
+    (ok ? console.log : console.error)(`db quick_check: ${dbCheck.result}`);
+  } catch (e) {
+    dbCheck = { ok: false, result: e.message };
+    console.error('db quick_check:', e.message);
+  }
+  return dbCheck;
+}
+checkDb();
+
+// Candle interval -> [seconds per candle, how far back the unpaged chart used to show].
 const CANDLES = { '15m': [900, 86400], '1h': [3600, 4 * 86400], '4h': [14400, 16 * 86400], '1d': [86400, 120 * 86400], '1w': [604800, 3 * 365 * 86400] }; // ~100 candles each
 const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
+const CANDLE_SOURCE = 'CoinPaprika price of SafeTrade NOID/USDT, sampled every 3 minutes';
+const MONDAY = 4 * 86400; // weeks start on Monday (1970-01-05), not on the epoch's Thursday
+const PAGE_MAX = 5000;
+const candleStart = (t, b) => (b === 604800 ? Math.floor((t - MONDAY) / b) * b + MONDAY : Math.floor(t / b) * b);
+// `before`/`limit` present -> a page of history. Absent on both -> the old fixed window.
+function paging(params, fallback) {
+  const bRaw = params.get('before'), lRaw = params.get('limit');
+  if (bRaw == null && lRaw == null) return null;
+  let before = null;
+  if (bRaw != null && bRaw !== '') {
+    if (!/^\d{1,12}$/.test(bRaw)) throw Object.assign(new Error('expected before as a unix timestamp'), { status: 400 });
+    before = Number(bRaw);
+  }
+  let limit = fallback;
+  if (lRaw != null && lRaw !== '') {
+    if (!/^\d{1,6}$/.test(lRaw)) throw Object.assign(new Error('expected limit as a positive integer'), { status: 400 });
+    limit = Math.min(Math.max(Number(lRaw), 1), PAGE_MAX);
+  }
+  return { before, limit };
+}
+function aggregateCandles(pts, b) {
+  const candles = [];
+  for (const p of pts) {
+    const t = candleStart(p.t, b), c = candles.at(-1);
+    if (c?.t === t) { c.h = Math.max(c.h, p.usd); c.l = Math.min(c.l, p.usd); c.c = p.usd; c.n++; c.approx &&= p.approx; continue; }
+    const o = p.approx && c ? c.c : p.usd; // a lone close has no open of its own: continue from the previous candle
+    candles.push({ t, o, h: Math.max(o, p.usd), l: Math.min(o, p.usd), c: p.usd, n: 1, approx: p.approx });
+  }
+  return candles;
+}
+// Hourly (last 24 h) and, for 1h and up, daily closes before our own 3-minute samples.
+function fillerSeries(b) {
+  if (b < 3600) return [];
+  return b >= 86400 ? price.daily : [...price.hourly, ...price.daily];
+}
+function tickPoint(r) {
+  return { t: r.ts, usd: r.usd, hi: r.usd, lo: r.usd, volume_24h_usd: r.volume_24h, market_cap_usd: r.supply ? (r.supply / 1e6) * r.usd : null };
+}
+// Newest `limit` stored prices with ts < before (or up to now). One index scan; candles are folded in JS.
+function pricePage(before, limit) {
+  const now = Math.floor(Date.now() / 1000);
+  const end = before ?? now + 1;
+  const first = q.firstTick.get().t ?? now;
+  const rows = q.ticksBefore.all(end, limit);
+  const reached = rows.length < limit;
+  let points = rows.reverse().map(tickPoint);
+  let more = !reached;
+  if (reached) {
+    const floor = points[0]?.t ?? end;
+    const filler = [...price.hourly, ...price.daily].filter((p) => p.t < floor && p.t < first && p.t < end).sort((a, c) => a.t - c.t);
+    const uniq = [];
+    for (const p of filler) if (uniq.at(-1)?.t !== p.t) uniq.push(p);
+    const room = limit - points.length;
+    const chunk = uniq.slice(Math.max(0, uniq.length - room));
+    if (uniq.length > room) more = true;
+    points = chunk.map((p) => ({ t: p.t, usd: p.usd, hi: null, lo: null, volume_24h_usd: null, market_cap_usd: null })).concat(points);
+  }
+  return { bucket: 180, points, more: points.length ? more : false, oldest: points[0]?.t ?? null, limit, ticks_since: first };
+}
+function candlePage(iv, before, limit) {
+  const b = CANDLES[iv][0];
+  const now = Math.floor(Date.now() / 1000);
+  const end = before ?? now + 1;
+  const first = q.firstTick.get().t ?? now;
+  const per = Math.max(1, Math.ceil(b / 180));
+  // shortcut: at most 60k ticks per page. A sparse week still returns every candle those ticks cover; the client asks again.
+  const tickCap = Math.min((limit + 2) * per, 60_000);
+  const rows = q.ticksBefore.all(end, tickCap);
+  const reached = rows.length < tickCap;
+  let ticks = rows.reverse().map((r) => ({ t: r.ts, usd: r.usd, approx: false }));
+  if (!reached && ticks.length) {
+    const cut = candleStart(ticks[0].t, b) + b; // drop the oldest bucket; it may start before this page's ticks
+    const full = ticks.filter((p) => p.t >= cut);
+    if (full.length) ticks = full;
+  }
+  const filler = fillerSeries(b);
+  const floor = ticks[0]?.t ?? end;
+  const pts = (reached ? filler.filter((p) => p.t < floor && p.t < first && p.t < end).map((p) => ({ t: p.t, usd: p.usd, approx: true })) : [])
+    .concat(ticks).sort((a, c) => a.t - c.t);
+  let candles = aggregateCandles(pts, b).filter((c) => c.t < end);
+  if (candles.length > limit) candles = candles.slice(-limit);
+  const earliest = filler.length ? Math.min(first, ...filler.map((p) => p.t)) : first;
+  const more = !!candles.length && (!reached || candleStart(earliest, b) < candles[0].t);
+  return {
+    interval: iv, bucket: b, candles, samples_since: first, source: CANDLE_SOURCE,
+    more, oldest: candles[0]?.t ?? null, limit,
+  };
+}
 
 const routes = {
   async stats() {
@@ -888,6 +1003,8 @@ const routes = {
   // daily history fills in. Points are bucketed so a window never exceeds ~600 points.
   async price(_, params) {
     if (!price.now) return null;
+    const page = paging(params, 500);
+    if (page) return pricePage(page.before, page.limit);
     const w = params.get('window') || '24h';
     const now = Math.floor(Date.now() / 1000);
     const bucket = { '24h': 180, '7d': 900, '30d': 3600, all: 21600 }[w] ?? 180;
@@ -913,25 +1030,18 @@ const routes = {
   async candles(_, params) {
     if (!price.now) return null;
     const iv = Object.hasOwn(CANDLES, params.get('interval')) ? params.get('interval') : '1h';
+    const page = paging(params, 300);
+    if (page) return candlePage(iv, page.before, page.limit);
     const [b, span] = CANDLES[iv];
     const now = Math.floor(Date.now() / 1000);
     const first = q.firstTick.get().t ?? now;
-    const MON = 4 * 86400; // weeks start on Monday (1970-01-05), not on the epoch's Thursday
-    const start = (t) => (b === 604800 ? Math.floor((t - MON) / b) * b + MON : Math.floor(t / b) * b);
-    const since = start(now - span);
+    const since = candleStart(now - span, b);
     const filler = b >= 86400 ? price.daily : b >= 3600 ? price.hourly : [];
     const pts = [
       ...filler.filter((p) => p.t >= since && p.t < first).map((p) => ({ t: p.t, usd: p.usd, approx: true })),
       ...q.tickRange.all(since).map((r) => ({ t: r.ts, usd: r.usd, approx: false })),
     ].sort((x, y) => x.t - y.t);
-    const candles = [];
-    for (const p of pts) {
-      const t = start(p.t), c = candles.at(-1);
-      if (c?.t === t) { c.h = Math.max(c.h, p.usd); c.l = Math.min(c.l, p.usd); c.c = p.usd; c.n++; c.approx &&= p.approx; continue; }
-      const o = p.approx && c ? c.c : p.usd; // a lone close has no open of its own: continue from the previous candle
-      candles.push({ t, o, h: Math.max(o, p.usd), l: Math.min(o, p.usd), c: p.usd, n: 1, approx: p.approx });
-    }
-    return { interval: iv, bucket: b, candles, samples_since: first, source: 'CoinPaprika price of SafeTrade NOID/USDT, sampled every 3 minutes' };
+    return { interval: iv, bucket: b, candles: aggregateCandles(pts, b), samples_since: first, source: CANDLE_SOURCE };
   },
 
   async holders(_, params) {
@@ -951,9 +1061,19 @@ const routes = {
 
   async supply(_, params) {
     const w = params.get('window') || '30d';
-    const now = Math.floor(Date.now() / 1000);
-    const bucket = { '24h': 900, '7d': 3600, '30d': 21600, all: 86400 }[w] ?? 21600;
-    return { window: w, points: q.supplySeries.all({ b: bucket, since: now - (WINDOWS[w] ?? WINDOWS['30d']) }) };
+    // 1h is not a chart tab; without this it used to fall through to the 30-day scan.
+    const spec = { '1h': [300, 3600], '24h': [900, 86400], '7d': [3600, 7 * 86400], '30d': [21600, 30 * 86400], all: [86400, 1e10] }[w]
+      ?? [21600, 30 * 86400];
+    const [bucket, span] = spec;
+    const points = [];
+    for (const r of q.supplySeries.all(Math.floor(Date.now() / 1000) - span)) {
+      if (r.supply == null) continue;
+      const t = Math.floor(r.ts / bucket) * bucket;
+      const last = points.at(-1);
+      if (last?.t === t) { if (r.supply > last.supply) last.supply = r.supply; }
+      else points.push({ t, supply: r.supply });
+    }
+    return { window: w, points };
   },
 
   async charts() {
@@ -990,7 +1110,7 @@ setInterval(() => hits.clear(), 60_000).unref();
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
 const inflight = new Map();
-const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf',
+const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
   'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
@@ -1001,6 +1121,7 @@ const INDEX = path.join(__dirname, 'public', 'index.html');
 const STATIC = {
   '/favicon.ico': 'image/x-icon', '/favicon-32.png': 'image/png', '/apple-touch-icon.png': 'image/png',
   '/icon-192.png': 'image/png', '/icon-512.png': 'image/png', '/og.png': 'image/png', '/site.webmanifest': 'application/manifest+json',
+  '/lightweight-charts.js': 'text/javascript; charset=utf-8',
 };
 
 function readBody(req) {
@@ -1074,11 +1195,16 @@ async function handle(req, res) {
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
     if (!acct && !ownPage && name !== 'stats' && name !== 'health') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
     if (url.pathname === '/api/live') return live(req, res, ip);
+    // No key required, same as /api/stats: uptime checks hit this directly. 503 when the db check fails or indexing is stalled.
     if (name === 'health') {
       const stallMs = Number(process.env.STALL_MS || 120_000);
       const age = indexer.at == null ? null : Date.now() - indexer.at;
       const stalled = indexer.at == null || age > stallMs || !!indexer.error;
-      const body = { ok: !stalled, stalled, age_ms: age, stall_ms: stallMs, indexer, gaps: q.gapCount.get().n, reorgs: q.reorgCount.get().n };
+      const body = {
+        ok: dbCheck.ok && !stalled, stalled, age_ms: age, stall_ms: stallMs,
+        db: dbCheck, temp_store: db.prepare('pragma temp_store').get().temp_store,
+        indexer, gaps: q.gapCount.get().n, reorgs: q.reorgCount.get().n,
+      };
       return send(body.ok ? 200 : 503, body, { 'cache-control': 'no-store' });
     }
     // Billing: a keyed request counts only when it returns data (200, cached or not); errors, 404s and the live feed are free.

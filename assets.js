@@ -13,7 +13,8 @@
 //     trades[]: txid, token_id, ts, height, side (buy|sell), token_amount, noid_micronoid,
 //       trader, venue (curve|pool), price_micronoid
 //     transfers[]: txid, token_id, ts, height, from, to, amount
-//   Trades roll into 1-minute token_candles. Larger charts sum those minutes.
+//   Trades are stored on (token_id, ts) and folded into 1-minute OHLCV in token_candles.
+//   Charts sum those minutes. 1w buckets start Monday 00:00 UTC. ?before=&limit= pages them.
 //     collections[]: id, name, creator, items, owners, floor_micronoid, volume_micronoid,
 //       created_ts, nfts[{id, name, owner, image}]
 //   quoteSwap({token_id, side, amount_micronoid|token_amount, slippage_bps, fee_bps, fee_address})
@@ -28,7 +29,9 @@ const ADDR = /^o1[02-9ac-hj-np-z]{6,120}$/;
 const ID = /^[A-Za-z0-9:_-]{1,80}$/;
 const NOTICE = 'Tokens coming with v2.1';
 const WINS = { '5m': 300, '1h': 3600, '6h': 21600, '24h': 86400 };
-const TFS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
+const TFS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800 };
+const WEEK_OFF = 345600; // 1970-01-05, so a week starts Monday 00:00 UTC
+const CANDLE_MAX = 1000;
 const U = 1_000_000n;
 const TOKEN_SORTS = new Set(['liquidity', 'volume', 'age', 'mcap', 'fdv', 'txns', 'makers', 'buys', 'sells', 'change', 'progress']);
 const LOW_LIQ = 10_000n * U;
@@ -78,16 +81,18 @@ module.exports = function assets(db, rpc, priceNow) {
   const q = {
     tokens: db.prepare('select * from tokens'),
     pools: db.prepare('select * from pools'),
-    recentTrades: db.prepare('select * from token_trades where ts >= ?'),
-    baseTrades: db.prepare(`select t.* from token_trades t join (
-      select token_id, max(ts) ts from token_trades where ts < ? group by token_id
-    ) m on m.token_id = t.token_id and m.ts = t.ts`),
+    // (token_id, ts) index range. No GROUP BY: that spills a temp b-tree, and temp_store=memory has nowhere to put the file.
+    tradeBefore: db.prepare('select * from token_trades where token_id = ? and ts < ? order by ts desc limit 1'),
+    tradesSince: db.prepare('select * from token_trades where token_id = ? and ts >= ? order by ts'),
+    tradesIn: db.prepare('select price_micronoid, noid_micronoid, height from token_trades where token_id = ? and ts >= ? and ts < ? and price_micronoid is not null order by ts'),
     token: db.prepare('select * from tokens where id = ?'),
     poolsFor: db.prepare('select * from pools where token_id = ?'),
     tradesFor: db.prepare('select * from token_trades where token_id = ? order by ts desc limit 400'),
-    holdersFor: db.prepare('select address, balance from token_holders where token_id = ? order by cast(balance as integer) desc limit 20'),
+    // Sort in JS. ORDER BY cast(balance) cannot use (token_id, address) and asks SQLite for a temp b-tree.
+    holdersFor: db.prepare('select address, balance from token_holders where token_id = ?'),
     holderCount: db.prepare('select count(*) n from token_holders where token_id = ?'),
-    candlesFor: db.prepare('select bucket t, o, h, l, c, v, n from token_candles where token_id = ? and bucket >= ? order by bucket'),
+    candlesBefore: db.prepare('select bucket t, o, h, l, c, v, n from token_candles where token_id = ? and bucket < ? order by bucket desc limit cast(? as integer)'),
+    candleOlder: db.prepare('select 1 x from token_candles where token_id = ? and bucket < ? limit 1'),
     transfersFor: db.prepare('select txid, ts, height, from_addr, to_addr, amount from token_transfers where token_id = ? order by ts desc limit 40'),
     cols: db.prepare('select * from nft_collections'),
     col: db.prepare('select * from nft_collections where id = ?'),
@@ -96,11 +101,7 @@ module.exports = function assets(db, rpc, priceNow) {
       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     upPool: db.prepare('insert or replace into pools (id, token_id, reserve_token, reserve_noid_micronoid, lp_supply, updated_height) values (?, ?, ?, ?, ?, ?)'),
     upTrade: db.prepare('insert or ignore into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid, trader, venue, price_micronoid) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
-    upCandle: db.prepare(`insert into token_candles (token_id, bucket, o, h, l, c, v, n, height) values (?, ?, ?, ?, ?, ?, ?, 1, ?)
-      on conflict(token_id, bucket) do update set
-        h = max(token_candles.h, excluded.h), l = min(token_candles.l, excluded.l), c = excluded.c,
-        v = token_candles.v + excluded.v, n = token_candles.n + 1,
-        height = coalesce(excluded.height, token_candles.height)`),
+    upCandle: db.prepare('insert or replace into token_candles (token_id, bucket, o, h, l, c, v, n, height) values (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     upTransfer: db.prepare('insert or ignore into token_transfers (txid, token_id, ts, height, from_addr, to_addr, amount) values (?, ?, ?, ?, ?, ?, ?)'),
     delHolders: db.prepare('delete from token_holders where token_id = ?'),
     upHolder: db.prepare('insert or replace into token_holders (token_id, address, balance) values (?, ?, ?)'),
@@ -191,7 +192,7 @@ module.exports = function assets(db, rpc, priceNow) {
   // Prices are μNOID per whole token. Curve targets are the preview's 20,000 NOID.
   function demoCatalog(now) {
     const spec = [
-      { id: 'gcat', name: 'Ghost Cat', ticker: 'GCAT', supply: 100_000_000n, price: 2000n, p24: 1786n, age_h: 240, vol: 12_000n * U, buys: 24, sells: 10, graduated: true, launch: 'launchpad', poolNoid: 25_000n * U, poolToken: 12_500_000n, links: { website: 'https://example.com/gcat', twitter: 'ghostcat', telegram: 'ghostcat' } },
+      { id: 'gcat', name: 'Ghost Cat', ticker: 'GCAT', supply: 100_000_000n, price: 2000n, p24: 1786n, age_h: 1920, vol: 12_000n * U, buys: 24, sells: 10, graduated: true, launch: 'launchpad', poolNoid: 25_000n * U, poolToken: 12_500_000n, links: { website: 'https://example.com/gcat', twitter: 'ghostcat', telegram: 'ghostcat' } },
       { id: 'nbus', name: 'Night Bus', ticker: 'NBUS', supply: 20_000_000n, price: 5000n, p24: 3704n, age_h: 30, vol: 8_000n * U, buys: 18, sells: 6, launch: 'launchpad', raised: 17_200n * U, vToken: 4_000_000n },
       { id: 'qsun', name: 'Quiet Sun', ticker: 'QSUN', supply: 50_000_000n, price: 100n, p24: 95n, age_h: 2, vol: 50n * U, buys: 3, sells: 1, launch: 'launchpad', raised: 400n * U, vToken: 10_000_000n },
       { id: 'crown', name: 'Paper Crown', ticker: 'CROWN', supply: 10_000_000n, price: 8000n, p24: 9412n, age_h: 100, vol: 3_000n * U, buys: 8, sells: 14, graduated: true, launch: 'direct', poolNoid: 4_000n * U, poolToken: 500_000n },
@@ -384,13 +385,15 @@ module.exports = function assets(db, rpc, priceNow) {
       if (!prev || (bi(p.reserve_noid_micronoid) || 0n) > (bi(prev.reserve_noid_micronoid) || 0n)) pools.set(p.token_id, p);
     }
     const since = now - 86400;
-    const by = indexTrades([...q.baseTrades.all(since), ...q.recentTrades.all(since - 120)]);
     return q.tokens.all().map((t) => {
+      const recent = q.tradesSince.all(t.id, since - 120);
+      const base = q.tradeBefore.get(t.id, since);
+      const trades = base && !recent.some((r) => r.txid === base.txid) ? [base, ...recent] : recent;
       const curve = t.curve_target_micronoid ? {
         raised_micronoid: t.curve_raised_micronoid, target_micronoid: t.curve_target_micronoid,
         virtual_noid: t.curve_virtual_noid, virtual_token: t.curve_virtual_token,
       } : null;
-      return presentToken({ ...t, graduated: !!t.graduated, pool: pools.get(t.id) || null, curve }, by.get(t.id) || [], now, noidUsd());
+      return presentToken({ ...t, graduated: !!t.graduated, pool: pools.get(t.id) || null, curve }, indexTrades(trades).get(t.id) || [], now, noidUsd());
     });
   }
 
@@ -431,6 +434,12 @@ module.exports = function assets(db, rpc, priceNow) {
       return view;
     });
     if (preset === 'graduating') rows = rows.filter((r) => !r.graduated && r.curve);
+    if (preset === 'watch') {
+      const raw = params.get('ids') || '';
+      if (raw.length > 8000) throw bad('ids is too long');
+      const ids = new Set(raw.split(',').map((s) => s.trim()).filter((s) => ID.test(s)).slice(0, 200));
+      rows = rows.filter((r) => ids.has(r.id));
+    }
     if (qtext) rows = rows.filter((r) => `${r.name} ${r.ticker} ${r.id}`.toLowerCase().includes(qtext));
     rows = rows.filter((r) => inRange(bi(r.liquidity_micronoid), ...filters.liq)
       && inRange(bi(r.volume_micronoid), ...filters.vol)
@@ -477,7 +486,10 @@ module.exports = function assets(db, rpc, priceNow) {
       chartTrades = q.tradesFor.all(id).map((t) => ({ ...t, ts: Number(t.ts), price: bi(t.price_micronoid), noid: bi(t.noid_micronoid) || 0n })).reverse();
       trades = q.tradesFor.all(id).slice(0, 40).map(publicTrade);
       const supply = bi(row.supply) || 0n;
-      holders = q.holdersFor.all(id).map((h) => ({ address: h.address, balance: h.balance, share: supply > 0n ? Number(bi(h.balance) * 10000n / supply) / 100 : null }));
+      holders = q.holdersFor.all(id)
+        .sort((a, b) => (bi(b.balance) > bi(a.balance) ? 1 : bi(b.balance) < bi(a.balance) ? -1 : 0))
+        .slice(0, 20)
+        .map((h) => ({ address: h.address, balance: h.balance, share: supply > 0n ? Number(bi(h.balance) * 10000n / supply) / 100 : null }));
     }
     const chart = chartTrades.filter((t) => t.price != null).map((t) => ({ t: t.ts, price_micronoid: t.price.toString(), price_usd: usdOf(t.price, noidUsd()) }));
     const pool = row._pool ? {
@@ -500,63 +512,107 @@ module.exports = function assets(db, rpc, priceNow) {
     };
   }
 
+  function bucketOf(t, sec) {
+    if (sec === 604800) return t - ((t - WEEK_OFF) % sec);
+    return t - (t % sec);
+  }
   function rollup(mins, sec) {
-    if (sec === 60) return mins;
-    const groups = new Map();
+    const out = [];
     for (const c of mins) {
-      const b = c.t - (c.t % sec);
-      const g = groups.get(b);
+      const b = bucketOf(c.t, sec);
       const o = bi(c.o), h = bi(c.h), l = bi(c.l), cl = bi(c.c), v = bi(c.v) || 0n;
-      if (!g) groups.set(b, { t: b, o, h, l, c: cl, v, n: c.n || 0 });
+      const g = out.at(-1);
+      if (!g || g.t !== b) out.push({ t: b, o, h, l, c: cl, v, n: c.n || 0 });
       else {
         if (h > g.h) g.h = h;
         if (l < g.l) g.l = l;
         g.c = cl; g.v += v; g.n += c.n || 0;
       }
     }
-    return [...groups.values()];
+    return out;
   }
   function candleOut(rows) {
     return rows.map((c) => ({ t: c.t, o: c.o.toString(), h: c.h.toString(), l: c.l.toString(), c: c.c.toString(), v: c.v.toString(), n: c.n }));
   }
-  // Fixture chart: one candle per minute for the last day, stepped from the demo trades, with a small wobble so empty minutes are not a flat line.
-  function demoMinuteCandles(trades, now) {
-    const start = now - 86400;
-    const out = [];
-    let price = priceAt(trades, start) || trades.find((t) => t.price)?.price || 1n;
-    for (let t = start; t <= now; t += 60) {
-      const hit = trades.filter((tr) => tr.price != null && tr.ts >= t && tr.ts < t + 60);
-      if (hit.length) {
-        let h = hit[0].price, l = hit[0].price, v = 0n;
-        for (const tr of hit) { if (tr.price > h) h = tr.price; if (tr.price < l) l = tr.price; v += tr.noid || 0n; }
-        out.push({ t, o: hit[0].price, h, l, c: hit.at(-1).price, v, n: hit.length });
-        price = hit.at(-1).price;
-      } else {
-        const wobble = BigInt((Math.floor(t / 60) % 9) - 4);
-        let next = price + (price * wobble) / 800n;
-        if (next < 1n) next = 1n;
-        out.push({ t, o: price, h: price > next ? price : next, l: price < next ? price : next, c: next, v: 0n, n: 0 });
-        price = next;
-      }
+  function candleLimit(params) {
+    const raw = params.get('limit');
+    if (raw == null || raw === '') return 300;
+    if (!/^\d+$/.test(raw)) throw bad('bad limit');
+    return Math.min(Math.max(Number(raw), 1), CANDLE_MAX);
+  }
+  function candleBefore(params) {
+    const raw = params.get('before');
+    if (raw == null || raw === '') return null;
+    if (!/^\d+$/.test(raw)) throw bad('bad before');
+    return Number(raw);
+  }
+  // Fixture path for the visible page only. Real candles are folded from stored trades.
+  function pathPrice(id, t, created, now, endPrice) {
+    const span = Math.max(now - created, 1);
+    const u = Math.max(0, Math.min(1, (t - created) / span));
+    const phase = [...id].reduce((s, ch) => s + ch.charCodeAt(0), 0);
+    const wobble = Math.sin(t / 1500 + phase) * 0.06 + Math.sin(t / 7200 + phase * 0.2) * 0.11;
+    let n = Math.round(Number(endPrice) * (0.38 + 0.62 * u) * (1 + wobble * (1 - u * 0.9)));
+    if (t >= now - 60) n = Number(endPrice);
+    if (!Number.isFinite(n) || n < 1) n = 1;
+    return BigInt(Math.min(n, Number.MAX_SAFE_INTEGER));
+  }
+  function demoCandles(token, sec, before, limit, now) {
+    const endPrice = bi(token.price_micronoid) || 1n;
+    const created = Number(token.created_ts) || now - sec;
+    const last = before == null ? bucketOf(now, sec) : bucketOf(before - 1, sec);
+    const first = bucketOf(created, sec);
+    const phase = [...token.id].reduce((s, ch) => s + ch.charCodeAt(0), 0);
+    const candles = [];
+    for (let i = 0; i < limit; i++) {
+      const t = last - i * sec;
+      if (t < first) break;
+      const samples = [0, 0.27, 0.5, 0.73, 0.999].map((f) => pathPrice(token.id, t + Math.floor(sec * f), created, now, endPrice));
+      let o = samples[0], h = o, l = o;
+      for (const p of samples) { if (p > h) h = p; if (p < l) l = p; }
+      let c = samples.at(-1);
+      if (t + sec > now) { c = endPrice; if (c > h) h = c; if (c < l) l = c; }
+      const wave = (Math.sin((t / 86400) * Math.PI * 2 + phase) + 1) / 2;
+      const v = BigInt(Math.round((400 + wave * 8600) * Math.max(sec / 60, 1))) * 1000n;
+      candles.push({ t, o, h, l, c, v, n: 1 + ((Math.floor(t / sec) + phase) % 7) });
     }
-    return out;
+    candles.reverse();
+    return { candles, more: candles.length > 0 && candles[0].t > first, oldest: candles[0]?.t ?? null };
+  }
+  function storedPage(id, sec, before, limit, now) {
+    const end = before ?? (now + sec);
+    const per = Math.max(1, sec / 60);
+    const cap = Math.min((limit + 1) * per, 20000);
+    const desc = q.candlesBefore.all(id, end, cap);
+    const reached = desc.length < cap;
+    const mins = desc.reverse();
+    let candles = rollup(mins, sec).filter((c) => c.t < end);
+    if (!reached && candles.length && mins.length && mins[0].t > candles[0].t) candles.shift();
+    if (candles.length > limit) candles = candles.slice(-limit);
+    const oldest = candles[0]?.t ?? null;
+    return { candles, more: oldest != null && !!q.candleOlder.get(id, oldest), oldest };
   }
   function candleView(id, params) {
     checkId(id);
     const tf = params.get('tf') || '15m';
     if (!Object.hasOwn(TFS, tf)) throw bad('bad tf');
+    const sec = TFS[tf];
     const demo = isDemo(params);
     const now = Math.floor(Date.now() / 1000);
-    if (!findPresented(id, demo, now)) return null;
-    let mins;
-    if (demo) {
-      const src = demoCatalog(now).tokens.find((t) => t.id === id);
-      mins = demoMinuteCandles(indexTrades(src.trades).get(id) || [], now);
-    } else {
-      const from = now - (tf === '1m' ? 86400 : tf === '5m' ? 3 * 86400 : 30 * 86400);
-      mins = q.candlesFor.all(id, from).map((c) => ({ t: c.t, o: BigInt(c.o), h: BigInt(c.h), l: BigInt(c.l), c: BigInt(c.c), v: BigInt(c.v), n: c.n }));
+    const token = findPresented(id, demo, now);
+    if (!token) return null;
+    const limit = candleLimit(params);
+    const sinceRaw = params.get('since');
+    if (sinceRaw != null && sinceRaw !== '') {
+      if (!/^\d+$/.test(sinceRaw)) throw bad('bad since');
+      const from = bucketOf(Number(sinceRaw), sec);
+      const page = demo ? demoCandles(token, sec, null, limit, now) : storedPage(id, sec, null, limit, now);
+      const candles = page.candles.filter((c) => c.t >= from);
+      return { demo, tf, bucket: sec, candles: candleOut(candles), more: false, oldest: candles[0]?.t ?? null, limit };
     }
-    return { demo, tf, candles: candleOut(rollup(mins, TFS[tf])) };
+    const before = candleBefore(params);
+    const page = demo ? demoCandles(token, sec, before, limit, now) : storedPage(id, sec, before, limit, now);
+    return { demo, tf, bucket: sec, candles: candleOut(page.candles), more: page.more, oldest: page.oldest, limit };
   }
   function tradeView(id, params) {
     checkId(id);
@@ -875,7 +931,7 @@ module.exports = function assets(db, rpc, priceNow) {
         const price = strInt(t.price_micronoid);
         const info = q.upTrade.run(txid, String(t.token_id), t.ts, Number.isInteger(t.height) ? t.height : null, side, strInt(t.token_amount), strInt(t.noid_micronoid),
           ADDR.test(t.trader || '') ? t.trader : null, t.venue === 'pool' || t.venue === 'curve' ? t.venue : null, price);
-        if (info.changes && price) bumpCandle(String(t.token_id), t.ts, price, strInt(t.noid_micronoid) || '0', t.height);
+        if (info.changes) bumpCandle(String(t.token_id), t.ts);
       }
       for (const t of (Array.isArray(snap.transfers) ? snap.transfers : [])) {
         const txid = String(t.txid || '');
@@ -934,12 +990,23 @@ module.exports = function assets(db, rpc, priceNow) {
     }
   }
 
-  function bumpCandle(tokenId, ts, priceStr, volStr, height) {
-    const price = bi(priceStr);
-    const vol = bi(volStr) || 0n;
-    if (price == null || price > BigInt(Number.MAX_SAFE_INTEGER) || vol > BigInt(Number.MAX_SAFE_INTEGER)) return;
-    const n = Number(price);
-    q.upCandle.run(tokenId, ts - (ts % 60), n, n, n, n, Number(vol), Number.isInteger(height) ? height : null);
+  // Rebuild the minute from trades in time order, so a late older fill does not become the close.
+  function bumpCandle(tokenId, ts) {
+    const bucket = ts - (ts % 60);
+    let o, h, l, c, v = 0n, n = 0, height = null;
+    for (const r of q.tradesIn.all(tokenId, bucket, bucket + 60)) {
+      const price = bi(r.price_micronoid);
+      const vol = bi(r.noid_micronoid) || 0n;
+      if (price == null || price > BigInt(Number.MAX_SAFE_INTEGER) || vol > BigInt(Number.MAX_SAFE_INTEGER)) continue;
+      if (!n) o = h = l = price;
+      else { if (price > h) h = price; if (price < l) l = price; }
+      c = price; v += vol; n++;
+      // shortcut: height is the last trade in the minute, so a reorg drops a minute that also holds an older fill.
+      if (Number.isInteger(r.height)) height = r.height;
+    }
+    if (!n) return;
+    const safe = (x) => Number(x > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : x);
+    q.upCandle.run(tokenId, bucket, safe(o), safe(h), safe(l), safe(c), safe(v), n, height);
   }
 
   return {

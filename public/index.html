@@ -129,9 +129,21 @@
   @media (max-width:800px) { .split { grid-template-columns:1fr } .sidecol { order:-1 } }
   @media (max-width:800px) { .pair .sidecol { order:0 } }
   .rank { color:var(--muted); font:12px var(--mono); margin-right:8px }
-  #tv { height:380px; min-height:280px; width:100%; overflow:hidden }
-  .tfs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 8px }
+  #tv { height:auto; min-height:0; width:100%; overflow:hidden }
+  .tokenchart { position:relative; width:100%; aspect-ratio:16/10; max-height:560px; min-height:260px; touch-action:none; overscroll-behavior:contain; user-select:none; background:var(--card) }
+  .card:has(.tokenchart) { overflow:hidden }
+  .tokenchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); white-space:nowrap; box-shadow:var(--glow); max-width:calc(100% - 8px) }
+  .tokenchart .pxtip.on { display:block }
+  @media (max-width:800px) {
+    .tokenchart { aspect-ratio:5/4; max-height:420px; min-height:240px }
+    .tokenchart .pxtip { white-space:normal }
+    .tfs button { padding:6px 8px; letter-spacing:.04em }
+  }
+  .tfs { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 8px }
   .tfs button.on { background:var(--accent); color:var(--bg) }
+  button.star { padding:2px 7px; margin-left:6px; letter-spacing:0; text-transform:none; font-size:16px; line-height:1; color:var(--muted); border-color:var(--line); vertical-align:1px }
+  button.star.on { color:var(--gold); border-color:var(--gold) }
+  .mcard .px button.star { margin:0 0 4px; display:inline-block }
   .tape td.side { font-weight:700 }
   .swap .fine { color:var(--muted); font:12px/1.5 var(--mono); margin:10px 0 0 } .swap .kvl { margin-top:12px }
   .pill { display:inline-block; padding:1px 6px; border:1px solid var(--line); border-radius:3px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
@@ -168,9 +180,13 @@
   .ok { color:#3ddc97 } :root[data-theme="light"] .ok { color:#0d8a54 }
   .trust { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-top:12px; font-size:13px; color:var(--muted) } .trust b { color:var(--fg); display:block; font-size:13px }
   .up { color:#3ddc97 } .down { color:#ff6b6b }
-  .candles .cd { color:#3ddc97 } .candles .cd.dn { color:#ff6b6b } .candles .cd.ax { opacity:.45 }
-  :root[data-theme="light"] .candles .cd { color:#0d8a54 } :root[data-theme="light"] .candles .cd.dn { color:#c62828 }
-  .ichart .tip .o { font-weight:400; color:var(--muted) }
+  .ichart .tip .o, .pxchart .pxtip .o { font-weight:400; color:var(--muted) }
+  /* Square price chart: full card width on a phone, capped so a desktop card stays a square. */
+  .pxchart { position:relative; width:100%; aspect-ratio:1; max-height:680px; touch-action:none; overscroll-behavior:contain; user-select:none; background:var(--card) }
+  .card:has(.pxchart) { overflow:hidden }
+  .pxchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); white-space:nowrap; box-shadow:var(--glow) }
+  .pxchart .pxtip.on { display:block }
+  button.fit { margin-left:auto }
   :root[data-theme="light"] .up { color:#0d8a54 } :root[data-theme="light"] .down { color:#c62828 }
   .tabs { display:flex; gap:6px; flex-wrap:wrap }
   select { padding:9px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono) } .tabs button.on { background:var(--accent); color:var(--bg) }
@@ -239,7 +255,12 @@
 const app = document.getElementById('app');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const myKey = () => { try { return localStorage.getItem('nk') || ''; } catch { return ''; } };
-const saveKey = (k) => { try { k ? localStorage.setItem('nk', k) : localStorage.removeItem('nk'); } catch {} };
+let starCache = null, starsReady = null;
+const saveKey = (k) => {
+  try { k ? localStorage.setItem('nk', k) : localStorage.removeItem('nk'); } catch {}
+  starCache = null; starsReady = null;
+  if (k) ensureStars().catch(() => {});
+};
 // Sends the account key (if any) so paid users get their tier everywhere.
 const apiCache = new Map();
 const api = async (p, body) => {
@@ -256,6 +277,9 @@ const api = async (p, body) => {
   }
   return j;
 };
+// One failed call must not reject the whole page: the card shows the error, the rest still render.
+const part = (p) => api(p).catch((e) => ({ _err: e.message }));
+const errp = (x) => `<p class="msg err">${esc(x?._err || 'unavailable')}</p>`;
 const n0 = (x) => Number(x ?? 0).toLocaleString();
 const usd = (credits, per) => `$${(credits / per).toFixed(2)}`;
 
@@ -301,7 +325,7 @@ const rows = (list, cols) => list?.length
 // ---- live helpers
 let feed = null, ticker = null;
 const $ = (id) => document.getElementById(id);
-function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+function flash(el) { if (!el) return; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
 function setText(id, s) { const el = $(id); if (el && el.textContent !== String(s)) { el.textContent = s; flash(el); } }
 // Count from the shown value to the new one so changes are visible.
 function setNum(id, n) {
@@ -340,8 +364,8 @@ const BUCKET_FMT = { '24h': 'hour', '7d': 'dayhour', '30d': 'day', all: 'day' };
 const tabs = (name, opts, on) => `<div class="tabs" data-tabs="${name}">${opts.map(([v, l]) => `<button data-v="${v}" class="${v === on ? 'on' : ''}">${l}</button>`).join('')}</div>`;
 // Wire a tab group: clicking a tab marks it and calls fn(value).
 function onTabs(name, fn) {
-  for (const b of document.querySelectorAll(`[data-tabs="${name}"] button`)) b.onclick = () => {
-    b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v);
+  for (const b of document.querySelectorAll(`[data-tabs="${name}"] button[data-v]`)) b.onclick = () => {
+    b.parentNode.querySelectorAll('button[data-v]').forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v);
   };
 }
 const WINDOW_TABS = [['24h', '24 h'], ['7d', '7 d'], ['30d', '30 d'], ['all', 'All time']];
@@ -387,44 +411,257 @@ function priceSeries(h, key, height = 170) {
   const fx = { '24h': 'hour', '7d': 'dayhour', '30d': 'day', all: 'day' }[h.window] || 'hour';
   return ichart(pts, fx, key === 'usd' ? 'usd' : 'money', height);
 }
-// OHLC candles from /api/candles, drawn in the same hoverable frame as ichart. Faded candles are close-only history.
+// Interactive NOID/USD chart (line or candles). TradingView lightweight-charts, vendored: pinch, wheel and drag.
 const CANDLE_TABS = [['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']];
-const CANDLE_FMT = { '15m': 'hour', '1h': 'dayhour', '4h': 'dayhour', '1d': 'day', '1w': 'day' };
-function candleChart(r, h = 220) {
-  const cs = r?.candles ?? [];
-  if (cs.length < 2) return '<p class="muted">Not enough price samples for this interval yet: candles fill in as the explorer records the price every 3 minutes.</p>';
-  const lo = Math.min(...cs.map((c) => c.l)), hi = Math.max(...cs.map((c) => c.h)), span = hi - lo || 1, w = 600 / cs.length;
-  const y = (v) => (h - 6 - ((v - lo) / span) * (h - 12)).toFixed(1);
-  const body = cs.map((c, i) => {
-    const x = (i + 0.5) * w, top = y(Math.max(c.o, c.c)), bh = Math.max(Math.abs(y(c.o) - y(c.c)), 1);
-    return `<g class="cd${c.c < c.o ? ' dn' : ''}${c.approx ? ' ax' : ''}"><line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${y(c.h)}" y2="${y(c.l)}" stroke="currentColor" vector-effect="non-scaling-stroke"/>`
-      + `<rect x="${(x - w * 0.35).toFixed(1)}" width="${(w * 0.7).toFixed(1)}" y="${top}" height="${bh.toFixed(1)}" fill="currentColor"/></g>`;
-  }).join('');
-  const fx = CANDLE_FMT[r.interval] || 'dayhour', last = cs.at(-1), first = cs[0];
-  const chg = ((last.c - first.o) / first.o) * 100;
-  return `<div class="ichart candles" data-pts="${esc(JSON.stringify(cs.map((c) => [c.t, c.c])))}" data-ohlc="${esc(JSON.stringify(cs.map((c) => [c.o, c.h, c.l, c.c, c.approx ? 1 : 0])))}" data-fx="${fx}" data-fy="usd" data-lo="${lo}" data-hi="${hi}" data-h="${h}">
-    <svg viewBox="0 0 600 ${h}" preserveAspectRatio="none" style="height:${h}px" aria-label="NOID/USD candles">${body}</svg>
-    <div class="xh" style="height:${h}px"></div><div class="pt"></div><div class="tip"></div>
-    <div class="axis"><span>${esc(FMT[fx](first.t))}</span><span>low ${esc(usd4(lo))} · high ${esc(usd4(hi))} · <b class="${chg >= 0 ? 'up' : 'down'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</b></span><span>${esc(FMT[fx](last.t))}</span></div></div>
-    <p class="muted" style="font-size:12px;margin:6px 0 0">${n0(cs.length)} candles · built from the SafeTrade price sampled every 3 minutes${cs.some((c) => c.approx) ? '; faded candles are older daily/hourly closes (no intra-candle range)' : ''}. No per-candle volume is published.</p>`;
+const PX_WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
+let pxChart = null, lwReady = null;
+function loadLw() {
+  if (window.LightweightCharts) return Promise.resolve();
+  lwReady ??= new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = '/lightweight-charts.js?v=4.2.3';
+    s.onload = () => (window.LightweightCharts ? ok() : fail(new Error('chart library failed to load')));
+    s.onerror = () => fail(new Error('chart library failed to load'));
+    document.head.append(s);
+  });
+  return lwReady;
 }
-// Price chart with a Line / Candles switch. Line uses time windows; candles use intervals.
-const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h')}</span></div>
+function unmountPriceChart() {
+  const cur = pxChart;
+  pxChart = null;
+  if (!cur) return;
+  cur.dead = true;
+  try { cur.ro?.disconnect(); } catch {}
+  try { cur.chart?.remove(); } catch {}
+}
+function chartTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const pick = (n) => css.getPropertyValue(n).trim();
+  const light = document.documentElement.dataset.theme === 'light';
+  const up = light ? '#0d8a54' : '#3ddc97', down = light ? '#c62828' : '#ff6b6b', accent = pick('--accent'), line = pick('--line'), card = pick('--card'), muted = pick('--muted');
+  return {
+    up, down, accent, card,
+    upSoft: alpha(up, .45), downSoft: alpha(down, .45), area: alpha(accent, .28),
+    options: {
+      layout: { background: { color: card }, textColor: muted, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, attributionLogo: false },
+      grid: { vertLines: { color: line }, horzLines: { color: line } },
+      rightPriceScale: { borderColor: line, scaleMargins: { top: 0.12, bottom: 0.08 } },
+      timeScale: { borderColor: line, timeVisible: true, secondsVisible: false, rightOffset: 3 },
+      crosshair: { mode: 0, vertLine: { color: muted, labelVisible: false, width: 1 }, horzLine: { color: muted, labelVisible: false, width: 1 } },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+      kineticScroll: { touch: true, mouse: false },
+    },
+  };
+}
+const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button></div>
   <div id="${name}c" style="margin-top:10px"><p class="muted">Loading chart…</p></div>`;
-function wirePriceBox(name, height = 200) {
-  let mode = 'line';
-  const show = (v) => (mode === 'line' ? api(`price?window=${v}`).then((h) => priceSeries(h, 'usd', height)) : api(`candles?interval=${v}`).then((r) => candleChart(r, height + 20)))
-    .then((html) => { if ($(name + 'c')) $(name + 'c').innerHTML = html; })
-    .catch((e) => { if ($(name + 'c')) $(name + 'c').innerHTML = `<p class="msg err">Could not load the chart: ${esc(e.message)}</p>`; });
+// Pages of /api/price (3-minute samples) or /api/candles. Older pages use before= the oldest time we have.
+async function pxFetch(mode, spec, before, limit) {
+  const q = mode === 'candles'
+    ? `candles?interval=${encodeURIComponent(spec)}&limit=${limit}${before ? `&before=${before}` : ''}`
+    : `price?limit=${limit}${before ? `&before=${before}` : ''}`;
+  const r = await api(q);
+  const rows = mode === 'candles' ? r.candles || [] : r.points || [];
+  const bars = mode === 'candles'
+    ? rows.map((c) => ({ time: c.t, open: c.o, high: c.h, low: c.l, close: c.c, approx: !!c.approx }))
+    : rows.filter((p) => p.usd != null).map((p) => ({ time: p.t, value: p.usd }));
+  return { bars, more: !!r.more, oldest: r.oldest ?? bars[0]?.time ?? null, approx: bars.some((b) => b.approx) };
+}
+function pxWhen(t, mode, spec) {
+  const day = mode === 'candles' && (spec === '1d' || spec === '1w');
+  return new Date(t * 1000).toLocaleString([], day ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function wirePriceBox(name) {
+  unmountPriceChart();
+  let mode = 'line', spec = '24h', gen = 0;
+  const host = $(name + 'c');
+  const fitBtn = $(name + 'fit');
+  if (fitBtn) fitBtn.onclick = () => pxChart?.fit?.();
+  const pick = (v) => { spec = v; open(); };
   onTabs(name + 'm', (m) => {
     mode = m;
-    const first = m === 'line' ? '24h' : '1h';
-    $(name + 't').innerHTML = tabs(name, m === 'line' ? WINDOW_TABS : CANDLE_TABS, first);
-    onTabs(name, show);
-    show(first);
+    spec = m === 'line' ? '24h' : '1h';
+    $(name + 't').innerHTML = tabs(name, m === 'line' ? WINDOW_TABS : CANDLE_TABS, spec);
+    onTabs(name, pick);
+    open();
   });
-  onTabs(name, show);
-  show('24h');
+  onTabs(name, pick);
+
+  async function open() {
+    const g = ++gen;
+    unmountPriceChart();
+    if (host) host.innerHTML = '<p class="muted">Loading chart…</p>';
+    try {
+      await loadLw();
+      let bars = [], more = false, approx = false, before = null, guard = 0;
+      const need = mode === 'line' && spec !== 'all' ? Math.floor(Date.now() / 1000) - (PX_WINDOWS[spec] || PX_WINDOWS['24h']) : 0;
+      do {
+        const limit = mode === 'candles' ? 200 : spec === '24h' && !before ? 500 : 2000;
+        const page = await pxFetch(mode, spec, before, limit);
+        if (g !== gen || !host?.isConnected) return;
+        const older = before ? page.bars.filter((b) => b.time < before) : page.bars;
+        if (before && !older.length) { more = false; break; }
+        bars = older.concat(bars);
+        more = page.more;
+        approx = approx || page.approx;
+        before = bars[0]?.time ?? null;
+        guard++;
+        if (mode !== 'line') break;
+        if (spec !== 'all' && before && before <= need) break;
+      } while (more && guard < (spec === 'all' ? 8 : 12));
+      if (g !== gen || !host?.isConnected) return;
+      // Candles open on the recent real samples so the square is not a year of daily closes. Zoom left loads the rest.
+      if (mode === 'candles' && bars.length) {
+        const real = bars.filter((b) => !b.approx);
+        const shown = (real.length ? real : bars).slice(-120);
+        if (shown[0] && bars[0] && shown[0].time > bars[0].time) more = true;
+        bars = shown;
+        approx = bars.some((b) => b.approx);
+      }
+      if (bars.length < 1) {
+        host.innerHTML = '<p class="muted">Not enough price samples yet: the chart fills in as the explorer records the SafeTrade price every 3 minutes.</p>';
+        return;
+      }
+      mount(g, bars, more, approx);
+    } catch (e) {
+      if (g === gen && host?.isConnected) host.innerHTML = `<p class="msg err">Could not load the chart: ${esc(e.message)}</p>`;
+    }
+  }
+
+  function mount(g, bars, more, approx) {
+    host.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'pxchart';
+    box.setAttribute('aria-label', 'NOID price chart');
+    const tip = document.createElement('div');
+    tip.className = 'pxtip';
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.style.cssText = 'font-size:12px;margin:6px 0 0';
+    host.append(box, note);
+    const theme = chartTheme();
+    const chart = LightweightCharts.createChart(box, theme.options);
+    box.append(tip);
+    const series = mode === 'candles'
+      ? chart.addCandlestickSeries({ upColor: theme.up, downColor: theme.down, borderVisible: false, wickUpColor: theme.up, wickDownColor: theme.down })
+      : chart.addAreaSeries({ lineColor: theme.accent, topColor: theme.area, bottomColor: 'rgba(0,0,0,0)', lineWidth: 2, priceLineVisible: false });
+    const byTime = new Map();
+    const state = { bars, more, approx, quiet: 0, loading: false, w: 0, h: 0, dead: false };
+    const toLw = (b, th) => b.open == null ? { time: b.time, value: b.value } : {
+      time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
+      ...(b.approx && { color: b.close >= b.open ? th.upSoft : th.downSoft, wickColor: b.close >= b.open ? th.upSoft : th.downSoft }),
+    };
+    const paint = (th) => {
+      byTime.clear();
+      for (const b of state.bars) byTime.set(b.time, b);
+      state.quiet++;
+      series.setData(state.bars.map((b) => toLw(b, th)));
+      state.quiet--;
+    };
+    const writeNote = () => {
+      const kind = mode === 'candles' ? 'candles' : 'points';
+      const fade = state.approx ? '; faded candles are older daily/hourly closes (no intra-candle range)' : '';
+      const older = state.more ? ' · zoom or pan left for older prices' : '';
+      note.textContent = `${state.bars.length.toLocaleString()} ${kind} · SafeTrade price sampled every 3 minutes${fade}${older}`
+        + (mode === 'candles' ? '. No per-candle volume is published.' : '.');
+    };
+    // Line windows open on that span; candles and All fit whatever was loaded into the square.
+    const fitSpan = () => {
+      if (state.dead) return;
+      state.quiet++;
+      try {
+        if (mode === 'line' && spec !== 'all' && state.bars.length > 1) {
+          const to = state.bars.at(-1).time;
+          chart.timeScale().setVisibleRange({ from: to - (PX_WINDOWS[spec] || PX_WINDOWS['24h']), to });
+        } else chart.timeScale().fitContent();
+      } catch {}
+      state.quiet--;
+    };
+    const size = () => {
+      const w = box.clientWidth, h = box.clientHeight;
+      if (w > 10 && h > 10) chart.resize(w, h);
+    };
+    paint(theme);
+    writeNote();
+    // Range events also fire when we fit. Only a real zoom or pan should ask for older prices.
+    let userNav = false;
+    const arm = () => { userNav = true; };
+    // Capture so this runs before the chart handles the same gesture and moves the range.
+    box.addEventListener('wheel', arm, { passive: true, capture: true });
+    box.addEventListener('pointerdown', arm, true);
+    box.addEventListener('touchstart', arm, { passive: true, capture: true });
+    const ro = new ResizeObserver(() => {
+      if (state.dead) return;
+      const w = box.clientWidth, h = box.clientHeight;
+      if (!w || !h || (w === state.w && h === state.h)) return;
+      state.w = w; state.h = h;
+      size();
+      fitSpan();
+    });
+    ro.observe(box);
+    requestAnimationFrame(() => { size(); fitSpan(); });
+
+    async function pull(range) {
+      if (state.dead || state.loading || !state.more || !range || range.from >= -1) return;
+      const before = state.bars[0]?.time;
+      if (!before) { state.more = false; return; }
+      state.loading = true;
+      try {
+        const page = await pxFetch(mode, spec, before, mode === 'candles' ? 300 : 2000);
+        if (g !== gen || state.dead || !host.isConnected) return;
+        const older = page.bars.filter((b) => b.time < before);
+        if (!older.length) { state.more = false; writeNote(); return; }
+        state.bars = older.concat(state.bars);
+        state.more = page.more;
+        state.approx = state.approx || page.approx;
+        for (const b of older) byTime.set(b.time, b);
+        const th = chartTheme();
+        state.quiet++;
+        series.setData(state.bars.map((b) => toLw(b, th)));
+        chart.timeScale().setVisibleLogicalRange({ from: range.from + older.length, to: range.to + older.length });
+        state.quiet--;
+        writeNote();
+      } catch (e) {
+        note.textContent = `Could not load older prices: ${e.message}`;
+        return;
+      } finally {
+        state.loading = false;
+      }
+      const now = chart.timeScale().getVisibleLogicalRange();
+      if (g === gen && state.more && now && now.from < -1) pull(now);
+    }
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (userNav && !state.quiet && !state.loading) pull(range);
+    });
+    chart.subscribeCrosshairMove((param) => {
+      const t = typeof param.time === 'number' ? param.time : null;
+      const d = t != null && byTime.get(t);
+      if (!d || !param.point || param.point.x < 0 || param.point.y < 0) { tip.classList.remove('on'); return; }
+      tip.innerHTML = d.open == null
+        ? `<b>${esc(usd4(d.value))}</b> · ${esc(pxWhen(d.time, mode, spec))}`
+        : `${esc(pxWhen(d.time, mode, spec))}<br><span class="o">O</span> ${esc(usd4(d.open))} <span class="o">H</span> ${esc(usd4(d.high))}<br><span class="o">L</span> ${esc(usd4(d.low))} <span class="o">C</span> <b>${esc(usd4(d.close))}</b>${d.approx ? '<br><span class="o">daily/hourly close only</span>' : ''}`;
+      tip.classList.add('on');
+      const x = Math.min(Math.max(param.point.x - tip.offsetWidth / 2, 4), Math.max(box.clientWidth - tip.offsetWidth - 4, 4));
+      tip.style.left = `${x}px`;
+      tip.style.top = `${Math.max(param.point.y - tip.offsetHeight - 10, 4)}px`;
+    });
+    pxChart = {
+      chart, ro,
+      set dead(v) { state.dead = v; },
+      fit() { if (!state.dead) { state.quiet++; try { chart.timeScale().fitContent(); } catch {} state.quiet--; } },
+      applyTheme() {
+        if (state.dead) return;
+        const th = chartTheme();
+        chart.applyOptions(th.options);
+        series.applyOptions(mode === 'candles'
+          ? { upColor: th.up, downColor: th.down, wickUpColor: th.up, wickDownColor: th.down }
+          : { lineColor: th.accent, topColor: th.area });
+        paint(th);
+      },
+    };
+  }
+  open();
 }
 function pct(v) { return v == null ? '<span class="muted">–</span>' : `<b class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2)}%</b>`; }
 
@@ -481,7 +718,6 @@ function markNew(tableId, oldTip) {
 
 // ---- globe: countries of peers connected to this explorer's node (never exact locations, never miner locations)
 const GLOBE_JS = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js';
-const LW_JS = 'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js';
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/example/datasets/ne_110m_admin_0_countries.geojson';
 const ISO_FIX = { France: 'FR', Norway: 'NO' }; // Natural Earth leaves these as -99
 // Small countries/territories (common hosting spots) that the 1:110m map omits; points only, no outline.
@@ -701,9 +937,86 @@ function chgTh(win, sort, dir, window) {
   return `<th class="${opt ? 'opt' : ''}" aria-sort="${on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}"><button type="button" class="sort${on ? ' on' : ''}" data-sort="change" data-win="${win}" aria-label="Sort by ${win} change">${win}${on ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}</button></th>`;
 }
 const launchHtml = (t) => t.launch === 'launchpad' ? '<span class="pill">Launchpad</span>' : t.launch === 'direct' ? '<span class="pill">Direct issue</span>' : '<span class="muted">–</span>';
+const STAR_RE = /^[A-Za-z0-9:_-]{1,80}$/;
+function localStars() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('noid_stars') || '[]');
+    return Array.isArray(raw) ? raw.filter((id) => STAR_RE.test(id)).slice(0, 200) : [];
+  } catch { return []; }
+}
+function writeStars(ids) {
+  const uniq = [...new Set(ids)].filter((id) => STAR_RE.test(id)).slice(0, 200);
+  try { localStorage.setItem('noid_stars', JSON.stringify(uniq)); } catch {}
+  starCache = new Set(uniq);
+  paintStars();
+  return starCache;
+}
+function starSet() {
+  if (!starCache) starCache = new Set(localStars());
+  return starCache;
+}
+function paintStars() {
+  const set = starSet();
+  for (const b of document.querySelectorAll('button.star')) {
+    const on = set.has(b.dataset.star);
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.textContent = on ? '★' : '☆';
+    const name = b.getAttribute('aria-label')?.replace(/^(Add|Remove) /, '').replace(/ (to|from) watchlist$/, '') || b.dataset.star;
+    b.setAttribute('aria-label', `${on ? 'Remove' : 'Add'} ${name} ${on ? 'from' : 'to'} watchlist`);
+  }
+}
+function dropApiCache(prefix) {
+  for (const k of [...apiCache.keys()]) if (k === prefix || k.startsWith(prefix + '?')) apiCache.delete(k);
+}
+// shortcut: one browser shares noid_stars across accounts; the next login unions that list into whichever account signs in.
+async function mergeStars() {
+  const local = localStars();
+  if (!myKey()) return writeStars(local);
+  try {
+    dropApiCache('stars');
+    const r = local.length ? await api('stars', { ids: local }) : await api('stars');
+    const ids = [...new Set([...local, ...(r.ids || [])])];
+    if (r.ids && ids.length !== r.ids.length) {
+      dropApiCache('stars');
+      const again = await api('stars', { ids });
+      return writeStars(again.ids || ids);
+    }
+    return writeStars(r.ids || ids);
+  } catch {
+    return writeStars(local);
+  }
+}
+function ensureStars() {
+  starsReady ??= mergeStars();
+  return starsReady;
+}
+async function toggleStar(id) {
+  if (!STAR_RE.test(id || '')) return;
+  const set = new Set(starSet());
+  if (set.has(id)) set.delete(id); else set.add(id);
+  writeStars([...set]);
+  if (myKey()) {
+    try { const r = await api('stars', { id, on: set.has(id) }); writeStars(r.ids || [...set]); }
+    catch (e) { if (e.status === 401) saveKey(''); }
+  }
+  if (new URLSearchParams(location.search).get('preset') === 'watch' && $('exlist')) fillExplore().catch(showExErr);
+}
+addEventListener('click', (e) => {
+  const b = e.target.closest?.('button.star');
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toggleStar(b.dataset.star);
+}, true);
+function starBtn(id, name) {
+  const on = starSet().has(id);
+  return `<button type="button" class="star${on ? ' on' : ''}" data-star="${esc(id)}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${on ? 'Remove' : 'Add'} ${esc(name || id)} ${on ? 'from' : 'to'} watchlist">${on ? '★' : '☆'}</button>`;
+}
 function tokenTable(list, sort, dir, window, page, pageSize) {
-  const head = `<tr><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('makers', 'Makers', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${sortTh('fdv', 'FDV', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th>Launch</th><th class="opt">Backing</th></tr>`;
+  const head = `<tr><th></th><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('makers', 'Makers', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${sortTh('fdv', 'FDV', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th>Launch</th><th class="opt">Backing</th></tr>`;
   const body = list.map((t, i) => `<tr>
+      <td>${starBtn(t.id, t.name)}</td>
       <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b><small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
       <td>${sparkSvg(t.spark)}${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
       <td>${esc(ageLabel(t))}</td><td class="num">${n0(t.txns)}</td><td class="num">${n0(t.makers)}</td>
@@ -716,7 +1029,7 @@ function tokenTable(list, sort, dir, window, page, pageSize) {
 function tokenCards(list) {
   return `<div class="narrow">${list.map((t) => `<a class="mcard" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>
       ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b><small>${esc(t.ticker)} · ${esc(ageLabel(t))} · ${t.graduated ? 'Pool' : 'Curve'}</small></span>
-      <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</small></span>
+      <span class="px">${starBtn(t.id, t.name)}${esc(fmtNoid(t.price_micronoid))}<small>${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</small></span>
       <span class="chgs">${sparkSvg(t.spark)} 5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</span>
       <span class="meta">Liq ${esc(fmtNoid(t.liquidity_micronoid))} · Vol ${esc(fmtNoid(t.volume_micronoid))} · MCap ${esc(fmtNoid(t.mcap_micronoid))} · FDV ${esc(fmtNoid(t.fdv_micronoid))}</span>
       <span class="meta">${n0(t.txns)} txns · ${n0(t.makers)} makers · Backing ${esc(fmtNoid(t.backing_per_token_micronoid))} · ${t.launch === 'direct' ? 'Direct issue' : t.launch === 'launchpad' ? 'Launchpad' : ''}</span>
@@ -737,7 +1050,7 @@ function nftCards(list) {
       <span class="meta">Vol ${esc(fmtNoid(c.volume_micronoid))} · ${n0(c.items)} items · ${n0(c.owners)} owners</span></a>`).join('')}</div>`;
 }
 const rangeInputs = (label, a, b, params) => `<label>${label}<span class="pair"><input data-f="${a}" value="${esc(params.get(a) || '')}" placeholder="min" inputmode="decimal" aria-label="${esc(label)} minimum"><input data-f="${b}" value="${esc(params.get(b) || '')}" placeholder="max" inputmode="decimal" aria-label="${esc(label)} maximum"></span></label>`;
-let exGen = 0, exploreTimer = null, tokenTimer = null, tvChart = null;
+let exGen = 0, exploreTimer = null, tokenTimer = null, tokenChart = null;
 function exploreShell(tab, params) {
   const sorts = tab === 'nfts' ? NFT_SORTS : TOKEN_SORTS;
   const sort = params.get('sort') || (tab === 'nfts' ? 'volume' : 'volume');
@@ -753,7 +1066,7 @@ function exploreShell(tab, params) {
         <select id="exsort" aria-label="Sort">${sorts.flatMap(([k]) => [['desc', '↓'], ['asc', '↑']].map(([d, arrow]) => `<option value="${k}:${d}"${sort === k && dir === d ? ' selected' : ''}>${sorts.find((s) => s[0] === k)[1]} ${arrow}</option>`)).join('')}</select>
         ${tab === 'tokens' ? `<select id="exwin" aria-label="Stats window">${['5m', '1h', '6h', '24h'].map((w) => `<option${(params.get('window') || '24h') === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
       </div>
-      ${tab === 'tokens' ? tabs('preset', [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon']], params.get('preset') || '') : ''}
+      ${tab === 'tokens' ? tabs('preset', [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Watchlist']], params.get('preset') || '') : ''}
       ${tab === 'tokens' ? '<p class="muted" style="margin:8px 0 0;font:11px var(--mono)">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
       <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
       <div id="exchips"></div>
@@ -783,10 +1096,25 @@ function syncExploreUrl() {
   history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next : ''));
 }
 async function fillExplore() {
+  await ensureStars();
   const gen = ++exGen;
   const params = new URLSearchParams(location.search);
   const tab = params.get('tab') === 'nfts' ? 'nfts' : 'tokens';
-  const data = await api((tab === 'nfts' ? 'collections?' : 'tokens?') + params.toString());
+  const req = new URLSearchParams(params);
+  if (tab === 'tokens' && params.get('preset') === 'watch') {
+    await ensureStars();
+    if (gen !== exGen || !$('exlist')) return;
+    const ids = [...starSet()];
+    if (!ids.length) {
+      if ($('exbanner')) $('exbanner').innerHTML = params.get('demo') === '1' ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>` : '';
+      $('extools').hidden = false;
+      $('exlist').removeAttribute('aria-busy');
+      $('exlist').innerHTML = `<div class="empty"><b>Nothing starred</b><p class="muted">Star a token to pin it here. ${myKey() ? 'Stars are saved on your account.' : 'They stay in this browser until you log in, then they save to your account.'}</p></div>`;
+      return;
+    }
+    req.set('ids', ids.join(','));
+  }
+  const data = await api((tab === 'nfts' ? 'collections?' : 'tokens?') + req.toString());
   if (gen !== exGen || !$('exlist')) return;
   const bare = ![...params.keys()].some((k) => !['tab', 'demo'].includes(k));
   const rows = tab === 'nfts' ? data.collections : data.tokens;
@@ -980,15 +1308,191 @@ function homeStrip(list) {
       <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}
     <p><a href="/explore?demo=1" data-link>All sample tokens →</a></p></div>`;
 }
+function unmountTokenChart() {
+  const cur = tokenChart;
+  tokenChart = null;
+  if (!cur) return;
+  cur.dead = true;
+  clearInterval(cur.poll);
+  try { cur.ro?.disconnect(); } catch {}
+  try { cur.chart?.remove(); } catch {}
+}
+async function fetchTokenCandles(id, tf, demo, extra) {
+  const q = new URLSearchParams();
+  if (demo) q.set('demo', '1');
+  q.set('tf', tf);
+  q.set('limit', String(extra.limit || 180));
+  if (extra.before) q.set('before', String(extra.before));
+  if (extra.since != null) q.set('since', String(extra.since));
+  const r = await api(`tokens/${encodeURIComponent(id)}/candles?${q}`);
+  const bars = [];
+  for (const c of r.candles || []) {
+    const o = Number(c.o), h = Number(c.h), l = Number(c.l), cl = Number(c.c), v = Number(c.v);
+    if (![o, h, l, cl, v].every(Number.isFinite) || h < l || h > Number.MAX_SAFE_INTEGER) continue;
+    bars.push({ time: c.t, open: o / 1e6, high: h / 1e6, low: l / 1e6, close: cl / 1e6, vol: v / 1e6, raw: c });
+  }
+  return { bars, more: !!r.more, oldest: r.oldest ?? bars[0]?.time ?? null };
+}
+function tokenWhen(t, tf) {
+  const day = tf === '1d' || tf === '1w';
+  return new Date(t * 1000).toLocaleString([], day ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+async function openTokenChart(id, demo, tf) {
+  const g = (openTokenChart.gen = (openTokenChart.gen || 0) + 1);
+  unmountTokenChart();
+  const host = $('tv');
+  if (!host) return;
+  host.innerHTML = '<p class="muted">Loading chart…</p>';
+  await loadLw();
+  if (g !== openTokenChart.gen || !$('tv')) return;
+  const page = await fetchTokenCandles(id, tf, demo, { limit: 180 });
+  if (g !== openTokenChart.gen || !$('tv')) return;
+  if (!page.bars.length) { host.innerHTML = '<p class="muted">Not enough trades for a chart yet.</p>'; return; }
+  host.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'tokenchart';
+  box.setAttribute('aria-label', 'Token price and volume');
+  const tip = document.createElement('div');
+  tip.className = 'pxtip';
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.style.cssText = 'font-size:12px;margin:6px 0 0';
+  host.append(box, note);
+  const theme = chartTheme();
+  const chart = LightweightCharts.createChart(box, theme.options);
+  chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.28 } });
+  box.append(tip);
+  const series = chart.addCandlestickSeries({
+    upColor: theme.up, downColor: theme.down, borderVisible: false, wickUpColor: theme.up, wickDownColor: theme.down,
+    priceFormat: { type: 'price', precision: 6, minMove: 0.000001 },
+  });
+  const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol', base: 0 });
+  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+  const byTime = new Map();
+  const state = { bars: page.bars, more: page.more, loading: false, quiet: 0, dead: false, w: 0, h: 0, tf };
+  const volBar = (b, th) => ({ time: b.time, value: b.vol, color: b.close >= b.open ? th.upSoft : th.downSoft });
+  const paint = (th) => {
+    byTime.clear();
+    for (const b of state.bars) byTime.set(b.time, b);
+    state.quiet++;
+    series.setData(state.bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+    vol.setData(state.bars.map((b) => volBar(b, th)));
+    state.quiet--;
+  };
+  const writeNote = () => {
+    note.textContent = `${state.bars.length.toLocaleString()} candles · volume from trades${state.more ? ' · zoom or pan left for older candles' : ''}`;
+  };
+  const fit = () => {
+    if (state.dead) return;
+    state.quiet++;
+    try { chart.timeScale().fitContent(); } catch {}
+    state.quiet--;
+  };
+  const size = () => {
+    const w = box.clientWidth, h = box.clientHeight;
+    if (w > 10 && h > 10) chart.resize(w, h);
+  };
+  paint(theme);
+  writeNote();
+  let userNav = false;
+  const arm = () => { userNav = true; };
+  box.addEventListener('wheel', arm, { passive: true, capture: true });
+  box.addEventListener('pointerdown', arm, true);
+  box.addEventListener('touchstart', arm, { passive: true, capture: true });
+  const ro = new ResizeObserver(() => {
+    if (state.dead) return;
+    const w = box.clientWidth, h = box.clientHeight;
+    if (!w || !h || (w === state.w && h === state.h)) return;
+    state.w = w; state.h = h;
+    size();
+    if (!userNav) fit();
+  });
+  ro.observe(box);
+  requestAnimationFrame(() => { size(); fit(); });
+  async function pull(range) {
+    if (state.dead || state.loading || !state.more || !range || range.from >= -1) return;
+    const before = state.bars[0]?.time;
+    if (!before) { state.more = false; return; }
+    state.loading = true;
+    try {
+      const olderPage = await fetchTokenCandles(id, tf, demo, { before, limit: 300 });
+      if (g !== openTokenChart.gen || state.dead) return;
+      const older = olderPage.bars.filter((b) => b.time < before);
+      if (!older.length) { state.more = false; writeNote(); return; }
+      state.bars = older.concat(state.bars);
+      state.more = olderPage.more;
+      for (const b of older) byTime.set(b.time, b);
+      const th = chartTheme();
+      state.quiet++;
+      series.setData(state.bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+      vol.setData(state.bars.map((b) => volBar(b, th)));
+      chart.timeScale().setVisibleLogicalRange({ from: range.from + older.length, to: range.to + older.length });
+      state.quiet--;
+      writeNote();
+    } catch (e) {
+      note.textContent = `Could not load older candles: ${e.message}`;
+      return;
+    } finally { state.loading = false; }
+    const now = chart.timeScale().getVisibleLogicalRange();
+    if (g === openTokenChart.gen && state.more && now && now.from < -1) pull(now);
+  }
+  chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    if (userNav && !state.quiet && !state.loading) pull(range);
+  });
+  chart.subscribeCrosshairMove((param) => {
+    const t = typeof param.time === 'number' ? param.time : null;
+    const d = t != null && byTime.get(t);
+    if (!d || !param.point || param.point.x < 0 || param.point.y < 0) { tip.classList.remove('on'); return; }
+    const r = d.raw;
+    tip.innerHTML = `${esc(tokenWhen(d.time, tf))}<br><span class="o">O</span> ${esc(fmtNoid(r.o))} <span class="o">H</span> ${esc(fmtNoid(r.h))}<br><span class="o">L</span> ${esc(fmtNoid(r.l))} <span class="o">C</span> <b>${esc(fmtNoid(r.c))}</b><br><span class="o">Vol</span> ${esc(fmtNoid(r.v))}`;
+    tip.classList.add('on');
+    const x = Math.min(Math.max(param.point.x - tip.offsetWidth / 2, 4), Math.max(box.clientWidth - tip.offsetWidth - 4, 4));
+    tip.style.left = `${x}px`;
+    tip.style.top = `${Math.max(param.point.y - tip.offsetHeight - 10, 4)}px`;
+  });
+  // shortcut: the open chart polls every 5s. Use a shared feed if many token pages stay open.
+  const poll = setInterval(async () => {
+    if (state.dead || document.hidden || !state.bars.length) return;
+    try {
+      const live = await fetchTokenCandles(id, tf, demo, { limit: 2 });
+      if (g !== openTokenChart.gen || state.dead) return;
+      const last = state.bars.at(-1).time;
+      let changed = false;
+      for (const b of live.bars) {
+        if (b.time < last) continue;
+        if (b.time === last) state.bars[state.bars.length - 1] = b;
+        else state.bars.push(b);
+        byTime.set(b.time, b);
+        const th = chartTheme();
+        series.update({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close });
+        vol.update(volBar(b, th));
+        changed = true;
+      }
+      if (changed) writeNote();
+    } catch {}
+  }, 5000);
+  tokenChart = {
+    chart, ro, poll,
+    set dead(v) { state.dead = v; },
+    fit() { userNav = false; fit(); },
+    applyTheme() {
+      if (state.dead) return;
+      const th = chartTheme();
+      chart.applyOptions(th.options);
+      series.applyOptions({ upColor: th.up, downColor: th.down, wickUpColor: th.up, wickDownColor: th.down });
+      paint(th);
+    },
+  };
+}
 const pages = {
   async home() {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
-    const soft = (p) => api(p).catch(() => null);
-    const [s, b, t, hi, net, mi, preview] = await Promise.all([
-      soft('stats'), soft('blocks?limit=15'), soft('txs'), soft('history?window=24h'), soft('network'), soft('miners?window=24h'),
-      demo ? soft('tokens?demo=1') : Promise.resolve(null),
+    const [s0, b0, t0, hi0, net0, mi0, preview] = await Promise.all([
+      part('stats'), part('blocks?limit=15'), part('txs'), part('history?window=24h'), part('network'), part('miners?window=24h'),
+      demo ? part('tokens?demo=1') : Promise.resolve(null),
     ]);
-    const strip = homeStrip(preview?.tokens);
+    const s = s0._err ? null : s0, b = b0._err ? null : b0, t = t0._err ? null : t0, hi = hi0._err ? null : hi0, net = net0._err ? null : net0, mi = mi0._err ? null : mi0;
+    const strip = homeStrip(preview && !preview._err ? preview.tokens : null);
     if (!s || !b?.blocks?.length) {
       app.innerHTML = `<div class="livebar"><span class="dot off"></span><span>Node unavailable. Live blocks, price and the globe need the Parano1d node. Explore still opens.</span></div>
         ${exploreCard(demo)}${strip}
@@ -1002,11 +1506,11 @@ const pages = {
       <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
       <div class="card globe"><div id="globe"><div class="glmsg">Loading network globe…</div></div>
         <div class="over">
-          <div class="chip">Block<b id="gh">${n0(s.chain.height)}</b></div>
-          <div class="chip">Last block<b id="gago">${esc(ago(b.blocks[0]?.timestamp))}</b></div>
-          <div class="chip">NOID<b id="gpx">${esc(s.price ? usd4(s.price.usd) : '–')}</b></div>
-          <div class="chip">Peers<b id="gpeers">${n0(s.peers)}</b></div>
-          <div class="chip">Countries<b id="gcc">${n0(net?.peers.length)}</b></div>
+          <div class="chip">Block<b id="gh">${s ? n0(s.chain.height) : '–'}</b></div>
+          <div class="chip">Last block<b id="gago">${b ? esc(ago(b.blocks[0]?.timestamp)) : '–'}</b></div>
+          <div class="chip">NOID<b id="gpx">${esc(s?.price ? usd4(s.price.usd) : '–')}</b></div>
+          <div class="chip">Peers<b id="gpeers">${s ? n0(s.peers) : '–'}</b></div>
+          <div class="chip">Countries<b id="gcc">${net ? n0(net.peers.length) : '–'}</b></div>
         </div>
         <div class="event" id="gevent"></div>
         <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
@@ -1016,9 +1520,9 @@ const pages = {
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
         <div style="margin:12px 0 0">${priceBox('pwin')}</div>
         <p style="margin:8px 0 0;text-align:right"><a href="/market" data-link>Full market analytics →</a></p></div>
-      <div class="grid">
+      ${s ? `<div class="grid">
         ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
-        ${stat('Last block', 'ago', esc(ago(b.blocks[0]?.timestamp)), 'Time since the newest block was mined.')}
+        ${stat('Last block', 'ago', b ? esc(ago(b.blocks[0]?.timestamp)) : '–', 'Time since the newest block was mined.')}
         ${stat('Circulating supply', 'supply', esc(noid(s.chain.circulating_supply_micronoid)), 'All NOID currently in existence.')}
         ${stat('Block reward', 'reward', esc(noid(s.mining.block_reward_micronoid)), 'NOID paid to the miner of each new block.')}
         ${stat('Active slots', 'slots', esc(Number(s.state.active_slots).toLocaleString()), 'Unspent outputs in the Live State (like UTXOs).')}
@@ -1038,30 +1542,31 @@ const pages = {
         ${stat('Mempool', 'mp', '…', 'Transactions waiting to be mined, and the minimum fee rate accepted.')}
         ${stat('Connected peers', 'peers', esc(s.peers), 'Other nodes this explorer’s node is talking to.')}
         ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
-      </div>
+      </div>` : `<div class="card"><h2>Overview</h2>${errp(s0)}</div>`}
       <div class="card"><h2>Network history</h2>${tabs('cwin', WINDOW_TABS, '24h')}</div>
-      <div class="grid" id="charts">${hi ? charts(hi) : '<div class="card"><p class="muted">History is unavailable right now.</p></div>'}</div>
-      <div class="card" id="miners">${minersCard(mi)}</div>
+      <div class="grid" id="charts">${hi ? charts(hi) : errp(hi0)}</div>
+      <div class="card" id="miners">${mi ? minersCard(mi) : `<h2>Top miners</h2>${errp(mi0)}`}</div>
       <div class="card"><h2>Latest blocks</h2><div id="blocks">${rows(b.blocks, BLOCK_COLS)}</div>
         <p><a href="/blocks/${b.blocks.at(-1)?.height - 1}" data-link>Older →</a></p></div>
-      <div class="card" id="txs">${txsCard(t)}</div>`;
-    for (const [id, v] of Object.entries({ h: s.chain.height, gh: s.chain.height, slots: s.state.active_slots, peers: s.peers, gpeers: s.peers, gcc: net?.peers.length })) $(id).dataset.v = v ?? 0;
+      <div class="card" id="txs">${t0._err ? errp(t0) : txsCard(t)}</div>`;
+    for (const [id, v] of Object.entries({ h: s.chain.height, gh: s.chain.height, slots: s.state.active_slots, peers: s.peers, gpeers: s.peers, gcc: net?.peers.length })) { const el = $(id); if (el) el.dataset.v = v ?? 0; }
     growBars();
-    const loadCharts = async () => { $('charts').innerHTML = charts(await api(`history?window=${chartWin}&at=${tip}`)); };
+    const loadCharts = async () => { const el = $('charts'); if (el) el.innerHTML = charts(await api(`history?window=${chartWin}&at=${tip}`)); };
     const loadMiners = () => showMiners(`miners?window=${minerWin}&at=${tip}`, (v) => { minerWin = v; loadMiners(); });
-    onTabs('cwin', (v) => { chartWin = v; loadCharts().catch((e) => { $('charts').innerHTML = `<p class="msg err">Could not load this window: ${esc(e.message)}</p>`; }); });
+    onTabs('cwin', (v) => { chartWin = v; loadCharts().catch((e) => { const el = $('charts'); if (el) el.innerHTML = `<p class="msg err">Could not load this window: ${esc(e.message)}</p>`; }); });
     onTabs('mwin', (v) => { minerWin = v; loadMiners(); });
-    mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
+    if (net0._err) { const g = $('globe'); if (g) g.innerHTML = `<div class="glmsg">${esc(net0._err)}</div>`; }
+    else mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
-    wirePriceBox('pwin', 170);
-    let tip = Number(s.chain.height), tipTs = b.blocks[0]?.timestamp;
-    ticker = setInterval(() => { if (tipTs) { $('ago').textContent = ago(tipTs); $('gago').textContent = ago(tipTs); } }, 1000);
+    wirePriceBox('pwin');
+    let tip = s ? Number(s.chain.height) : 0, tipTs = b?.blocks[0]?.timestamp;
+    ticker = setInterval(() => { if (tipTs) { if ($('ago')) $('ago').textContent = ago(tipTs); if ($('gago')) $('gago').textContent = ago(tipTs); } }, 1000);
     feed = new EventSource('/api/live');
     feed.onmessage = async (e) => {
       const d = JSON.parse(e.data);
-      $('dot').classList.remove('off'); $('livemsg').textContent = `LIVE · updates every 2 s · checked ${new Date(d.at).toLocaleTimeString()}`;
+      $('dot')?.classList.remove('off'); if ($('livemsg')) $('livemsg').textContent = `LIVE · updates every 2 s · checked ${new Date(d.at).toLocaleTimeString()}`;
       setText('supply', noid(d.chain.circulating_supply_micronoid));
-      if (d.price) {
+      if (d.price && $('pxch')) {
         setText('px', usd4(d.price.usd)); setText('gpx', usd4(d.price.usd)); setText('pxvol', money(d.price.volume_24h_usd, 0));
         setText('pxcap', money((Number(d.chain.circulating_supply_micronoid) / 1e6) * d.price.usd, 0));
         const ch = d.price.change_24h_pct; $('pxch').className = ch >= 0 ? 'up' : 'down';
@@ -1083,17 +1588,17 @@ const pages = {
       const h = Number(d.chain.height);
       if (h <= tip) return;
       const old = tip; tip = h; tipTs = d.header?.timestamp ?? tipTs;
-      $('h').href = `/block/${h}`; setNum('h', h); setNum('gh', h);
+      if ($('h')) $('h').href = `/block/${h}`; setNum('h', h); setNum('gh', h);
       flash($('ago')); flash($('gago')); globeBlock(h);
       // ?at= makes each new height a fresh (but still shared) cache entry.
       const [nb, nt] = await Promise.all([api(`blocks?limit=15&at=${h}`), api(`txs?at=${h}`).catch(() => null)]);
       if (!feed) return;
-      $('blocks').innerHTML = rows(nb.blocks, BLOCK_COLS); markNew('blocks', old);
-      $('txs').innerHTML = txsCard(nt); loadCharts().catch(() => {}); loadMiners().catch(() => {});
+      if ($('blocks')) { $('blocks').innerHTML = rows(nb.blocks, BLOCK_COLS); markNew('blocks', old); }
+      if ($('txs')) $('txs').innerHTML = txsCard(nt); loadCharts().catch(() => {}); loadMiners().catch(() => {});
     };
-    feed.addEventListener('down', () => { $('dot').classList.add('off'); $('livemsg').textContent = 'Node not responding · retrying'; });
+    feed.addEventListener('down', () => { $('dot')?.classList.add('off'); if ($('livemsg')) $('livemsg').textContent = 'Node not responding · retrying'; });
     feed.onerror = () => { $('dot')?.classList.add('off'); $('livemsg') && ($('livemsg').textContent = 'Connection lost · reconnecting…'); };
-    if (s.donate) document.getElementById('foot').innerHTML += `<p>Support this explorer: ${link('address', s.donate)}</p>`;
+    if (s?.donate) document.getElementById('foot').innerHTML += `<p>Support this explorer: ${link('address', s.donate)}</p>`;
   },
   async blocks(before) {
     const b = await api(`blocks?limit=50&before=${encodeURIComponent(before)}`);
@@ -1131,45 +1636,52 @@ const pages = {
   'api-access': () => go('/account'),
 
   async market() {
-    const [s, pr, ho, rl, su] = await Promise.all([api('stats'), api('price?window=24h'), api('holders?window=30d'), api('richlist?limit=25'), api('supply?window=30d')]);
-    const p = pr.now, supplyNoid = Number(s.chain.circulating_supply_micronoid) / 1e6;
-    const richHtml = (rl.warning ? `<p class="msg err">${esc(rl.warning)}</p>` : '') + (rl.rows.length
+    const [s, pr, ho, rl, su] = await Promise.all([
+      part('stats'), part('price?window=24h'), part('holders?window=30d'), part('richlist?limit=25'), part('supply?window=30d'),
+    ]);
+    const p = pr._err ? null : pr.now;
+    const supplyMicro = s._err ? null : s.chain.circulating_supply_micronoid;
+    const supplyNoid = supplyMicro == null ? null : Number(supplyMicro) / 1e6;
+    const richHtml = rl._err ? errp(rl) : (rl.warning ? `<p class="msg err">${esc(rl.warning)}</p>` : '') + (rl.rows.length
       ? `<div class="bars">${rl.rows.map((r) => `<a class="bar" href="/address/${encodeURIComponent(r.address)}" data-link title="${esc(r.address)}"><span class="name">#${r.rank} ${esc(r.entity || '—')} <span class="mono">${esc(short(r.address))}</span></span><span class="val">${esc(noid(r.balance))} · ${(100 * (r.share || 0)).toFixed(2)}% · ${n0(r.slots)} slots</span><span class="track"><span class="fill" data-w="${(100 * r.balance / rl.rows[0].balance).toFixed(1)}"></span></span></a>`).join('')}</div>`
       : '<p class="muted">Available after the first Live State sweep (a few minutes after start).</p>');
     const card = (title, html, id = '') => `<div class="card"${id ? ` id="${id}"` : ''}><h2>${title}</h2>${html}</div>`;
-    const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h')}<div id="${name}c" style="margin-top:10px">${priceSeries(h, key)}</div>`);
+    const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h')}<div id="${name}c" style="margin-top:10px">${h._err ? errp(h) : priceSeries(h, key)}</div>`);
+    const supplyBody = su._err ? errp(su) : (su.points.length > 1 ? ichart(su.points.map((x) => [x.t, x.supply / 1e6]), 'day', 'num', 130) : '<p class="muted">Collecting…</p>');
+    const holdersBody = ho._err ? errp(ho) : (ho.points.length > 1 ? ichart(ho.points.map((x) => [x.t, x.holders]), 'day', 'count', 130) : '<p class="muted">Collecting: one point per sweep, every ' + Math.round(ho.sweep.every_ms / 60000) + ' minutes.</p>');
     app.innerHTML = `
       <div class="grid">
-        <div class="card stat"><small>NOID price</small><b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small></div>
-        <div class="card stat" title="Price × circulating supply from this node"><small>Market cap</small><b>${esc(money(supplyNoid * p.usd, 0))}</b></div>
-        <div class="card stat"><small>24h volume</small><b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small></div>
-        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small><b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'approx. · swept ' + ago(ho.latest.ts) : ho.sweep.running ? 'first sweep ' + Math.round(100 * (ho.sweep.progress || 0)) + '% done' : 'first sweep pending'}</small></div>
-        <div class="card stat"><small>All-time high</small><b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small></div>
-        <div class="card stat"><small>Circulating supply</small><b>${esc(noid(s.chain.circulating_supply_micronoid))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small></div>
+        <div class="card stat"><small>NOID price</small>${p ? `<b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small>` : errp(pr)}</div>
+        <div class="card stat" title="Price × circulating supply from this node"><small>Market cap</small>${p && supplyNoid != null ? `<b>${esc(money(supplyNoid * p.usd, 0))}</b>` : errp(s._err ? s : pr)}</div>
+        <div class="card stat"><small>24h volume</small>${p ? `<b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small>` : errp(pr)}</div>
+        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small>${ho._err ? errp(ho) : `<b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'approx. · swept ' + ago(ho.latest.ts) : ho.sweep.running ? 'first sweep ' + Math.round(100 * (ho.sweep.progress || 0)) + '% done' : 'first sweep pending'}</small>`}</div>
+        <div class="card stat"><small>All-time high</small>${p ? `<b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small>` : errp(pr)}</div>
+        <div class="card stat"><small>Circulating supply</small>${s._err ? errp(s) : `<b>${esc(noid(supplyMicro))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small>`}</div>
       </div>
-      ${card('Price change', `<div class="delta">${['15m', '1h', '6h', '24h', '7d', '30d'].map((k) => `<div><small>${k}</small>${pct(p.change[k])}</div>`).join('')}</div>`)}
-      ${card(`NOID / USD <small class="muted">${pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`, priceBox('px'))}
+      ${card('Price change', p ? `<div class="delta">${['15m', '1h', '6h', '24h', '7d', '30d'].map((k) => `<div><small>${k}</small>${pct(p.change[k])}</div>`).join('')}</div>` : errp(pr))}
+      ${card(`NOID / USD <small class="muted">${!pr._err && pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`, priceBox('px'))}
       <div class="grid">
         ${chartCard('Market cap', 'mc', 'cap', pr)}
         ${chartCard('24h volume', 'vo', 'vol', pr)}
       </div>
       <div class="grid">
-        ${card(`Holders over time${ho.first ? ` <small class="muted">tracked since ${esc(new Date(ho.first * 1000).toLocaleDateString())}; longer windows show the same data until then</small>` : ''}`, `${tabs('hw', WINDOW_TABS, '30d')}<div id="hwc" style="margin-top:10px">${ho.points.length > 1 ? ichart(ho.points.map((x) => [x.t, x.holders]), 'day', 'count', 130) : '<p class="muted">Collecting: one point per sweep, every ' + Math.round(ho.sweep.every_ms / 60000) + ' minutes.</p>'}</div>`)}
-        ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d')}<div id="swc" style="margin-top:10px">${su.points.length > 1 ? ichart(su.points.map((x) => [x.t, x.supply / 1e6]), 'day', 'num', 130) : '<p class="muted">Collecting…</p>'}</div>`)}
+        ${card(`Holders over time${!ho._err && ho.first ? ` <small class="muted">tracked since ${esc(new Date(ho.first * 1000).toLocaleDateString())}; longer windows show the same data until then</small>` : ''}`, `${tabs('hw', WINDOW_TABS, '30d')}<div id="hwc" style="margin-top:10px">${holdersBody}</div>`)}
+        ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d')}<div id="swc" style="margin-top:10px">${supplyBody}</div>`)}
       </div>
-      ${card('Concentration', ho.latest?.holders ? `<div class="delta">
+      ${card('Concentration', ho._err ? errp(ho) : ho.latest?.holders ? `<div class="delta">
           <div><small>Top 10 hold</small><b>${(100 * ho.latest.top10 / ho.latest.supply).toFixed(1)}%</b></div>
           <div><small>Top 100 hold</small><b>${(100 * ho.latest.top100 / ho.latest.supply).toFixed(1)}%</b></div>
           <div><small>Live slots</small><b>${n0(ho.latest.slots)}</b></div>
           <div><small>Avg per holder</small><b>${esc(noid(Math.round(ho.latest.supply / ho.latest.holders)))}</b></div></div>` : '<p class="muted">Available after the first sweep.</p>')}
-      ${card(`Rich list <small class="muted">top 25 of ${rl.holders ? n0(rl.holders) : '…'} holders${rl.updated ? ' · approximate, swept ' + esc(ago(rl.updated)) : ''} · entity labels refresh every 30 min</small>`, richHtml)}
-      ${card('Markets', pr.markets?.length ? rows(pr.markets.map((m) => ({ exchange: m.exchange, pair: m.pair, price: usd4(m.usd), volume_24h: money(m.volume_24h_usd, 0), share: (m.share_pct ?? 0).toFixed(1) + '%' })), ['exchange', 'pair', 'price', 'volume_24h', 'share'])
+      ${card(`Rich list <small class="muted">top 25 of ${!rl._err && rl.holders ? n0(rl.holders) : '…'} holders${!rl._err && rl.updated ? ' · approximate, swept ' + esc(ago(rl.updated)) : ''} · entity labels refresh every 30 min</small>`, richHtml)}
+      ${card('Markets', pr._err ? errp(pr) : pr.markets?.length ? rows(pr.markets.map((m) => ({ exchange: m.exchange, pair: m.pair, price: usd4(m.usd), volume_24h: money(m.volume_24h_usd, 0), share: (m.share_pct ?? 0).toFixed(1) + '%' })), ['exchange', 'pair', 'price', 'volume_24h', 'share'])
         + '<p class="muted">Order books and individual trades are not published by these exchanges in a form this explorer can read; prices and volumes come from CoinPaprika.</p>' : '<p class="muted">Market list unavailable right now.</p>')}`;
     growBars();
-    const reload = (name, key) => (w) => api(`price?window=${w}`).then((h) => { $(name + 'c').innerHTML = priceSeries(h, key); });
-    wirePriceBox('px', 200); onTabs('mc', reload('mc', 'cap')); onTabs('vo', reload('vo', 'vol'));
-    onTabs('hw', (w) => api(`holders?window=${w}`).then((h) => { $('hwc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.holders]), BUCKET_FMT[w], 'count', 130) : '<p class="muted">Not enough sweeps in this window yet.</p>'; }));
-    onTabs('sw', (w) => api(`supply?window=${w}`).then((h) => { $('swc').innerHTML = h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.supply / 1e6]), BUCKET_FMT[w], 'num', 130) : '<p class="muted">Collecting…</p>'; }));
+    const into = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+    const reload = (name, key) => (w) => api(`price?window=${w}`).then((h) => into(name + 'c', priceSeries(h, key))).catch((e) => into(name + 'c', errp({ _err: e.message })));
+    wirePriceBox('px'); onTabs('mc', reload('mc', 'cap')); onTabs('vo', reload('vo', 'vol'));
+    onTabs('hw', (w) => api(`holders?window=${w}`).then((h) => into('hwc', h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.holders]), BUCKET_FMT[w], 'count', 130) : '<p class="muted">Not enough sweeps in this window yet.</p>')).catch((e) => into('hwc', errp({ _err: e.message }))));
+    onTabs('sw', (w) => api(`supply?window=${w}`).then((h) => into('swc', h.points.length > 1 ? ichart(h.points.map((x) => [x.t, x.supply / 1e6]), BUCKET_FMT[w], 'num', 130) : '<p class="muted">Collecting…</p>')).catch((e) => into('swc', errp({ _err: e.message }))));
   },
 
   async mempool() {
@@ -1188,11 +1700,14 @@ const pages = {
   },
 
   async mining() {
-    const [s, m, h] = await Promise.all([api('stats'), api('miners?window=24h'), api('history?window=7d')]);
-    const net = s.network, height = Number(s.chain.height);
-    // Until block 3,223,778 miners get 90% of the subsidy; the other 10% goes to the allocation schedule.
-    const minerShare = height < 3223778 ? 0.9 : 1, reward = (Number(s.mining.block_reward_micronoid) / 1e6) * minerShare;
-    app.innerHTML = `<div class="grid">
+    const [s, m, h] = await Promise.all([part('stats'), part('miners?window=24h'), part('history?window=7d')]);
+    const hashCard = `<div class="card"><h2>Hashrate, last 7 days</h2>${h._err ? errp(h) : ichart(h.points.map((p) => [p.t, p.hashrate]), 'dayhour', 'hs', 150)}</div>`;
+    const minerCard = `<div class="card" id="miners">${m._err ? `<h2>Top miners</h2>${errp(m)}` : minersCard(m)}</div>`;
+    if (!s._err) {
+      const net = s.network, height = Number(s.chain.height);
+      // Until block 3,223,778 miners get 90% of the subsidy; the other 10% goes to the allocation schedule.
+      const minerShare = height < 3223778 ? 0.9 : 1, reward = (Number(s.mining.block_reward_micronoid) / 1e6) * minerShare;
+      app.innerHTML = `<div class="grid">
         <div class="card stat"><small>Network hashrate</small><b>${esc(si(net.hashrate, 'H/s'))}</b></div>
         <div class="card stat"><small>Difficulty</small><b>${esc(si(net.difficulty_work, 'H'))}</b></div>
         <div class="card stat"><small>Avg block time</small><b>${esc(net.avg_block_time?.toFixed(1) ?? '–')} s</b></div>
@@ -1205,21 +1720,22 @@ const pages = {
         </div>
         <div class="grid" id="mout" style="margin-top:12px"></div>
         <p class="muted">Mining is random: real results vary a lot from day to day, especially with a small share of the network. "Revenue minus electricity" leaves out hardware cost, pool and exchange fees, how much NOID the market can absorb, and future changes in difficulty and price.</p></div>
-      <div class="card"><h2>Hashrate, last 7 days</h2>${ichart(h.points.map((p) => [p.t, p.hashrate]), 'dayhour', 'hs', 150)}</div>
-      <div class="card" id="miners">${minersCard(m)}</div>`;
-    const calc = () => {
-      const mine = Number($('mh').value) * Number($('mu').value), share = net.hashrate ? mine / net.hashrate : 0;
-      const blocksDay = 86400 / (net.avg_block_time || 30), myBlocks = blocksDay * share, noidDay = myBlocks * reward;
-      const usd = s.price?.usd, power = (Number($('mw').value) / 1000) * 24 * Number($('mk').value);
-      const out = (k, v) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b></div>`;
-      $('mout').innerHTML = out('Share of network', `${(share * 100).toPrecision(3)}%`) + out('NOID per day', noidDay.toLocaleString(undefined, { maximumFractionDigits: 4 }))
-        + out('Revenue per day', usd ? money(noidDay * usd) : '–') + out('Electricity per day', money(power))
-        + out('Revenue minus electricity / day', usd ? money(noidDay * usd - power) : '–') + out('Avg time to find a block', myBlocks ? (myBlocks >= 24 ? `${((24 * 60) / myBlocks).toFixed(1)} min` : myBlocks >= 1 ? `${(24 / myBlocks).toFixed(1)} h` : `${(1 / myBlocks).toFixed(1)} days`) : '–');
-    };
-    for (const id of ['mh', 'mu', 'mw', 'mk']) $(id).oninput = calc;
-    calc(); growBars();
-    const pick = (v) => showMiners(`miners?window=${v}`, pick);
-    onTabs('mwin', pick);
+      ${hashCard}
+      ${minerCard}`;
+      const calc = () => {
+        const mine = Number($('mh').value) * Number($('mu').value), share = net.hashrate ? mine / net.hashrate : 0;
+        const blocksDay = 86400 / (net.avg_block_time || 30), myBlocks = blocksDay * share, noidDay = myBlocks * reward;
+        const usd = s.price?.usd, power = (Number($('mw').value) / 1000) * 24 * Number($('mk').value);
+        const out = (k, v) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b></div>`;
+        $('mout').innerHTML = out('Share of network', `${(share * 100).toPrecision(3)}%`) + out('NOID per day', noidDay.toLocaleString(undefined, { maximumFractionDigits: 4 }))
+          + out('Revenue per day', usd ? money(noidDay * usd) : '–') + out('Electricity per day', money(power))
+          + out('Revenue minus electricity / day', usd ? money(noidDay * usd - power) : '–') + out('Avg time to find a block', myBlocks ? (myBlocks >= 24 ? `${((24 * 60) / myBlocks).toFixed(1)} min` : myBlocks >= 1 ? `${(24 / myBlocks).toFixed(1)} h` : `${(1 / myBlocks).toFixed(1)} days`) : '–');
+      };
+      for (const id of ['mh', 'mu', 'mw', 'mk']) $(id).oninput = calc;
+      calc();
+    } else app.innerHTML = `<div class="card"><h2>Mining</h2>${errp(s)}</div>${hashCard}${minerCard}`;
+    growBars();
+    if (!m._err) { const pick = (v) => showMiners(`miners?window=${v}`, pick); onTabs('mwin', pick); }
   },
 
 
@@ -1244,6 +1760,7 @@ const pages = {
         <table>
           <tr><th>Endpoint</th><th>Returns</th></tr>
           <tr><td><code>GET /stats</code></td><td>Height, supply, difficulty, block reward, Live State, peers, node status</td></tr>
+          <tr><td><code>GET /health</code></td><td>Database quick_check and indexer status, for uptime monitors (no key)</td></tr>
           <tr><td><code>GET /live</code></td><td>Server-sent events: the stats above, pushed every 2 s</td></tr>
           <tr><td><code>GET /blocks?before=H&amp;limit=N</code></td><td>Block headers, newest first (max 50)</td></tr>
           <tr><td><code>GET /block/:height|:hash</code></td><td>One block, with its transactions while retained</td></tr>
@@ -1417,6 +1934,7 @@ const pages = {
     await fillExplore();
   },
   async token(id) {
+    await ensureStars();
     const demo = new URLSearchParams(location.search).get('demo') === '1';
     const q = demo ? '?demo=1' : '';
     const d = await api(`tokens/${encodeURIComponent(id)}${q}`);
@@ -1431,6 +1949,7 @@ const pages = {
     const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}
       <p><a href="${demoHref('/explore')}" data-link>← Tokens</a>
+        ${starBtn(t.id, t.name)}
         <button type="button" class="copy" data-copy="${esc(share)}" aria-label="Copy link to this token">Copy link</button>
         <button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy token id">Copy token id</button></p>
       <div class="split pair"><div>
@@ -1439,7 +1958,7 @@ const pages = {
           <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div>
         </div></div></div>
         <div class="card"><h2>Price <small>NOID per token</small></h2>
-          <div class="tfs" data-tabs="tf">${['1m', '5m', '15m', '1h', '4h', '1d'].map((tf) => `<button type="button" data-v="${tf}" class="${tf === '15m' ? 'on' : ''}">${tf}</button>`).join('')}</div>
+          <div class="tfs" data-tabs="tf">${[['1m', '1m'], ['5m', '5m'], ['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']].map(([tf, label]) => `<button type="button" data-v="${tf}" class="${tf === '15m' ? 'on' : ''}">${label}</button>`).join('')}<button type="button" class="fit" id="tvfit" title="Fit the loaded candles in the card">Fit</button></div>
           <div id="tv"><p class="muted">Loading chart…</p></div></div>
         <div class="card"><h2>Trades <small class="muted">auto-refresh 15s</small></h2><div id="tape"></div></div>
         <div class="card"><h2>Holders <small class="muted">${n0(t.holders_n)} · top 10 hold ${esc(t.top10_pct)}%</small></h2>${d.holders.length ? `<div class="bars">${d.holders.map((h) => `<a class="bar" href="/address/${encodeURIComponent(h.address)}" data-link><span class="name">${esc(h.address)}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Top holders are not published for this token yet.</p>'}</div>
@@ -1472,36 +1991,10 @@ const pages = {
         ${trades.map((tr) => `<tr><td>${esc(ago(tr.ts))}</td><td class="side ${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td><td>${esc(Number(tr.token_amount).toLocaleString())}</td><td>${esc(fmtNoid(tr.noid_micronoid))}</td><td>${esc(fmtNoid(tr.price_micronoid))}</td><td>${tr.trader ? link('address', tr.trader, short(tr.trader)) : '<span class="muted">–</span>'}</td></tr>`).join('')}</table></div>` : '<p class="muted">No trades captured yet.</p>';
     };
     paintTape(d.trades);
-    const loadTf = async (tf) => {
-      const box = $('tv');
-      if (!box) return;
-      const candles = await api(`tokens/${encodeURIComponent(id)}/candles${q}${q ? '&' : '?'}tf=${tf}`);
-      if (!$('tv')) return;
-      if (!window.LightweightCharts) {
-        try { await loadScript(LW_JS); } catch { box.innerHTML = '<p class="muted">Chart library failed to load.</p>'; return; }
-      }
-      if (!$('tv')) return;
-      const rows = (candles.candles || []).filter((c) => Number(c.h) >= Number(c.l)).map((c) => ({
-        time: c.t, open: Number(c.o) / 1e6, high: Number(c.h) / 1e6, low: Number(c.l) / 1e6, close: Number(c.c) / 1e6,
-      }));
-      if (rows.length < 2) { tvChart?.remove(); tvChart = null; box.innerHTML = '<p class="muted">Not enough trades for a chart yet.</p>'; return; }
-      if (!tvChart) {
-        box.innerHTML = '';
-        const fg = cssv('--muted') || '#a9c0c1', line = cssv('--line') || '#152a2d';
-        tvChart = LightweightCharts.createChart(box, {
-          width: box.clientWidth, height: 380,
-          layout: { background: { color: 'transparent' }, textColor: fg, fontFamily: cssv('--mono') || 'monospace' },
-          grid: { vertLines: { color: line }, horzLines: { color: line } },
-          rightPriceScale: { borderColor: line }, timeScale: { borderColor: line, timeVisible: true, secondsVisible: false },
-        });
-        tvChart._series = tvChart.addCandlestickSeries({ upColor: '#3ddc97', downColor: '#ff6b6b', borderVisible: false, wickUpColor: '#3ddc97', wickDownColor: '#ff6b6b' });
-        new ResizeObserver(() => tvChart?.applyOptions({ width: box.clientWidth })).observe(box);
-      }
-      tvChart._series.setData(rows);
-      tvChart.timeScale().fitContent();
-    };
-    onTabs('tf', (tf) => { loadTf(tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
-    await loadTf('15m');
+    const fitBtn = $('tvfit');
+    if (fitBtn) fitBtn.onclick = () => tokenChart?.fit?.();
+    onTabs('tf', (tf) => { openTokenChart(id, demo, tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
+    await openTokenChart(id, demo, '15m');
     if (show && $('swappane')) mountSwap(d, id);
     clearInterval(tokenTimer);
     tokenTimer = setInterval(async () => {
@@ -1619,7 +2112,7 @@ function feePartsView(t) {
 async function render() {
   const [, type, id] = location.pathname.split('/');
   feed?.close(); feed = null; clearInterval(ticker); clearInterval(exploreTimer); clearInterval(tokenTimer); exploreTimer = null; tokenTimer = null;
-  tvChart?.remove(); tvChart = null; unmountGlobe();
+  unmountPriceChart(); unmountTokenChart(); unmountGlobe();
   const onEx = type === 'explore' || type === 'token' || type === 'collection';
   for (const a of document.querySelectorAll('#menu nav a, a.explore')) {
     const href = a.getAttribute('href');
@@ -1632,7 +2125,7 @@ async function render() {
   try {
     await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms', 'economics', 'halving', 'orphans', 'receipts', 'contracts'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
-    app.innerHTML = `<div class="card"><h2>Not found</h2><p class="muted">${esc(e.message)}</p></div>`;
+    app.innerHTML = `<div class="card"><h2>${e.status === 404 ? 'Not found' : 'Unavailable'}</h2><p class="muted">${esc(e.message)}</p></div>`;
   }
 }
 const go = (href) => { history.pushState(null, '', href); render(); };
@@ -1643,6 +2136,8 @@ const setTheme = (t) => {
   try { localStorage.setItem('theme', t); } catch {}
   $('theme').textContent = t === 'light' ? '☾  Dark mode' : '☀  Light mode';
   if (globe) globeColors();
+  pxChart?.applyTheme?.();
+  tokenChart?.applyTheme?.();
 };
 setTheme((() => { try { return localStorage.getItem('theme'); } catch {} })() || 'dark');
 $('theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');

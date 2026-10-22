@@ -81,6 +81,8 @@ test('indexer + api', async (t) => {
   const labelFile = path.join(os.tmpdir(), `noid-labels-${process.pid}.json`);
   fs.writeFileSync(labelFile, JSON.stringify({ o1whalewhale: { entity: 'Test Whale', note: 'fixture' } }));
   process.env.LABELS_FILE = labelFile;
+  // Candle and watchlist checks add requests on top of the indexer suite.
+  process.env.RATE_LIMIT = '1000';
   const { server, tick, db, compressJson, packStats, issuance } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
   const get = async (p, opt = {}) => {
@@ -388,6 +390,32 @@ test('indexer + api', async (t) => {
   node.getBlockHeader = realHeader; holes.clear();
   // Big grouped queries keep temp data in memory (the service's /tmp is read-only).
   assert.strictEqual(db.prepare('pragma temp_store').get().temp_store, 2);
+  // Supply reads through the ts index. A GROUP BY temp b-tree is what fails with "disk I/O error"
+  // when /tmp, /var/tmp and the cwd are read-only.
+  const plan = db.prepare(`explain query plan select ts, cast(json_extract(data, '$.circulating_supply_micronoid') as real) supply from stats where ts >= 0 order by ts`).all().map((r) => r.detail).join('\n');
+  assert.match(plan, /USING INDEX stats_ts/);
+  assert.doesNotMatch(plan, /TEMP B-TREE/);
+  // Fake headers are stamped in 2023, so recent windows only see rows we place near Date.now().
+  const supplyNow = Math.floor(Date.now() / 1000);
+  const old = supplyNow - 10 * 86400;
+  db.exec('begin');
+  const insStat = db.prepare('insert into stats (height, ts, data, hash) values (?, ?, ?, ?)');
+  for (let i = 0; i < 48; i++) insStat.run(5_000_000 + i, old + i * 3600, JSON.stringify({ circulating_supply_micronoid: 5000 + i }), `sup${i}`);
+  for (let i = 0; i < 6; i++) insStat.run(6_000_000 + i, supplyNow - 3000 + i * 300, JSON.stringify({ circulating_supply_micronoid: 9000 + i }), `suph${i}`);
+  db.exec('commit');
+  const [, supAll] = await get('supply?window=all');
+  assert.strictEqual(supAll.window, 'all');
+  assert.ok(supAll.points.some((p) => p.supply === 5047), 'last old sample is the max of its bucket');
+  assert.strictEqual(supAll.points.at(-1).supply, 9005);
+  const [, sup7] = await get('supply?window=7d');
+  assert.ok(sup7.points.length >= 1 && sup7.points.every((p) => p.supply >= 9000 && p.supply <= 9005));
+  const [, sup1] = await get('supply?window=1h');
+  assert.strictEqual(sup1.window, '1h');
+  assert.strictEqual(sup1.points.at(-1).supply, 9005);
+  assert.ok(sup1.points.every((p) => p.t >= supplyNow - 3600 - 300));
+  const [hc, hb] = await get('health', { bare: true });
+  assert.strictEqual(hc, 200);
+  assert.deepStrictEqual({ ok: hb.ok, result: hb.db.result, temp: hb.temp_store }, { ok: true, result: 'ok', temp: 2 });
 
   // Icons and link-preview image are served as files; anything else falls back to the app page.
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -437,6 +465,72 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('candles?interval=bogus'))[1].interval, '1h');
   const [, ps] = await get('price?window=24h');
   assert.ok(ps.points.length >= 2 && ps.points.at(-1).usd === 0.6 && Math.abs(ps.points.at(-1).market_cap_usd - 1.2) < 1e-9);
+
+  // Full history is paged on the price_ticks primary key (no GROUP BY, no temp file).
+  const aged = T - 3 * 86400;
+  const insTick = db.prepare('insert into price_ticks (ts, usd) values (?, ?)');
+  for (let i = 0; i < 48; i++) insTick.run(aged + i * 900, 0.2 + (i % 5) * 0.01);
+  const tickPlan = db.prepare('explain query plan select ts, usd, volume_24h, supply from price_ticks where ts < ? order by ts desc limit cast(? as integer)').all(2_000_000_000, 10).map((r) => r.detail).join('\n');
+  assert.match(tickPlan, /PRIMARY KEY|COVERING INDEX/i, tickPlan);
+  assert.doesNotMatch(tickPlan, /TEMP/);
+  const [, newest] = await get('price?limit=2');
+  assert.strictEqual(newest.points.length, 2);
+  assert.strictEqual(newest.points[1].usd, 0.6);
+  assert.ok(newest.points[0].t < newest.points[1].t && newest.more && newest.oldest === newest.points[0].t);
+  let cursor = newest.oldest, pages = 0, sawDaily = false, prev = newest.points[0].t + 1;
+  while (pages++ < 20) {
+    const [, p] = await get(`price?limit=20&before=${cursor}`);
+    assert.ok(p.points.every((x) => x.t < cursor && x.t < prev), 'price pages move backward without overlap');
+    prev = p.oldest ?? 0;
+    if (p.points.some((x) => x.hi == null && x.usd < 0.4)) sawDaily = true;
+    if (!p.more) { assert.ok(p.points.length); break; }
+    assert.ok(p.oldest < cursor);
+    cursor = p.oldest;
+  }
+  assert.ok(sawDaily, 'paging reaches CoinPaprika daily closes');
+  assert.ok(pages < 40, 'price history ends');
+  const [, cpage] = await get('candles?interval=15m&limit=2');
+  assert.strictEqual(cpage.candles.length, 2);
+  assert.ok(cpage.more && cpage.candles.every((c) => c.t % 900 === 0 && c.t <= cpage.candles.at(-1).t));
+  const [, colder] = await get(`candles?interval=15m&limit=40&before=${cpage.oldest}`);
+  assert.ok(colder.candles.every((c) => c.t < cpage.oldest));
+  let b15 = null, seenT = false, seenOld = false, n15 = 0;
+  while (n15++ < 15) {
+    const [, p] = await get(`candles?interval=15m&limit=40${b15 ? `&before=${b15}` : ''}`);
+    const hit = p.candles.find((c) => c.t === T);
+    if (hit) {
+      seenT = true;
+      assert.deepStrictEqual(hit, { t: T, o: 0.5, h: 0.7, l: 0.4, c: 0.55, n: 4, approx: false });
+    }
+    if (p.candles.some((c) => c.t === aged)) seenOld = true;
+    if (!p.more) break;
+    assert.ok(p.oldest < (b15 ?? Infinity));
+    b15 = p.oldest;
+  }
+  assert.ok(seenT && seenOld, '15m pages include the known candle and older samples');
+  let wk = null, wpages = 0, mondays = [];
+  while (wpages++ < 20) {
+    const [, w] = await get(`candles?interval=1w&limit=3${wk ? `&before=${wk}` : ''}`);
+    assert.strictEqual(w.interval, '1w');
+    assert.ok(w.candles.every((c) => new Date(c.t * 1000).getUTCDay() === 1 && (!wk || c.t < wk)));
+    mondays.push(...w.candles);
+    if (!w.more) break;
+    wk = w.oldest;
+  }
+  assert.ok(mondays.length >= 2 && wpages < 20, 'weekly history is finite and aligned');
+  assert.strictEqual((await get('candles?interval=1h&before=soon'))[0], 400);
+  assert.strictEqual((await get('price?limit=lots'))[0], 400);
+  const [, capped] = await get('candles?interval=1d&limit=999999');
+  assert.ok(capped.candles.length >= 1 && capped.candles.length <= 5000);
+  const js = await fetch(base + '/lightweight-charts.js');
+  assert.strictEqual(js.status, 200);
+  assert.match(js.headers.get('content-type'), /javascript/);
+  assert.match(await js.text(), /LightweightCharts/);
+  const homeHtml = await (await fetch(base + '/')).text();
+  assert.match(homeHtml, /Watchlist/);
+  assert.match(homeHtml, /data-star/);
+  assert.match(homeHtml, /1W/);
+  assert.match(homeHtml, /tokenchart/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -507,7 +601,28 @@ test('indexer + api', async (t) => {
   const [, candles] = await get('tokens/gcat/candles?demo=1&tf=5m');
   assert.strictEqual(candles.tf, '5m');
   assert.ok(candles.candles.length > 20);
-  assert.ok(candles.candles.every((c) => BigInt(c.h) >= BigInt(c.l) && BigInt(c.h) >= BigInt(c.o) && BigInt(c.h) >= BigInt(c.c)));
+  assert.ok(candles.candles.every((c) => BigInt(c.h) >= BigInt(c.l) && BigInt(c.h) >= BigInt(c.o) && BigInt(c.h) >= BigInt(c.c) && BigInt(c.v) > 0n));
+  const [, hour] = await get('tokens/gcat/candles?demo=1&tf=1h&limit=3');
+  assert.strictEqual(hour.candles.length, 3);
+  assert.strictEqual(hour.more, true);
+  assert.ok(hour.candles.every((c) => c.t % 3600 === 0));
+  const [, hourOlder] = await get(`tokens/gcat/candles?demo=1&tf=1h&limit=3&before=${hour.oldest}`);
+  assert.ok(hourOlder.candles.length === 3 && hourOlder.candles.at(-1).t < hour.oldest);
+  const [, weeksDemo] = await get('tokens/gcat/candles?demo=1&tf=1w&limit=20');
+  assert.ok(weeksDemo.candles.length >= 8);
+  assert.ok(weeksDemo.candles.every((c) => new Date(c.t * 1000).getUTCDay() === 1));
+  const [, days] = await get('tokens/gcat/candles?demo=1&tf=1d&limit=5');
+  assert.ok(days.candles.every((c) => c.t % 86400 === 0 && BigInt(c.v) > 0n));
+  assert.strictEqual((await get('tokens/gcat/candles?demo=1&tf=1m&before=soon'))[0], 400);
+  assert.deepStrictEqual((await get('tokens?demo=1&preset=watch&ids=crown,qsun'))[1].tokens.map((t) => t.id).sort(), ['crown', 'qsun']);
+  assert.strictEqual((await get('tokens?demo=1&preset=watch'))[1].tokens.length, 0);
+  assert.strictEqual((await get('stars'))[0], 401);
+  const [, starred] = await post('stars', { id: 'gcat', on: true }, K);
+  assert.deepStrictEqual(starred.ids, ['gcat']);
+  const [, mergedStars] = await post('stars', { ids: ['gcat', 'nbus', 'not an id'] }, K);
+  assert.deepStrictEqual(mergedStars.ids.sort(), ['gcat', 'nbus']);
+  assert.deepStrictEqual((await post('stars', { id: 'gcat', on: false }, K))[1].ids, ['nbus']);
+  assert.strictEqual((await post('stars', { id: 'bad id' }, K))[0], 400);
   assert.ok((await get('tokens/gcat/trades?demo=1'))[1].trades.length >= 1);
   assert.strictEqual((await get('tokens/gcat/candles?demo=1&tf=nope'))[0], 400);
   assert.strictEqual((await get('tokens/missing/trades?demo=1'))[0], 404);
@@ -548,6 +663,43 @@ test('indexer + api', async (t) => {
   assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 1, 'the same trade is stored once');
   assert.strictEqual(db.prepare(`select n from token_candles where token_id = 'live1'`).get().n, 1, 'a trade rolls into one 1m candle, once');
   assert.strictEqual(db.prepare('select count(*) n from token_transfers').get().n, 1);
+  const minute = Math.floor(Date.now() / 1000);
+  const candleBase = minute - (minute % 300) - 600;
+  node.getAssetSnapshot = () => ({
+    tokens: [{ id: 'live1', name: 'Live Coin', ticker: 'LIVE', supply: '1000', reserve_micronoid: '1000000', created_ts: 1700000000, graduated: false, price_micronoid: '2000', curve_target_micronoid: '20000000000', curve_raised_micronoid: '1000000000', holders: [{ address: 'o1acdefghjkmnpqr', balance: '400' }, { address: 'o1qqqqqqqqqqqq', balance: '100' }] }],
+    trades: [
+      { txid: 'ohlcvtrade03', token_id: 'live1', ts: candleBase + 20, side: 'sell', token_amount: '1', noid_micronoid: '2000', price_micronoid: '1500', venue: 'curve', trader: 'o1acdefghjkmnpqr' },
+      { txid: 'ohlcvtrade01', token_id: 'live1', ts: candleBase, side: 'buy', token_amount: '1', noid_micronoid: '1000', price_micronoid: '1000', venue: 'curve', trader: 'o1acdefghjkmnpqr' },
+      { txid: 'ohlcvtrade04', token_id: 'live1', ts: candleBase + 5, side: 'sell', token_amount: '1', noid_micronoid: '100', price_micronoid: '500', venue: 'curve', trader: 'o1qqqqqqqqqqqq' },
+      { txid: 'ohlcvtrade02', token_id: 'live1', ts: candleBase + 10, side: 'buy', token_amount: '1', noid_micronoid: '5000', price_micronoid: '3000', venue: 'curve', trader: 'o1acdefghjkmnpqr' },
+      { txid: 'ohlcvtrade05', token_id: 'live1', ts: candleBase + 60, side: 'buy', token_amount: '1', noid_micronoid: '4000', price_micronoid: '2000', venue: 'curve', trader: 'o1acdefghjkmnpqr' },
+      { txid: 'ohlcvweeksun', token_id: 'live1', ts: 1703980800, side: 'buy', token_amount: '1', noid_micronoid: '100', price_micronoid: '100', venue: 'curve', trader: 'o1acdefghjkmnpqr' },
+      { txid: 'ohlcvweekmon', token_id: 'live1', ts: 1704067200, side: 'buy', token_amount: '1', noid_micronoid: '400', price_micronoid: '400', venue: 'curve', trader: 'o1acdefghjkmnpqr' },
+    ],
+  });
+  await tick();
+  const bar = db.prepare('select o, h, l, c, v, n from token_candles where token_id = ? and bucket = ?').get('live1', candleBase);
+  assert.deepStrictEqual({ ...bar }, { o: 1000, h: 3000, l: 500, c: 1500, v: 8100, n: 4 }, 'minute OHLCV follows trade time, not ingest order');
+  const [, m1] = await get('tokens/live1/candles?tf=1m&limit=50');
+  const hit = m1.candles.find((c) => c.t === candleBase);
+  assert.deepStrictEqual([hit.o, hit.h, hit.l, hit.c, hit.v, String(hit.n)], ['1000', '3000', '500', '1500', '8100', '4']);
+  const [, five] = await get(`tokens/live1/candles?tf=5m&limit=1&before=${candleBase + 300}`);
+  const rolled = five.candles.find((c) => c.t === candleBase);
+  assert.ok(rolled && rolled.o === '1000' && rolled.h === '3000' && rolled.l === '500' && rolled.c === '2000' && rolled.v === '12100');
+  const [, newestCandle] = await get('tokens/live1/candles?tf=1m&limit=1');
+  assert.strictEqual(newestCandle.candles.length, 1);
+  assert.strictEqual(newestCandle.more, true);
+  const [, olderCandle] = await get(`tokens/live1/candles?tf=1m&limit=1&before=${newestCandle.oldest}`);
+  assert.ok(olderCandle.candles.length === 1 && olderCandle.candles[0].t < newestCandle.oldest);
+  const [, weeks] = await get('tokens/live1/candles?tf=1w&limit=50');
+  assert.ok(weeks.candles.every((c) => new Date(c.t * 1000).getUTCDay() === 1), 'weekly candles start on Monday');
+  assert.ok(weeks.candles.some((c) => c.t === 1703462400) && weeks.candles.some((c) => c.t === 1704067200));
+  const candlePlan = db.prepare("explain query plan select bucket from token_candles where token_id = 'live1' and bucket < 2000000000 order by bucket desc limit 10").all().map((r) => r.detail).join(' ');
+  assert.match(candlePlan, /token_candles/);
+  assert.doesNotMatch(candlePlan, /TEMP B-TREE/);
+  const tradePlan = db.prepare("explain query plan select ts from token_trades where token_id = 'live1' and ts < 2000000000 order by ts desc limit 1").all().map((r) => r.detail).join(' ');
+  assert.match(tradePlan, /token_trades_tok_ts/);
+  assert.doesNotMatch(tradePlan, /TEMP B-TREE/);
   const [, liveTok] = await get('tokens');
   assert.strictEqual(liveTok.demo, false);
   assert.strictEqual(liveTok.tokens[0].ticker, 'LIVE');
@@ -621,6 +773,18 @@ test('indexer + api', async (t) => {
   const [, cold70] = await get('block/70');
   assert.strictEqual(cold70.archived, true);
   assert.strictEqual(cold70.retained.transactions[0].tx_hash, H('tx70'));
+
+  // db-check is read-only and refuses to rebuild a healthy file.
+  const { DatabaseSync } = require('node:sqlite');
+  const { execFileSync } = require('node:child_process');
+  const tmpDb = path.join(os.tmpdir(), `noid-check-${process.pid}.db`);
+  const tdb = new DatabaseSync(tmpDb);
+  tdb.exec('create table stats (height integer primary key, ts integer, data text not null)');
+  tdb.close();
+  const checkOut = execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/db-check.js', tmpDb], { encoding: 'utf8' });
+  assert.match(checkOut, /quick_check: ok/);
+  assert.throws(() => execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/db-check.js', '--repair', tmpDb], { encoding: 'utf8' }), (e) => e.status === 2 && /Refusing --repair/.test(e.stderr));
+  fs.rmSync(tmpDb, { force: true });
 });
 
 test('migrates a text-hash archive and backups round-trip', () => {

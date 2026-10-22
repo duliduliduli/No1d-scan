@@ -17,6 +17,11 @@ EnvironmentFile=-/etc/noid-scan.env
 ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning server.js
 Restart=always
 StateDirectory=noid-scan
+# Large sorts spill to /tmp, /var/tmp, then the working directory. ProtectSystem=strict makes
+# all three read-only ("disk I/O error"). PrivateTmp is a writable tmpfs; the process also
+# points SQLITE_TMPDIR at this state directory, which stays writable.
+Environment=SQLITE_TMPDIR=/var/lib/noid-scan
+PrivateTmp=true
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
