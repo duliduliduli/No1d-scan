@@ -544,6 +544,14 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="enhform"/);
   assert.match(homeHtml, /Profile review/);
   assert.match(homeHtml, /Sample page\. Payment is not taken/);
+  assert.match(homeHtml, /My trades/);
+  assert.match(homeHtml, /Top traders/);
+  assert.match(homeHtml, /Top holders/);
+  assert.match(homeHtml, /Copy address/);
+  assert.match(homeHtml, /id="sharebtn"/);
+  assert.match(homeHtml, />\$100/);
+  assert.match(homeHtml, />\$1k/);
+  assert.match(homeHtml, /Pair age/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -602,6 +610,17 @@ test('indexer + api', async (t) => {
   assert.strictEqual(tok.demo, true);
   assert.strictEqual(tok.token.venue, 'pool');
   assert.ok(tok.chart.length >= 2 && tok.trades.length >= 1 && tok.holders.length >= 1);
+  assert.ok(tok.trades.every((t) => t.txid && t.trader && typeof t.usd === 'number'));
+  const [, traders] = await get('tokens/gcat/traders?demo=1');
+  assert.strictEqual(traders.label, 'Indexed trades');
+  assert.ok(traders.traders.length >= 1 && traders.traders[0].txns >= 1 && traders.traders[0].volume_micronoid);
+  const [, wal] = await get('wallet/o1acdefghjkmnpqr?demo=1&token=gcat');
+  assert.ok(wal.holdings.some((h) => h.token_id === 'gcat'));
+  assert.ok(wal.trades.length >= 1 && wal.trades.every((t) => t.trader === 'o1acdefghjkmnpqr' && t.token_id === 'gcat'));
+  assert.strictEqual(wal.pnl.buys + wal.pnl.sells, wal.pnl.txns);
+  assert.strictEqual(wal.activity.txns, wal.pnl.txns);
+  assert.ok(wal.pnl.txns >= wal.trades.length);
+  assert.strictEqual((await get('wallet/not-an-address?demo=1'))[0], 400);
   assert.strictEqual((await get('token/gcat'))[0], 404);
   const [, screen] = await get('tokens/gcat?demo=1');
   assert.strictEqual(screen.token.launch, 'launchpad');
@@ -715,6 +734,9 @@ test('indexer + api', async (t) => {
   const tradePlan = db.prepare("explain query plan select ts from token_trades where token_id = 'live1' and ts < 2000000000 order by ts desc limit 1").all().map((r) => r.detail).join(' ');
   assert.match(tradePlan, /token_trades_tok_ts/);
   assert.doesNotMatch(tradePlan, /TEMP B-TREE/);
+  const traderPlan = db.prepare("explain query plan select ts from token_trades where trader = 'o1acdefghjkmnpqr' order by ts desc limit 10").all().map((r) => r.detail).join(' ');
+  assert.match(traderPlan, /token_trades_trader/);
+  assert.doesNotMatch(traderPlan, /TEMP B-TREE/);
   const [, liveTok] = await get('tokens');
   assert.strictEqual(liveTok.demo, false);
   assert.strictEqual(liveTok.tokens[0].ticker, 'LIVE');
@@ -881,6 +903,10 @@ test('indexer + api', async (t) => {
   await tick();
   assert.strictEqual((await get('tokens/live1/book?window=5m'))[1].source, 'reserves');
   delete process.env.ASSET_PROBE_MS;
+  const [, liveWal] = await get('wallet/o1acdefghjkmnpqr?token=live1');
+  assert.strictEqual(liveWal.demo, false);
+  assert.ok(liveWal.holdings.some((h) => h.token_id === 'live1' && h.balance === '400'));
+  assert.ok(liveWal.trades.length >= 1 && liveWal.pnl.txns >= 1);
 
   // USDC: off until the address is set. An exact base-unit amount marks the profile pending and does not add credits.
   const { solanaCredits } = require('./usdc.js');

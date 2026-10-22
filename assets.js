@@ -56,8 +56,10 @@ module.exports = function assets(db, rpc, priceNow) {
       side text not null, token_amount text not null, noid_micronoid text not null,
       trader text, venue text, price_micronoid text);
     create index if not exists token_trades_tok_ts on token_trades(token_id, ts);
+    create index if not exists token_trades_trader on token_trades(trader, ts);
     create table if not exists token_holders (
       token_id text not null, address text not null, balance text not null, primary key (token_id, address));
+    create index if not exists token_holders_addr on token_holders(address);
     create table if not exists nft_collections (
       id text primary key, name text not null, creator text, items integer not null default 0,
       owners integer not null default 0, floor_micronoid text, volume_micronoid text not null default '0',
@@ -90,8 +92,11 @@ module.exports = function assets(db, rpc, priceNow) {
     token: db.prepare('select * from tokens where id = ?'),
     poolsFor: db.prepare('select * from pools where token_id = ?'),
     tradesFor: db.prepare('select * from token_trades where token_id = ? order by ts desc limit 400'),
+    // (trader, ts) covers the wallet scan. Sort stays in the index order.
+    tradesByTrader: db.prepare('select * from token_trades where trader = ? order by ts desc limit 400'),
     // Sort in JS. ORDER BY cast(balance) cannot use (token_id, address) and asks SQLite for a temp b-tree.
     holdersFor: db.prepare('select address, balance from token_holders where token_id = ?'),
+    holdersByAddr: db.prepare('select token_id, balance from token_holders where address = ?'),
     holderCount: db.prepare('select count(*) n from token_holders where token_id = ?'),
     candlesBefore: db.prepare('select bucket t, o, h, l, c, v, n from token_candles where token_id = ? and bucket < ? order by bucket desc limit cast(? as integer)'),
     candleOlder: db.prepare('select 1 x from token_candles where token_id = ? and bucket < ? limit 1'),
@@ -131,7 +136,9 @@ module.exports = function assets(db, rpc, priceNow) {
   const isDemo = (params) => params.get('demo') === '1' || process.env.TOKENS_DEMO === '1';
   const noidUsd = () => {
     const p = priceNow();
-    return p?.usd > 0 ? p.usd : null;
+    if (p?.usd > 0) return p.usd;
+    const pin = Number(process.env.USD_PER_NOID);
+    return pin > 0 ? pin : null;
   };
   const usdOf = (micro, usd) => {
     if (micro == null || usd == null) return null;
@@ -213,7 +220,7 @@ module.exports = function assets(db, rpc, priceNow) {
       let ntr = 0;
       const push = (ts, price, noid, side) => trades.push({
         txid: `${s.id}-${ts}-${side}`, token_id: s.id, ts, height: 236000 + s.age_h, side,
-        token_amount: price > 0n ? (noid / price).toString() : '1',
+        token_amount: price > 0n ? ((noid / price) || 1n).toString() : '1',
         noid_micronoid: noid.toString(), price_micronoid: price.toString(), trader: makers[ntr++ % makers.length], venue: s.graduated ? 'pool' : 'curve',
       });
       push(now - 86400 - 90, s.p24, 1n, 'buy'); // baseline just outside the 24h window
@@ -482,11 +489,11 @@ module.exports = function assets(db, rpc, priceNow) {
     if (demo) {
       const src = demoCatalog(now).tokens.find((t) => t.id === id);
       chartTrades = indexTrades(src.trades).get(id) || [];
-      trades = [...chartTrades].reverse().filter((t) => bi(t.token_amount) > 0n).slice(0, 40).map(publicTrade);
+      trades = [...chartTrades].reverse().filter((t) => bi(t.token_amount) > 0n).slice(0, 80).map(publicTrade);
       holders = src.holders.map((h) => ({ ...h, share: row.supply !== '0' ? Number(BigInt(h.balance) * 10000n / BigInt(row.supply)) / 100 : null }));
     } else {
       chartTrades = q.tradesFor.all(id).map((t) => ({ ...t, ts: Number(t.ts), price: bi(t.price_micronoid), noid: bi(t.noid_micronoid) || 0n })).reverse();
-      trades = q.tradesFor.all(id).slice(0, 40).map(publicTrade);
+      trades = q.tradesFor.all(id).slice(0, 80).map(publicTrade);
       const supply = bi(row.supply) || 0n;
       holders = q.holdersFor.all(id)
         .sort((a, b) => (bi(b.balance) > bi(a.balance) ? 1 : bi(b.balance) < bi(a.balance) ? -1 : 0))
@@ -622,9 +629,94 @@ module.exports = function assets(db, rpc, priceNow) {
     const now = Math.floor(Date.now() / 1000);
     if (!findPresented(id, demo, now)) return null;
     const trades = demo
-      ? [...(indexTrades(demoCatalog(now).tokens.find((t) => t.id === id).trades).get(id) || [])].reverse().slice(0, 40).map(publicTrade)
-      : q.tradesFor.all(id).slice(0, 40).map(publicTrade);
+      ? [...(indexTrades(demoCatalog(now).tokens.find((t) => t.id === id).trades).get(id) || [])].reverse().slice(0, 200).map(publicTrade)
+      : q.tradesFor.all(id).slice(0, 200).map(publicTrade);
     return { demo, trades };
+  }
+  // shortcut: top traders and wallet PnL use the newest 400 indexed fills, not the wallet's full history.
+  function pnlOf(trades, priceMicro, usd) {
+    let boughtNoid = 0n, soldNoid = 0n, boughtTok = 0n, soldTok = 0n, buys = 0, sells = 0, first = null, last = null;
+    for (const t of trades) {
+      const noid = bi(t.noid_micronoid) || bi(t.noid) || 0n;
+      const tok = bi(t.token_amount) || 0n;
+      if (t.side === 'sell') { sells++; soldNoid += noid; soldTok += tok; }
+      else { buys++; boughtNoid += noid; boughtTok += tok; }
+      const ts = Number(t.ts);
+      if (first == null || ts < first) first = ts;
+      if (last == null || ts > last) last = ts;
+    }
+    const remain = boughtTok - soldTok;
+    const bag = remain > 0n && priceMicro != null ? remain * priceMicro : 0n;
+    const pnl = soldNoid - boughtNoid + bag;
+    return {
+      buys, sells, txns: buys + sells, first_ts: first, last_ts: last,
+      bought_noid_micronoid: boughtNoid.toString(), sold_noid_micronoid: soldNoid.toString(),
+      bought_token: boughtTok.toString(), sold_token: soldTok.toString(), remaining_token: remain.toString(),
+      pnl_micronoid: pnl.toString(), pnl_usd: usdOf(pnl < 0n ? -pnl : pnl, usd) == null ? null : (pnl < 0n ? -usdOf(-pnl, usd) : usdOf(pnl, usd)),
+    };
+  }
+  function tradersView(id, params) {
+    checkId(id);
+    const demo = isDemo(params);
+    const now = Math.floor(Date.now() / 1000);
+    const row = findPresented(id, demo, now);
+    if (!row) return null;
+    const trades = demo
+      ? (indexTrades(demoCatalog(now).tokens.find((t) => t.id === id).trades).get(id) || [])
+      : q.tradesFor.all(id);
+    const by = new Map();
+    for (const t of trades) {
+      if (!t.trader) continue;
+      const g = by.get(t.trader) || [];
+      g.push(t);
+      by.set(t.trader, g);
+    }
+    const price = bi(row.price_micronoid);
+    const usd = noidUsd();
+    const traders = [...by.entries()].map(([address, list]) => {
+      const vol = list.reduce((s, t) => s + (bi(t.noid_micronoid) || bi(t.noid) || 0n), 0n);
+      return { address, ...pnlOf(list, price, usd), volume_micronoid: vol.toString(), volume_usd: usdOf(vol, usd) };
+    });
+    traders.sort((a, b) => (BigInt(b.volume_micronoid) > BigInt(a.volume_micronoid) ? 1 : BigInt(b.volume_micronoid) < BigInt(a.volume_micronoid) ? -1 : 0));
+    return { demo, token_id: id, label: 'Indexed trades', traders: traders.slice(0, 20) };
+  }
+  function walletView(address, params) {
+    if (!ADDR.test(address || '')) throw bad('expected an address');
+    const demo = isDemo(params);
+    const focus = params.get('token') || '';
+    if (focus && !ID.test(focus)) throw bad('expected a token id');
+    const now = Math.floor(Date.now() / 1000);
+    const usd = noidUsd();
+    let holdings, trades;
+    if (demo) {
+      holdings = [];
+      trades = [];
+      for (const t of demoCatalog(now).tokens) {
+        const h = t.holders.find((x) => x.address === address);
+        if (h) holdings.push({ token_id: t.id, name: t.name, ticker: t.ticker, balance: String(h.balance), price_micronoid: t.price_micronoid.toString() });
+        for (const tr of t.trades) if (tr.trader === address) trades.push(tr);
+      }
+      trades.sort((a, b) => b.ts - a.ts);
+    } else {
+      holdings = q.holdersByAddr.all(address).map((h) => {
+        const t = q.token.get(h.token_id);
+        return { token_id: h.token_id, name: t?.name || h.token_id, ticker: t?.ticker || '', balance: h.balance, price_micronoid: t?.price_micronoid || null };
+      });
+      trades = q.tradesByTrader.all(address);
+    }
+    holdings.sort((a, b) => ((bi(b.balance) || 0n) > (bi(a.balance) || 0n) ? 1 : -1));
+    const focused = focus ? trades.filter((t) => t.token_id === focus) : trades;
+    const presented = focus ? findPresented(focus, demo, now) : null;
+    const pnl = pnlOf(focused, presented ? bi(presented.price_micronoid) : null, usd);
+    return {
+      demo, address, token_id: focus || null,
+      holdings: holdings.map((h) => {
+        const value = bi(h.price_micronoid) == null ? null : (bi(h.balance) || 0n) * bi(h.price_micronoid);
+        return { token_id: h.token_id, name: h.name, ticker: h.ticker, balance: String(h.balance), value_micronoid: value == null ? null : value.toString(), value_usd: usdOf(value, usd) };
+      }),
+      trades: focused.slice(0, 80).map(publicTrade),
+      pnl, activity: { txns: pnl.txns, buys: pnl.buys, sells: pnl.sells, first_ts: pnl.first_ts, last_ts: pnl.last_ts },
+    };
   }
   function holderView(id, params) {
     const detail = tokenDetail(id, params);
@@ -651,9 +743,11 @@ module.exports = function assets(db, rpc, priceNow) {
   }
 
   function publicTrade(t) {
+    const noid = t.noid_micronoid == null ? (t.noid?.toString() ?? null) : String(t.noid_micronoid);
     return {
-      txid: t.txid, ts: Number(t.ts), side: t.side, token_amount: String(t.token_amount),
-      noid_micronoid: String(t.noid_micronoid), price_micronoid: t.price_micronoid == null ? (t.price?.toString() ?? null) : String(t.price_micronoid),
+      txid: t.txid, ts: Number(t.ts), side: t.side, token_id: t.token_id || null, token_amount: String(t.token_amount),
+      noid_micronoid: noid, usd: usdOf(bi(noid), noidUsd()),
+      price_micronoid: t.price_micronoid == null ? (t.price?.toString() ?? null) : String(t.price_micronoid),
       trader: t.trader || null, venue: t.venue || null, height: t.height ?? null,
     };
   }
@@ -1097,6 +1191,7 @@ module.exports = function assets(db, rpc, priceNow) {
     tokens: (id, params, sub) => {
       if (sub === 'candles') return candleView(id, params);
       if (sub === 'trades') return tradeView(id, params);
+      if (sub === 'traders') return tradersView(id, params);
       if (sub === 'holders') return holderView(id, params);
       if (sub === 'transfers') return transferView(id, params);
       if (sub === 'book') return bookView(id, params);
@@ -1104,6 +1199,7 @@ module.exports = function assets(db, rpc, priceNow) {
       return id ? tokenDetail(id, params) : listTokens(params);
     },
     token: (id, params) => tokenDetail(id, params),
+    wallet: (address, params) => walletView(address, params),
     collections: (_id, params) => listCollections(params),
     collection: (id, params) => collectionDetail(id, params),
     swap,

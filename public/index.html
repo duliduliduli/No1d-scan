@@ -153,6 +153,13 @@
   button.star.on { color:var(--gold); border-color:var(--gold) }
   .mcard .px button.star { margin:0 0 4px; display:inline-block }
   .tape td.side { font-weight:700 }
+  .statrow { display:grid; grid-template-columns:repeat(auto-fit, minmax(108px, 1fr)); gap:8px; margin-top:12px }
+  .statrow .stat b { display:block; font-size:14px }
+  .statrow .stat b small, .statrow .stat small.muted { display:block; font-weight:400 }
+  .txfilters { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 8px }
+  .txfilters input, .txfilters select { flex:1 1 88px; min-width:0; max-width:150px; width:auto; padding:7px 8px }
+  .txfilters .mine { flex:none; display:flex; gap:6px; align-items:center; font:12px var(--mono); color:var(--muted); text-transform:none; letter-spacing:0 }
+  .txfilters input[type="checkbox"] { flex:none; width:auto; max-width:none; padding:0 }
   .swap .fine { color:var(--muted); font:12px/1.5 var(--mono); margin:10px 0 0 } .swap .kvl { margin-top:12px }
   .swap input { width:100%; box-sizing:border-box; margin-top:6px }
   .swap .kvl b { font:700 15px var(--mono); color:var(--fg) }
@@ -1615,6 +1622,43 @@ async function openTokenChart(id, demo, tf) {
     },
   };
 }
+function walletHref(addr, tokenId, demo) {
+  const q = new URLSearchParams();
+  if (demo) q.set('demo', '1');
+  if (tokenId) q.set('token', tokenId);
+  const s = q.toString();
+  return `/wallet/${encodeURIComponent(addr)}${s ? '?' + s : ''}`;
+}
+function tradeTable(trades, demo, tokenId) {
+  if (!trades?.length) return '<p class="muted">No trades match.</p>';
+  const rows = trades.slice(0, 80).map((tr) => `<tr>
+    <td>${esc(ago(tr.ts))}</td>
+    <td class="side ${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td>
+    <td>${tr.usd == null ? '<span class="muted">–</span>' : esc(money(tr.usd, tr.usd < 1 ? 4 : 2))}</td>
+    <td class="num">${esc(Number(tr.token_amount).toLocaleString())}</td>
+    <td>${esc(fmtNoid(tr.noid_micronoid))}</td>
+    <td>${esc(fmtNoid(tr.price_micronoid))}</td>
+    <td>${tr.trader ? `<a class="mono" href="${walletHref(tr.trader, tokenId || tr.token_id, demo)}" data-link>${esc(short(tr.trader))}</a>` : '<span class="muted">–</span>'}</td>
+    <td>${tr.txid ? `<a href="/tx/${encodeURIComponent(tr.txid)}" data-link>tx</a>` : '<span class="muted">–</span>'}</td>
+  </tr>`).join('');
+  return `<div class="scroller"><table class="list tape"><tr><th>Age</th><th>Type</th><th>USD</th><th>Token</th><th>NOID</th><th>Price</th><th>Maker</th><th>Tx</th></tr>${rows}</table></div>`;
+}
+function statHead(t) {
+  const cell = (k, v) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`;
+  return `<div class="statrow">
+    ${cell('5m', chgHtml(t.change['5m']))}
+    ${cell('1h', chgHtml(t.change['1h']))}
+    ${cell('6h', chgHtml(t.change['6h']))}
+    ${cell('24h', chgHtml(t.change['24h']))}
+    ${cell('Txns', `${n0(t.txns)} <small class="muted">${n0(t.buys)} / ${n0(t.sells)}</small>`)}
+    ${cell('Volume', `${esc(fmtNoid(t.volume_micronoid))}${t.volume_usd == null ? '' : `<small class="muted">${esc(money(t.volume_usd, 0))}</small>`}`)}
+    ${cell('Makers', n0(t.makers))}
+    ${cell('Liquidity', esc(fmtNoid(t.liquidity_micronoid)))}
+    ${cell('FDV', esc(fmtNoid(t.fdv_micronoid)))}
+    ${cell('Mkt cap', esc(fmtNoid(t.mcap_micronoid)))}
+    ${cell('Pair age', esc(ageLabel(t)))}
+  </div>`;
+}
 const pages = {
   async home() {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
@@ -2071,7 +2115,6 @@ const pages = {
     const d = await api(`tokens/${encodeURIComponent(id)}${q}`);
     const t = d.token;
     const tradeOn = !!(d.demo || d.swap?.live);
-    const share = location.origin + location.pathname + location.search;
     const e = t.enhanced;
     const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
     const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
@@ -2081,14 +2124,14 @@ const pages = {
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
       <p><a href="${demoHref('/explore')}" data-link>← Tokens</a>
         ${starBtn(t.id, t.name)}
-        <button type="button" class="copy" data-copy="${esc(share)}" aria-label="Copy link to this token">Copy link</button>
-        <button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy token id">Copy token id</button></p>
+        <button type="button" id="sharebtn">Share</button>
+        <button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy address">Copy address</button></p>
       <div class="split pair"><div>
         <div class="card"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${enhBadge(t)} ${launchHtml(t)}</h2>
           ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
           ${links ? `<p class="enhlinks">${links}</p>` : ''}
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
-          <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div>
+          ${statHead(t)}
         </div></div></div>
         <div class="bookrow">
         <div class="card"><h2>Price <small>NOID per token</small></h2>
@@ -2096,8 +2139,22 @@ const pages = {
           <div id="tv"><p class="muted">Loading chart…</p></div></div>
         <div class="card book" id="book"><h2>Book <small id="booksrc">Open orders or derived from pool reserves</small></h2><div id="bookbody"><p class="muted">Loading book…</p></div></div>
         </div>
-        <div class="card"><h2>Trades <small class="muted">auto-refresh 5s</small></h2><div id="tape"></div></div>
-        <div class="card"><h2>Holders <small class="muted">${n0(t.holders_n)} · top 10 hold ${esc(t.top10_pct)}%</small></h2>${d.holders.length ? `<div class="bars">${d.holders.map((h) => `<a class="bar" href="/address/${encodeURIComponent(h.address)}" data-link><span class="name">${esc(h.address)}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Top holders are not published for this token yet.</p>'}</div>
+        <div class="card" id="feedcard"><h2>Transactions <small class="muted">auto-refresh 5s</small></h2>
+          <div class="tfs" data-tabs="feed"><button type="button" data-v="tx" class="on">Txns</button><button type="button" data-v="traders">Top traders</button><button type="button" data-v="holders">Top holders <span class="muted">${n0(t.holders_n)}</span></button></div>
+          <div class="txfilters" id="txfilters">
+            <button type="button" data-preset="100">>$100</button>
+            <button type="button" data-preset="1000">>$1k</button>
+            <input id="txmin" inputmode="decimal" placeholder="Min USD" aria-label="Minimum USD">
+            <input id="txmax" inputmode="decimal" placeholder="Max USD" aria-label="Maximum USD">
+            <select id="txtype" aria-label="Buy or sell"><option value="">All</option><option value="buy">Buy</option><option value="sell">Sell</option></select>
+            <input id="txmaker" placeholder="Maker" aria-label="Maker" autocomplete="off">
+            <label class="mine" id="mytrades"><input type="checkbox" id="txmine"> My trades</label>
+            <input id="txwallet" placeholder="Your wallet" aria-label="Your wallet" autocomplete="off" hidden>
+          </div>
+          <div id="tape"></div>
+          <div id="traderspane" hidden></div>
+          <div id="holderspane" hidden></div>
+        </div>
       </div><div class="sidecol">
         ${tradeOn ? '<div id="swappane"></div>' : tradeLocked(d.swap)}
         ${e ? '' : enhanceCard(d, demo)}
@@ -2120,14 +2177,88 @@ const pages = {
         ${!t.graduated && t.curve ? `<p>Launchpad curve. ${curveHtml(t)} Graduation target ${esc(fmtNoid(t.curve.target_micronoid))}.</p>` : ''}
         </div>
       </div></div>`;
-    growBars();
+    const txf = { preset: '', min: '', max: '', side: '', maker: '', mine: false };
+    const holderHtml = (holders, n, top) => holders?.length
+      ? `<p class="muted">${n0(n)} holders · top 10 hold ${esc(top)}%</p><div class="bars">${holders.map((h) => `<a class="bar" href="${walletHref(h.address, id, demo)}" data-link><span class="name">${esc(short(h.address))}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>`
+      : '<p class="muted">Top holders are not published for this token yet.</p>';
+    $('holderspane').innerHTML = holderHtml(d.holders, t.holders_n, t.top10_pct);
+    const passTrade = (tr) => {
+      if (txf.side && tr.side !== txf.side) return false;
+      const usd = tr.usd;
+      if (txf.preset) { if (usd == null || usd <= Number(txf.preset)) return false; }
+      else {
+        if (txf.min !== '' && (usd == null || usd < Number(txf.min))) return false;
+        if (txf.max !== '' && (usd == null || usd > Number(txf.max))) return false;
+      }
+      const mine = txf.mine ? ($('txwallet')?.value || '').trim() : '';
+      const maker = (mine || txf.maker).trim().toLowerCase();
+      if (txf.mine && !mine) return false;
+      if (maker && !(tr.trader || '').toLowerCase().includes(maker)) return false;
+      return true;
+    };
     const paintTape = (trades) => {
       const el = $('tape');
       if (!el) return;
-      el.innerHTML = trades.length ? `<div class="scroller"><table class="list tape"><tr><th>Age</th><th>Side</th><th>Tokens</th><th>NOID</th><th>Price</th><th>Maker</th></tr>
-        ${trades.map((tr) => `<tr><td>${esc(ago(tr.ts))}</td><td class="side ${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td><td>${esc(Number(tr.token_amount).toLocaleString())}</td><td>${esc(fmtNoid(tr.noid_micronoid))}</td><td>${esc(fmtNoid(tr.price_micronoid))}</td><td>${tr.trader ? link('address', tr.trader, short(tr.trader)) : '<span class="muted">–</span>'}</td></tr>`).join('')}</table></div>` : '<p class="muted">No trades captured yet.</p>';
+      if (txf.mine && !($('txwallet')?.value || '').trim()) { el.innerHTML = '<p class="muted">Add the wallet you trade from, then My trades can filter to it.</p>'; return; }
+      el.innerHTML = tradeTable((trades || []).filter(passTrade), demo, id);
     };
     paintTape(d.trades);
+    if (!myKey()) $('mytrades')?.remove();
+    else {
+      $('txwallet').hidden = false;
+      $('txwallet').value = localStorage.getItem('noid_wallet') || '';
+    }
+    $('sharebtn').onclick = async () => {
+      const url = location.href;
+      try { if (navigator.share) { await navigator.share({ title: t.name, url }); return; } } catch (e) { if (e?.name === 'AbortError') return; }
+      try { await navigator.clipboard.writeText(url); $('sharebtn').textContent = 'Link copied'; } catch { $('sharebtn').textContent = 'Copy the address bar'; }
+    };
+    const filters = $('txfilters');
+    filters.onclick = (e) => {
+      const b = e.target.closest('button[data-preset]');
+      if (!b) return;
+      txf.preset = txf.preset === b.dataset.preset ? '' : b.dataset.preset;
+      if (txf.preset) { txf.min = ''; txf.max = ''; $('txmin').value = ''; $('txmax').value = ''; }
+      filters.querySelectorAll('button[data-preset]').forEach((x) => x.classList.toggle('on', x.dataset.preset === txf.preset));
+      paintTape(d.trades);
+    };
+    const watch = (el, fn) => el.addEventListener('input', () => { fn(); paintTape(d.trades); });
+    watch($('txmin'), () => { txf.min = $('txmin').value.trim(); txf.preset = ''; filters.querySelectorAll('button[data-preset]').forEach((x) => x.classList.remove('on')); });
+    watch($('txmax'), () => { txf.max = $('txmax').value.trim(); txf.preset = ''; filters.querySelectorAll('button[data-preset]').forEach((x) => x.classList.remove('on')); });
+    $('txtype').onchange = () => { txf.side = $('txtype').value; paintTape(d.trades); };
+    watch($('txmaker'), () => { txf.maker = $('txmaker').value.trim(); });
+    $('txmine')?.addEventListener('change', () => { txf.mine = $('txmine').checked; paintTape(d.trades); });
+    $('txwallet')?.addEventListener('input', () => { try { localStorage.setItem('noid_wallet', $('txwallet').value.trim()); } catch {} paintTape(d.trades); });
+    let feedTab = 'tx';
+    const showFeed = (v) => {
+      feedTab = v;
+      $('tape').hidden = v !== 'tx';
+      $('txfilters').hidden = v !== 'tx';
+      $('traderspane').hidden = v !== 'traders';
+      $('holderspane').hidden = v !== 'holders';
+      if (v === 'holders') growBars();
+    };
+    onTabs('feed', (v) => { showFeed(v); if (v === 'traders') paintTraders().catch(() => {}); });
+    const paintTraders = async () => {
+      const el = $('traderspane');
+      if (!el) return;
+      const b = await api(`tokens/${encodeURIComponent(id)}/traders${q}`);
+      const rows = (b.traders || []).map((r) => `<tr>
+        <td><a class="mono" href="${walletHref(r.address, id, demo)}" data-link>${esc(short(r.address))}</a></td>
+        <td class="${(r.pnl_usd || 0) < 0 ? 'down' : 'up'}">${r.pnl_usd == null ? '–' : esc(money(r.pnl_usd, 0))}</td>
+        <td>${esc(fmtNoid(r.volume_micronoid))}</td>
+        <td class="num">${n0(r.buys)}</td>
+        <td class="num">${n0(r.sells)}</td>
+      </tr>`).join('');
+      el.innerHTML = `<p class="muted">${esc(b.label || 'Indexed trades')}. Newest fills only.</p>` + (rows ? `<div class="scroller"><table class="list tape"><tr><th>Maker</th><th>PnL</th><th>Volume</th><th>Buys</th><th>Sells</th></tr>${rows}</table></div>` : '<p class="muted">No traders in the indexed fills.</p>');
+    };
+    const paintHolders = async () => {
+      const h = await api(`tokens/${encodeURIComponent(id)}/holders${q}`);
+      if (!$('holderspane')) return;
+      $('holderspane').innerHTML = holderHtml(h.holders, h.holders_n, h.top10_pct);
+      if (feedTab === 'holders') growBars();
+    };
+    growBars();
     const fitBtn = $('tvfit');
     if (fitBtn) fitBtn.onclick = () => tokenChart?.fit?.();
     onTabs('tf', (tf) => { openTokenChart(id, demo, tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
@@ -2159,9 +2290,41 @@ const pages = {
     clearInterval(tokenTimer);
     tokenTimer = setInterval(async () => {
       if (document.hidden || !$('tape')) return;
-      try { paintTape((await api(`tokens/${encodeURIComponent(id)}/trades${q}`)).trades || []); } catch {}
+      try { const trades = (await api(`tokens/${encodeURIComponent(id)}/trades${q}`)).trades || []; d.trades = trades; paintTape(trades); } catch {}
+      if (feedTab === 'traders') paintTraders().catch(() => {});
+      if (feedTab === 'holders') paintHolders().catch(() => {});
       paintBook().catch(() => {});
     }, 5_000);
+  },
+  async wallet(id) {
+    const params = new URLSearchParams(location.search);
+    const demo = params.get('demo') === '1';
+    const token = params.get('token') || '';
+    const qs = new URLSearchParams();
+    if (demo) qs.set('demo', '1');
+    if (token) qs.set('token', token);
+    const w = await api(`wallet/${encodeURIComponent(id)}?${qs}`);
+    const pnl = w.pnl || {};
+    const pnlUsd = pnl.pnl_usd == null ? '–' : money(pnl.pnl_usd, 2);
+    const back = token
+      ? `<a href="${demoHref('/token/' + encodeURIComponent(token))}" data-link>← Token</a>`
+      : `<a href="${demoHref('/explore')}" data-link>← Tokens</a>`;
+    app.innerHTML = `${w.demo ? '<p class="demo-banner">Sample wallet for layout preview. Not on chain.</p>' : ''}
+      <p>${back}</p>
+      <div class="card"><h2>Wallet <small>${esc(short(w.address))}</small></h2>
+        <p class="mono">${esc(w.address)}${copyBtn(w.address)} · <a href="/address/${encodeURIComponent(w.address)}" data-link>NOID address</a></p>
+        <div class="grid">
+          <div class="stat"><small>PnL${token ? ` · ${esc(token)}` : ''}</small><b class="${(pnl.pnl_usd || 0) < 0 ? 'down' : 'up'}">${esc(pnlUsd)}</b></div>
+          <div class="stat"><small>Buys / sells</small><b>${n0(w.activity?.buys)} / ${n0(w.activity?.sells)}</b></div>
+          <div class="stat"><small>Remaining</small><b>${n0(pnl.remaining_token)}</b></div>
+          <div class="stat"><small>Last trade</small><b>${esc(pnl.last_ts ? ago(pnl.last_ts) : '–')}</b></div>
+        </div>
+        <p class="muted">PnL is NOID from sells, minus NOID spent on buys, plus the remaining tokens at the current price. It uses the newest indexed trades.</p>
+      </div>
+      <div class="card"><h2>Holdings</h2>${w.holdings?.length ? `<div class="scroller"><table class="list"><tr><th>Token</th><th>Balance</th><th>Value</th></tr>
+        ${w.holdings.map((h) => `<tr><td><a href="${demoHref('/token/' + encodeURIComponent(h.token_id))}" data-link>${esc(h.ticker || h.name)}</a></td><td class="num">${n0(h.balance)}</td><td>${h.value_usd == null ? esc(fmtNoid(h.value_micronoid)) : esc(money(h.value_usd, 0))}</td></tr>`).join('')}
+        </table></div>` : '<p class="muted">No token balances in the latest holder snapshot.</p>'}</div>
+      <div class="card"><h2>Trades <small>${token ? esc(token) : 'all indexed'}</small></h2>${tradeTable(w.trades, w.demo, token || null)}</div>`;
   },
   async collection(id) {
     const demo = new URLSearchParams(location.search).get('demo') === '1';

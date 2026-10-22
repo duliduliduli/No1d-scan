@@ -1084,6 +1084,7 @@ const routes = {
   // Routes must return a promise: the handler shares in-flight calls with .finally.
   tokens: async (...a) => profiles.decorate(await assets.tokens(...a)),
   token: async (...a) => profiles.decorate(await assets.token(...a)),
+  wallet: async (id, params) => assets.wallet(id, params),
   collections: async (...a) => assets.collections(...a),
   collection: async (...a) => assets.collection(...a),
   swap: async (...a) => assets.swap(...a),
