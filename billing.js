@@ -313,11 +313,14 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
           'line_items[0][price_data][currency]': 'usd',
           'line_items[0][price_data][unit_amount]': String(usd * 100),
           'line_items[0][price_data][product_data][name]': `Enhanced profile for ${row.token_id}`,
+          'line_items[0][price_data][product_data][description]': 'Sold by Duli Media LLC',
+          'payment_intent_data[description]': 'Sold by Duli Media LLC',
+          'custom_text[after_submit][message]': 'Sold by Duli Media LLC',
           client_reference_id: acct.id,
           'metadata[kind]': 'profile',
           'metadata[profile_id]': row.id,
-          success_url: `${SITE}/token/${encodeURIComponent(row.token_id)}?enhance=paid`,
-          cancel_url: `${SITE}/token/${encodeURIComponent(row.token_id)}`,
+          success_url: `${SITE}/${body.page === 'collection' ? 'collection' : 'token'}/${encodeURIComponent(row.token_id)}?enhance=paid`,
+          cancel_url: `${SITE}/${body.page === 'collection' ? 'collection' : 'token'}/${encodeURIComponent(row.token_id)}`,
         });
         const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
           method: 'POST', body: form, signal: AbortSignal.timeout(15_000),

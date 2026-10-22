@@ -567,6 +567,17 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /aria-label="Promoted"/);
   assert.match(homeHtml, /aria-label="USDC chain"/);
   assert.match(homeHtml, /native USDC on the chain you pick/);
+  assert.match(homeHtml, /© 2026 Duli Media LLC/);
+  assert.match(homeHtml, /href="\/privacy"/);
+  assert.match(homeHtml, /Sold by Duli Media LLC/);
+  assert.match(homeHtml, /DRAFT pending legal review/);
+  assert.match(homeHtml, /is the operator of this site/);
+  const siteHead = homeHtml.slice(homeHtml.indexOf('<header>'), homeHtml.indexOf('</header>'));
+  assert.doesNotMatch(siteHead, /Duli Media LLC/);
+  const billingSrc = require('fs').readFileSync(require('path').join(__dirname, 'billing.js'), 'utf8');
+  const creditCard = billingSrc.slice(billingSrc.indexOf('async function stripeCheckout'), billingSrc.indexOf('function stripeWebhook'));
+  assert.doesNotMatch(creditCard, /Duli Media LLC/);
+  assert.match(billingSrc, /payment_intent_data\[description\]': 'Sold by Duli Media LLC'/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');

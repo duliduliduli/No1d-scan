@@ -69,6 +69,7 @@
   svg { width:100%; height:90px; display:block } polyline { fill:none; stroke:var(--accent); stroke-width:1.5; filter:drop-shadow(0 0 3px var(--accent)) }
   polygon { fill:url(#glow-fill) }
   footer { color:var(--muted); font:13px/1.6 var(--mono) }
+  footer .entity { display:block; margin-top:2px; font-size:11px }
   /* Live feed */
   .livebar { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:12px; font:12px var(--mono); color:var(--muted); letter-spacing:.06em }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:var(--glow); animation:pulse 1.6s infinite }
@@ -291,7 +292,7 @@
   </div>
 </header>
 <main id="app" aria-live="polite"></main>
-<footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them. <a href="/terms" data-link>Terms</a></footer>
+<footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them. <a href="/terms" data-link>Terms</a> · <a href="/privacy" data-link>Privacy</a><span class="entity">© 2026 Duli Media LLC</span></footer>
 <script>
 const app = document.getElementById('app');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -1056,6 +1057,7 @@ function starBtn(id, name) {
 }
 let promoIds = new Set();
 const PAID = 'Paid promotion. Not a recommendation or endorsement by NOID Scan.';
+const SOLD = 'Sold by Duli Media LLC';
 const enhBadge = (t) => t?.enhanced ? `<span class="pill enh" title="${esc(PAID)}">Enhanced</span>` : '';
 const promoBadge = () => `<span class="pill promo" title="${esc(PAID)}">Promoted</span>`;
 const paidMarks = (t) => `${enhBadge(t)}${promoIds.has(t?.id) ? promoBadge() : ''}`;
@@ -1441,7 +1443,7 @@ function enhanceCard(d, demo) {
       <p id="enhmsg" class="muted"></p>
     </form></div>`;
 }
-function wireEnhance(d, t, demo) {
+function wireEnhance(d, t, demo, page) {
   const form = document.querySelector('#enhform form');
   if (!form) return;
   form.addEventListener('click', async (e) => {
@@ -1459,22 +1461,22 @@ function wireEnhance(d, t, demo) {
         token_id: t.id, description: form.description.value, website: form.website.value, twitter: form.twitter.value,
         icon: await fileB64(icon), banner: await fileB64(banner),
       });
-      const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh, chain: form.chain?.value });
+      const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh, chain: form.chain?.value, page });
       if (pay.url) { location.href = pay.url; return; }
       if (pay.method === 'usdc') {
-        msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b> is the last digits. A different amount is not matched. This page watches the transfer.`;
+        msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b> is the last digits. A different amount is not matched. This page watches the transfer.<br>${esc(SOLD)}`;
         clearInterval(usdcTimer);
         usdcTimer = setInterval(async () => {
           try {
             const st = await api('usdc-order/' + pay.id);
             if (!st?.paid || !$('enhmsg')) return;
             clearInterval(usdcTimer);
-            $('enhmsg').textContent = 'USDC payment confirmed. The profile stays hidden until an admin approves it.';
+            $('enhmsg').innerHTML = `USDC payment confirmed. The profile stays hidden until an admin approves it.<br>${esc(SOLD)}`;
           } catch {}
         }, 5000);
         return;
       }
-      msg.innerHTML = `Send exactly <b>${esc(pay.amount_noid)} NOID</b> to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_noid)} It stays in review until an admin approves it.`;
+      msg.innerHTML = `Send exactly <b>${esc(pay.amount_noid)} NOID</b> to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_noid)} It stays in review until an admin approves it.<br>${esc(SOLD)}`;
     } catch (err) {
       msg.textContent = err.message;
       b.disabled = false;
@@ -1509,14 +1511,14 @@ function wireBoost(kind, id, demo) {
     try {
       const made = await api('boost', { asset_id: id, kind, pack: b.dataset.boost });
       const pay = await api('boost-pay', { id: made.id, method: 'usdc', chain: form.querySelector('[name="chain"]')?.value });
-      msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b>. The slot stays hidden until an admin approves it, then it ends on its own.`;
+      msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b>. The slot stays hidden until an admin approves it, then it ends on its own.<br>${esc(SOLD)}`;
       clearInterval(usdcTimer);
       usdcTimer = setInterval(async () => {
         try {
           const st = await api('usdc-order/' + pay.id);
           if (!st?.paid || !$('boostmsg')) return;
           clearInterval(usdcTimer);
-          $('boostmsg').textContent = 'USDC payment confirmed. The slot stays hidden until an admin approves it, then it ends on its own.';
+          $('boostmsg').innerHTML = `USDC payment confirmed. The slot stays hidden until an admin approves it, then it ends on its own.<br>${esc(SOLD)}`;
         } catch {}
       }, 5000);
     } catch (err) {
@@ -2246,7 +2248,7 @@ const pages = {
     const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
     const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
-      ? '<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.</p>' : '';
+      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.<br><span class="muted">${esc(SOLD)}</span></p>` : '';
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}${paidBack}
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
       <p><a href="${demoHref('/explore')}" data-link>← Tokens</a>
@@ -2474,7 +2476,9 @@ const pages = {
     const itemGrid = (d.items || []).map((n) => `<div class="item"><b>${esc(n.name || n.id)}</b>
       <div class="traits">${(n.traits || []).map((t) => `<span>${esc(t.trait)} ${esc(t.value)}</span>`).join('')}</div>
       <div class="muted mono" style="font-size:12px">${n.owner ? `<a href="${walletHref(n.owner, '', demo)}" data-link>${esc(short(n.owner))}</a>` : '–'}</div></div>`).join('');
-    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample collection for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}
+    const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
+      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.<br><span class="muted">${esc(SOLD)}</span></p>` : '';
+    app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample collection for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}${paidBack}
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
       <p><a href="${demoHref('/explore?tab=nfts')}" data-link>← NFTs</a>
         ${starBtn(c.id, c.name)}
@@ -2594,7 +2598,7 @@ const pages = {
         <table><tbody>${rows(b.bids || [], 'bid')}</tbody></table>
         ${b.bids?.length || b.asks?.length ? '' : '<p class="muted">No listings yet.</p>'}`;
     };
-    wireEnhance(d, c, demo);
+    wireEnhance(d, c, demo, 'collection');
     wireBoost('collection', c.id, demo);
     await Promise.all([open(), loadActivity().catch((err) => { if ($('tape')) $('tape').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; }), paintBook().catch((err) => { if ($('bookbody')) $('bookbody').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; })]);
     clearInterval(tokenTimer);
@@ -2605,12 +2609,22 @@ const pages = {
     }, 5000);
   },
   terms() {
-    app.innerHTML = `<div class="card"><h2>Terms</h2>
+    app.innerHTML = `<div class="card"><h2>Terms of Service</h2>
+      <p class="muted">DRAFT pending legal review.</p>
+      <p>Duli Media LLC, a California LLC, is the operator of this site.</p>
       <p>NOID Scan is a block explorer. It does not hold NOID, tokens, NFTs or wallet keys, and it cannot move funds on your behalf.</p>
       <p>A swap quote, when the panel is shown, lists the front-end fee as a rate and an amount before you sign. That fee is a separate output to the explorer's published address when the Parano1d transaction can carry one. Until then the fee is only a line on the quote. You sign and submit from your own wallet. This site does not match orders and does not take custody of either side.</p>
       <p>Nothing here is investment, financial or trading advice. Listings are whatever the connected node reports. A demo banner means the rows are sample data and are not on chain.</p>
       <p id="promotion">Paid promotion. Not a recommendation or endorsement by NOID Scan. A Promoted slot and an Enhanced profile are paid placements. They sit apart from the organic list and do not change its order. A Promoted slot ends when its time is up.</p>
-      <p class="muted">The swap panel stays hidden unless the operator turns it on, sets a fee address, and the node exposes the v2.1 DEX and wallet interface. <code>?demo=1</code> shows a mock quote that cannot be submitted.</p></div>`;
+      <p class="muted">The swap panel stays hidden unless it is turned on, a fee address is set, and the node exposes the v2.1 DEX and wallet interface. <code>?demo=1</code> shows a mock quote that cannot be submitted.</p>
+      <p><a href="/privacy" data-link>Privacy</a></p></div>`;
+  },
+  privacy() {
+    app.innerHTML = `<div class="card"><h2>Privacy</h2>
+      <p class="muted">DRAFT pending legal review.</p>
+      <p>Duli Media LLC, a California LLC, is the operator of this site.</p>
+      <p>An account is an API key. The server stores a hash of that key, not a name or an email. An enhanced-profile or promoted-slot order stores the account id, the amount, the chain, and, once it matches, the transaction id. Card payments are taken by Stripe. This page is not a finished privacy policy.</p>
+      <p><a href="/terms" data-link>Terms of Service</a></p></div>`;
   },
 
   async address(id, page = 1) {
@@ -2773,7 +2787,7 @@ async function render() {
   for (const a of document.querySelectorAll('header a.explore, #menunav a[href^="/explore"]')) a.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
+    await (pages[type] && (id || ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin'].includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>${e.status === 404 ? 'Not found' : 'Unavailable'}</h2><p class="muted">${esc(e.message)}</p></div>`;
   }
