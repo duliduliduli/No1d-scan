@@ -552,6 +552,11 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, />\$100/);
   assert.match(homeHtml, />\$1k/);
   assert.match(homeHtml, /Pair age/);
+  assert.match(homeHtml, /data-tabs="nftkind"/);
+  assert.match(homeHtml, /data-tabs="homekind"/);
+  assert.match(homeHtml, /Listings and floor depth/);
+  assert.match(homeHtml, /class="traits"/);
+  assert.match(homeHtml, /Sales and transfers/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -661,8 +666,34 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('collections?demo=1'))[1].collections[0].id, 'stamps');
   assert.strictEqual((await get('collections?demo=1&q=paper'))[1].collections[0].id, 'faces');
   assert.deepStrictEqual((await get('collections?demo=1&min_floor=5'))[1].collections.map((c) => c.id), ['stamps']);
-  assert.ok((await get('collection/stamps?demo=1'))[1].items.length >= 1);
+  const [, stampsCol] = await get('collection/stamps?demo=1');
+  assert.ok(stampsCol.items.length >= 1);
+  assert.ok(stampsCol.items[0].traits.some((t) => t.trait === 'Backdrop'));
+  assert.match(stampsCol.collection.enhanced.banner, /demo=1/);
+  assert.strictEqual(stampsCol.collection.enhanced.website, 'https://example.com/stamps');
+  assert.strictEqual(stampsCol.collection.enhanced.twitter, 'https://x.com/nightstamps');
+  assert.strictEqual((await get('collection/faces?demo=1'))[1].collection.enhanced, null);
+  assert.strictEqual((await fetch(base + '/api/profile-media/stamps/banner?demo=1')).status, 200);
   assert.strictEqual((await get('collection/stamps'))[0], 404);
+  const [, saleC] = await get('collections/stamps/candles?demo=1&tf=5m');
+  assert.strictEqual(saleC.kind, 'sale');
+  assert.ok(saleC.candles.length > 0 && saleC.candles.every((c) => BigInt(c.h) >= BigInt(c.l) && BigInt(c.v) > 0n));
+  const [, floorC] = await get('collections/stamps/candles?demo=1&tf=1m&kind=floor&limit=5');
+  assert.strictEqual(floorC.candles.at(-1).c, '12000000');
+  const [, weekC] = await get('collections/stamps/candles?demo=1&tf=1w&kind=sale&limit=8');
+  assert.ok(weekC.candles.length >= 1 && weekC.candles.every((c) => new Date(c.t * 1000).getUTCDay() === 1));
+  assert.strictEqual((await get('collections/stamps/candles?demo=1&kind=nope'))[0], 400);
+  const [, nftBook] = await get('collections/stamps/book?demo=1');
+  assert.strictEqual(nftBook.source, 'listings');
+  assert.strictEqual(nftBook.label, 'Listings and floor depth');
+  assert.strictEqual(nftBook.bids.length, 0);
+  assert.strictEqual(nftBook.asks[0].price_micronoid, '12000000');
+  assert.ok(BigInt(nftBook.asks[0].size) >= 1n);
+  const [, nftAct] = await get('collections/stamps/activity?demo=1');
+  assert.ok(nftAct.events.some((e) => e.kind === 'sale' && typeof e.usd === 'number' && e.wallet));
+  assert.ok(nftAct.events.some((e) => e.kind === 'transfer' && e.wallet));
+  assert.deepStrictEqual((await get('collections?demo=1&preset=watch&ids=stamps'))[1].collections.map((c) => c.id), ['stamps']);
+  assert.ok((await post('stars', { id: 'stamps', on: true }, K))[1].ids.includes('stamps'));
   const [, off] = await get('swap/quote?token=gcat&side=buy&amount=100');
   assert.strictEqual(off.enabled, false);
   assert.strictEqual(off.signable, false);
@@ -748,12 +779,18 @@ test('indexer + api', async (t) => {
   db.prepare(`insert into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid) values ('reorgtrade1', 'live1', 1700000000, ?, 'buy', '1', '1')`).run(tip + 5);
   db.prepare(`insert into token_candles (token_id, bucket, o, h, l, c, v, n, height) values ('live1', 1, 1, 1, 1, 1, 1, 1, ?)`).run(tip + 5);
   db.prepare(`insert into token_transfers (txid, token_id, ts, height, from_addr, to_addr, amount) values ('reorgxfer01', 'live1', 1, ?, '', 'o1acdefghjkmnpqr', '1')`).run(tip + 5);
+  db.prepare(`insert into nft_sales (txid, collection_id, item_id, ts, height, price_micronoid) values ('reorgsale01', 'col1', 'n1', 1, ?, '1')`).run(tip + 5);
+  db.prepare(`insert into nft_candles (collection_id, kind, bucket, o, h, l, c, v, n, height) values ('col1', 'sale', 1, 1, 1, 1, 1, 1, 1, ?)`).run(tip + 5);
+  db.prepare(`insert into nft_transfers (txid, collection_id, item_id, ts, height, from_addr, to_addr) values ('reorgnxfer1', 'col1', 'n1', 1, ?, '', 'o1acdefghjkmnpqr')`).run(tip + 5);
   const tipBefore = tip;
   tip -= 2;
   await tick();
   assert.strictEqual(db.prepare(`select count(*) n from token_trades where txid = 'reorgtrade1'`).get().n, 0);
   assert.strictEqual(db.prepare('select count(*) n from token_candles where height > 0').get().n, 0);
   assert.strictEqual(db.prepare(`select count(*) n from token_transfers where txid = 'reorgxfer01'`).get().n, 0);
+  assert.strictEqual(db.prepare(`select count(*) n from nft_sales where txid = 'reorgsale01'`).get().n, 0);
+  assert.strictEqual(db.prepare('select count(*) n from nft_candles where height > 0').get().n, 0);
+  assert.strictEqual(db.prepare(`select count(*) n from nft_transfers where txid = 'reorgnxfer1'`).get().n, 0);
   tip = tipBefore;
   await tick();
   delete process.env.ASSET_PROBE_MS;
@@ -902,6 +939,46 @@ test('indexer + api', async (t) => {
   delete node.getOpenOrders;
   await tick();
   assert.strictEqual((await get('tokens/live1/book?window=5m'))[1].source, 'reserves');
+  delete process.env.ASSET_PROBE_MS;
+  process.env.ASSET_PROBE_MS = '0';
+  const nftNow = Math.floor(Date.now() / 1000);
+  node.getAssetSnapshot = () => ({
+    collections: [{
+      id: 'col1', name: 'Live Col', items: 2, owners: 1, floor_micronoid: '5000000', volume_micronoid: '9000000', created_ts: 1700000000,
+      nfts: [{ id: 'n1', name: 'One', owner: 'o1acdefghjkmnpqr', traits: [{ trait: 'Ink', value: 'Blue' }] }],
+      sales: [{ txid: 'col1sale0001', item_id: 'n1', ts: nftNow - 40, price_micronoid: '5000000', seller: 'o1qqqqqqqqqqqq', buyer: 'o1acdefghjkmnpqr', height: 1 }],
+      transfers: [{ txid: 'col1xfer0001', item_id: 'n1', ts: nftNow - 20, from: 'o1qqqqqqqqqqqq', to: 'o1acdefghjkmnpqr' }],
+      listings: [{ item_id: 'n1', price_micronoid: '5000000', seller: 'o1acdefghjkmnpqr' }],
+    }],
+  });
+  await tick();
+  assert.strictEqual((await get('collection/col1'))[1].items[0].traits[0].value, 'Blue');
+  assert.ok((await get('collections/col1/activity'))[1].events.some((e) => e.kind === 'sale' && e.price_micronoid === '5000000' && e.wallet));
+  const [, listedBook] = await get('collections/col1/book');
+  assert.strictEqual(listedBook.source, 'listings');
+  assert.match(listedBook.label, /floor depth/);
+  assert.strictEqual(listedBook.asks[0].size, '1');
+  assert.ok((await get('collections/col1/candles?tf=1m&kind=sale&limit=5'))[1].candles.some((c) => c.c === '5000000' && BigInt(c.v) >= 5000000n));
+  assert.ok((await get('collections/col1/candles?tf=1m&kind=floor&limit=3'))[1].candles.some((c) => c.c === '5000000'));
+  const salePlan = db.prepare("explain query plan select ts from nft_sales where collection_id = 'col1' and ts < 2000000000 order by ts desc limit 10").all().map((r) => r.detail).join(' ');
+  assert.match(salePlan, /nft_sales_col_ts/);
+  assert.doesNotMatch(salePlan, /TEMP B-TREE/);
+  const nftCandlePlan = db.prepare("explain query plan select bucket from nft_candles where collection_id = 'col1' and kind = 'sale' and bucket < 2000000000 order by bucket desc limit 10").all().map((r) => r.detail).join(' ');
+  assert.match(nftCandlePlan, /nft_candles/);
+  assert.doesNotMatch(nftCandlePlan, /TEMP B-TREE/);
+  node.getNftOrders = () => ({
+    listings: [{ price_micronoid: '5000000', item_id: 'n1' }, { price_micronoid: '7000000' }],
+    bids: [{ price_micronoid: '4000000', size: '2' }],
+  });
+  await tick();
+  const [, nftOrders] = await get('collections/col1/book?window=1m');
+  assert.strictEqual(nftOrders.source, 'orders');
+  assert.strictEqual(nftOrders.label, 'NFT orders');
+  assert.strictEqual(nftOrders.asks[0].size, '1');
+  assert.strictEqual(nftOrders.bids[0].size, '2');
+  delete node.getNftOrders;
+  await tick();
+  assert.strictEqual((await get('collections/col1/book?window=5m'))[1].source, 'listings');
   delete process.env.ASSET_PROBE_MS;
   const [, liveWal] = await get('wallet/o1acdefghjkmnpqr?token=live1');
   assert.strictEqual(liveWal.demo, false);

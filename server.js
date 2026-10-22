@@ -513,7 +513,7 @@ async function tick() {
     db.exec('begin');
     try {
       orphanAbove(tip); // before the delete: these rows are the only copy once the node has moved on
-      for (const t of ['blocks', 'stats', 'headers', 'token_trades', 'token_transfers', 'token_candles', 'tx_index', 'addr_tx', 'miner_payouts']) db.prepare(`delete from ${t} where height > ?`).run(tip);
+      for (const t of ['blocks', 'stats', 'headers', 'token_trades', 'token_transfers', 'token_candles', 'nft_sales', 'nft_transfers', 'nft_candles', 'tx_index', 'addr_tx', 'miner_payouts']) db.prepare(`delete from ${t} where height > ?`).run(tip);
       q.addReorg.run(top, tip, Date.now(), top - tip);
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
@@ -1085,8 +1085,8 @@ const routes = {
   tokens: async (...a) => profiles.decorate(await assets.tokens(...a)),
   token: async (...a) => profiles.decorate(await assets.token(...a)),
   wallet: async (id, params) => assets.wallet(id, params),
-  collections: async (...a) => assets.collections(...a),
-  collection: async (...a) => assets.collection(...a),
+  collections: async (...a) => profiles.decorate(await assets.collections(...a)),
+  collection: async (...a) => profiles.decorate(await assets.collection(...a)),
   swap: async (...a) => assets.swap(...a),
 
   async search(_, params) {

@@ -54,14 +54,17 @@ function demoBytes(kind) {
   return kind === 'banner' ? demoImg.banner : demoImg.icon;
 }
 function demoProfile(id) {
-  if (id !== 'gcat') return null;
+  const samples = {
+    gcat: ['Night market ghost cat. Sample enhanced profile, not a paid listing.', 'https://example.com/gcat', 'https://x.com/ghostcat'],
+    stamps: ['Night stamps, printed once. Sample enhanced profile, not a paid listing.', 'https://example.com/stamps', 'https://x.com/nightstamps'],
+  };
+  const row = samples[id];
+  if (!row) return null;
   const q = '?demo=1';
   return {
-    description: 'Night market ghost cat. Sample enhanced profile, not a paid listing.',
-    website: 'https://example.com/gcat',
-    twitter: 'https://x.com/ghostcat',
-    icon: `/api/profile-media/gcat/icon${q}`,
-    banner: `/api/profile-media/gcat/banner${q}`,
+    description: row[0], website: row[1], twitter: row[2],
+    icon: `/api/profile-media/${id}/icon${q}`,
+    banner: `/api/profile-media/${id}/banner${q}`,
   };
 }
 
@@ -91,7 +94,7 @@ module.exports = function profiles(db) {
   };
 
   function fields(body) {
-    if (!ID.test(body?.token_id || '')) throw bad('expected a token id');
+    if (!ID.test(body?.token_id || '')) throw bad('expected a token or collection id');
     const description = cleanText(body.description);
     const website = httpsUrl(body.website, 'website');
     const twitter = httpsUrl(body.twitter, 'X');
@@ -183,6 +186,8 @@ module.exports = function profiles(db) {
     const next = { ...out, enhance_usd: priceUsd(), enhance_usdc: priceUsdc() };
     if (next.tokens) next.tokens = next.tokens.map(apply);
     if (next.token) next.token = apply(next.token);
+    if (next.collections) next.collections = next.collections.map(apply);
+    if (next.collection) next.collection = apply(next.collection);
     return next;
   }
 
@@ -190,7 +195,7 @@ module.exports = function profiles(db) {
     if (kind !== 'icon' && kind !== 'banner') return null;
     if (!ID.test(tokenId || '')) return null;
     if (params.get('demo') === '1') {
-      if (tokenId !== 'gcat') return null;
+      if (tokenId !== 'gcat' && tokenId !== 'stamps') return null;
       return { bytes: demoBytes(kind), type: 'image/png' };
     }
     const row = q.pubImg.get(tokenId);

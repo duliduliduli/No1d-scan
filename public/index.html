@@ -182,6 +182,8 @@
   #admin img.logo { width:48px; height:48px }
   .items { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
   .item { border:1px solid var(--line); border-radius:4px; padding:10px; background:var(--head) }
+  .traits { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px }
+  .traits span { font:10px var(--mono); border:1px solid var(--line); border-radius:99px; padding:2px 6px; color:var(--muted) }
   .menu > button { padding:7px 11px; font-size:16px; line-height:1 }
   .menu nav { display:none; position:absolute; right:0; top:calc(100% + 8px); z-index:10; min-width:220px; flex-direction:column; gap:0; background:var(--card); border:1px solid var(--line); border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,.35) }
   .menu.open nav { display:flex }
@@ -1071,17 +1073,18 @@ function tokenCards(list) {
       ${!t.graduated && t.curve ? `<span class="chgs">${curveHtml(t)}</span>` : ''}</a>`).join('') || ''}</div>`;
 }
 function nftTable(list, sort, dir) {
-  const head = `<tr><th>Collection</th>${sortTh('floor', 'Floor', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('items', 'Items', sort, dir)}${sortTh('owners', 'Owners', sort, dir)}${sortTh('age', 'Age', sort, dir)}</tr>`;
+  const head = `<tr><th></th><th>Collection</th>${sortTh('floor', 'Floor', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('items', 'Items', sort, dir)}${sortTh('owners', 'Owners', sort, dir)}${sortTh('age', 'Age', sort, dir)}</tr>`;
   const body = list.map((c) => `<tr>
-      <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a></td>
+      <td>${starBtn(c.id, c.name)}</td>
+      <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a> ${enhBadge(c)}</td>
       ${numCell(c.floor_micronoid)}${numCell(c.volume_micronoid)}
       <td class="num">${n0(c.items)}</td><td class="num">${n0(c.owners)}</td><td>${esc(c.created_ts ? ago(c.created_ts) : ageShort(c.age_s))}</td></tr>`).join('');
   return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function nftCards(list) {
   return `<div class="narrow">${list.map((c) => `<a class="mcard" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>
-      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b><small>${esc(ageShort(c.age_s))}</small></span>
-      <span class="px">${esc(fmtNoid(c.floor_micronoid))}<small>floor</small></span>
+      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${enhBadge(c)}<small>${esc(ageShort(c.age_s))}</small></span>
+      <span class="px">${starBtn(c.id, c.name)}${esc(fmtNoid(c.floor_micronoid))}<small>floor</small></span>
       <span class="meta">Vol ${esc(fmtNoid(c.volume_micronoid))} · ${n0(c.items)} items · ${n0(c.owners)} owners</span></a>`).join('')}</div>`;
 }
 const rangeInputs = (label, a, b, params) => `<label>${label}<span class="pair"><input data-f="${a}" value="${esc(params.get(a) || '')}" placeholder="min" inputmode="decimal" aria-label="${esc(label)} minimum"><input data-f="${b}" value="${esc(params.get(b) || '')}" placeholder="max" inputmode="decimal" aria-label="${esc(label)} maximum"></span></label>`;
@@ -1101,7 +1104,7 @@ function exploreShell(tab, params) {
         <select id="exsort" aria-label="Sort">${sorts.flatMap(([k]) => [['desc', '↓'], ['asc', '↑']].map(([d, arrow]) => `<option value="${k}:${d}"${sort === k && dir === d ? ' selected' : ''}>${sorts.find((s) => s[0] === k)[1]} ${arrow}</option>`)).join('')}</select>
         ${tab === 'tokens' ? `<select id="exwin" aria-label="Stats window">${['5m', '1h', '6h', '24h'].map((w) => `<option${(params.get('window') || '24h') === w ? ' selected' : ''}>${w}</option>`).join('')}</select>` : ''}
       </div>
-      ${tab === 'tokens' ? tabs('preset', [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Watchlist']], params.get('preset') || '') : ''}
+      ${tabs('preset', tab === 'nfts' ? [['', 'All'], ['watch', 'Watchlist']] : [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Watchlist']], params.get('preset') || '')}
       ${tab === 'tokens' ? '<p class="muted" style="margin:8px 0 0;font:11px var(--mono)">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
       <details class="filters"${nFilt ? ' open' : ''}><summary>Filters${nFilt ? ` (${nFilt})` : ''}</summary><div class="fgrid">${filters}</div></details>
       <div id="exchips"></div>
@@ -1136,7 +1139,7 @@ async function fillExplore() {
   const params = new URLSearchParams(location.search);
   const tab = params.get('tab') === 'nfts' ? 'nfts' : 'tokens';
   const req = new URLSearchParams(params);
-  if (tab === 'tokens' && params.get('preset') === 'watch') {
+  if (params.get('preset') === 'watch') {
     await ensureStars();
     if (gen !== exGen || !$('exlist')) return;
     const ids = [...starSet()];
@@ -1144,7 +1147,7 @@ async function fillExplore() {
       if ($('exbanner')) $('exbanner').innerHTML = params.get('demo') === '1' ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>` : '';
       $('extools').hidden = false;
       $('exlist').removeAttribute('aria-busy');
-      $('exlist').innerHTML = `<div class="empty"><b>Nothing starred</b><p class="muted">Star a token to pin it here. ${myKey() ? 'Stars are saved on your account.' : 'They stay in this browser until you log in, then they save to your account.'}</p></div>`;
+      $('exlist').innerHTML = `<div class="empty"><b>Nothing starred</b><p class="muted">Star a token or collection to pin it here. ${myKey() ? 'Stars are saved on your account.' : 'They stay in this browser until you log in, then they save to your account.'}</p></div>`;
       return;
     }
     req.set('ids', ids.join(','));
@@ -1437,14 +1440,29 @@ function exploreCard(demo) {
         <p>Native tokens, launchpad curves, liquidity pools and collections. Prices in NOID, and in USD from the same feed as the market panel.</p>
         <span class="go">Open Explore →</span></a>`;
 }
-function homeStrip(list) {
-  if (!list?.length) return '';
-  return `<div class="card"><h2>Sample tokens <small>not on chain</small></h2>
+function homeStrip(tokens, cols) {
+  const tok = tokens || [], nft = cols || [];
+  if (!tok.length && !nft.length) return '';
+  return `<div class="card" id="homestrip"><h2>Sample market <small>not on chain</small></h2>
     <p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>
-    ${list.slice(0, 5).map((t) => `<a class="mcard" style="display:grid" href="/token/${encodeURIComponent(t.id)}?demo=1" data-link>
+    <div class="tabs" data-tabs="homekind"><button type="button" data-v="tokens" class="on">Tokens</button><button type="button" data-v="nfts">NFTs</button></div>
+    <div id="homestrip-tokens">${tok.slice(0, 5).map((t) => `<a class="mcard" style="display:grid" href="/token/${encodeURIComponent(t.id)}?demo=1" data-link>
       ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${enhBadge(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
-      <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}
-    <p><a href="/explore?demo=1" data-link>All sample tokens →</a></p></div>`;
+      <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}</div>
+    <div id="homestrip-nfts" hidden>${nft.slice(0, 5).map((c) => `<a class="mcard" style="display:grid" href="/collection/${encodeURIComponent(c.id)}?demo=1" data-link>
+      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${enhBadge(c)}<small>${esc(ageShort(c.age_s))}</small></span>
+      <span class="px">${esc(fmtNoid(c.floor_micronoid))}<small>floor</small></span></a>`).join('')}</div>
+    <p id="homestrip-more"><a href="/explore?demo=1" data-link>All sample tokens →</a></p></div>`;
+}
+function wireHomeStrip() {
+  if (!$('homestrip')) return;
+  onTabs('homekind', (v) => {
+    $('homestrip-tokens').hidden = v !== 'tokens';
+    $('homestrip-nfts').hidden = v !== 'nfts';
+    $('homestrip-more').innerHTML = v === 'nfts'
+      ? '<a href="/explore?tab=nfts&demo=1" data-link>All sample collections →</a>'
+      : '<a href="/explore?demo=1" data-link>All sample tokens →</a>';
+  });
 }
 function unmountTokenChart() {
   const cur = tokenChart;
@@ -1459,10 +1477,12 @@ async function fetchTokenCandles(id, tf, demo, extra) {
   const q = new URLSearchParams();
   if (demo) q.set('demo', '1');
   q.set('tf', tf);
+  if (extra.kind) q.set('kind', extra.kind);
   q.set('limit', String(extra.limit || 180));
   if (extra.before) q.set('before', String(extra.before));
   if (extra.since != null) q.set('since', String(extra.since));
-  const r = await api(`tokens/${encodeURIComponent(id)}/candles?${q}`);
+  const path = extra.path || `tokens/${encodeURIComponent(id)}/candles`;
+  const r = await api(`${path}?${q}`);
   const bars = [];
   for (const c of r.candles || []) {
     const o = Number(c.o), h = Number(c.h), l = Number(c.l), cl = Number(c.c), v = Number(c.v);
@@ -1475,7 +1495,7 @@ function tokenWhen(t, tf) {
   const day = tf === '1d' || tf === '1w';
   return new Date(t * 1000).toLocaleString([], day ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
-async function openTokenChart(id, demo, tf) {
+async function openTokenChart(id, demo, tf, opts = {}) {
   const g = (openTokenChart.gen = (openTokenChart.gen || 0) + 1);
   unmountTokenChart();
   const host = $('tv');
@@ -1483,13 +1503,14 @@ async function openTokenChart(id, demo, tf) {
   host.innerHTML = '<p class="muted">Loading chart…</p>';
   await loadLw();
   if (g !== openTokenChart.gen || !$('tv')) return;
-  const page = await fetchTokenCandles(id, tf, demo, { limit: 180 });
+  const load = (extra) => fetchTokenCandles(id, tf, demo, { ...extra, path: opts.path, kind: opts.kind });
+  const page = await load({ limit: 180 });
   if (g !== openTokenChart.gen || !$('tv')) return;
-  if (!page.bars.length) { host.innerHTML = '<p class="muted">Not enough trades for a chart yet.</p>'; return; }
+  if (!page.bars.length) { host.innerHTML = `<p class="muted">${esc(opts.empty || 'Not enough trades for a chart yet.')}</p>`; return; }
   host.innerHTML = '';
   const box = document.createElement('div');
   box.className = 'tokenchart';
-  box.setAttribute('aria-label', 'Token price and volume');
+  box.setAttribute('aria-label', opts.label || 'Token price and volume');
   const tip = document.createElement('div');
   tip.className = 'pxtip';
   const note = document.createElement('p');
@@ -1518,7 +1539,7 @@ async function openTokenChart(id, demo, tf) {
     state.quiet--;
   };
   const writeNote = () => {
-    note.textContent = `${state.bars.length.toLocaleString()} candles · volume from trades${state.more ? ' · zoom or pan left for older candles' : ''}`;
+    note.textContent = `${state.bars.length.toLocaleString()} candles · ${opts.note || 'volume from trades'}${state.more ? ' · zoom or pan left for older candles' : ''}`;
   };
   const fit = () => {
     if (state.dead) return;
@@ -1553,7 +1574,7 @@ async function openTokenChart(id, demo, tf) {
     if (!before) { state.more = false; return; }
     state.loading = true;
     try {
-      const olderPage = await fetchTokenCandles(id, tf, demo, { before, limit: 300 });
+      const olderPage = await load({ before, limit: 300 });
       if (g !== openTokenChart.gen || state.dead) return;
       const older = olderPage.bars.filter((b) => b.time < before);
       if (!older.length) { state.more = false; writeNote(); return; }
@@ -1592,7 +1613,7 @@ async function openTokenChart(id, demo, tf) {
   const poll = setInterval(async () => {
     if (state.dead || document.hidden || !state.bars.length) return;
     try {
-      const live = await fetchTokenCandles(id, tf, demo, { limit: 2 });
+      const live = await load({ limit: 2 });
       if (g !== openTokenChart.gen || state.dead) return;
       const last = state.bars.at(-1).time;
       let changed = false;
@@ -1662,16 +1683,18 @@ function statHead(t) {
 const pages = {
   async home() {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
-    const [s0, b0, t0, hi0, net0, mi0, preview] = await Promise.all([
+    const [s0, b0, t0, hi0, net0, mi0, preview, colsPreview] = await Promise.all([
       part('stats'), part('blocks?limit=15'), part('txs'), part('history?window=24h'), part('network'), part('miners?window=24h'),
       demo ? part('tokens?demo=1') : Promise.resolve(null),
+      demo ? part('collections?demo=1') : Promise.resolve(null),
     ]);
     const s = s0._err ? null : s0, b = b0._err ? null : b0, t = t0._err ? null : t0, hi = hi0._err ? null : hi0, net = net0._err ? null : net0, mi = mi0._err ? null : mi0;
-    const strip = homeStrip(preview && !preview._err ? preview.tokens : null);
+    const strip = homeStrip(preview && !preview._err ? preview.tokens : null, colsPreview && !colsPreview._err ? colsPreview.collections : null);
     if (!s || !b?.blocks?.length) {
       app.innerHTML = `<div class="livebar"><span class="dot off"></span><span>Node unavailable. Live blocks, price and the globe need the Parano1d node. Explore still opens.</span></div>
         ${exploreCard(demo)}${strip}
         <div class="card"><h2>Node unavailable</h2><p class="muted">This explorer could not reach its node, so chain stats are hidden until it answers. ${demo ? 'The token rows above are sample data and are not on chain.' : 'Add <span class="mono">?demo=1</span> to preview sample tokens without a node.'}</p></div>`;
+      wireHomeStrip();
       return;
     }
     let chartWin = '24h', minerWin = '24h';
@@ -1733,6 +1756,7 @@ const pages = {
     if (net0._err) { const g = $('globe'); if (g) g.innerHTML = `<div class="glmsg">${esc(net0._err)}</div>`; }
     else mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
+    wireHomeStrip();
     wirePriceBox('pwin');
     let tip = s ? Number(s.chain.height) : 0, tipTs = b?.blocks[0]?.timestamp;
     ticker = setInterval(() => { if (tipTs) { if ($('ago')) $('ago').textContent = ago(tipTs); if ($('gago')) $('gago').textContent = ago(tipTs); } }, 1000);
@@ -2327,20 +2351,145 @@ const pages = {
       <div class="card"><h2>Trades <small>${token ? esc(token) : 'all indexed'}</small></h2>${tradeTable(w.trades, w.demo, token || null)}</div>`;
   },
   async collection(id) {
+    await ensureStars();
     const demo = new URLSearchParams(location.search).get('demo') === '1';
-    const d = await api(`collection/${encodeURIComponent(id)}${demo ? '?demo=1' : ''}`);
+    const q = demo ? '?demo=1' : '';
+    const d = await api(`collection/${encodeURIComponent(id)}${q}`);
     const c = d.collection;
+    const e = c.enhanced;
+    const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
+    const chartOpts = () => ({ path: `collections/${encodeURIComponent(id)}/candles`, kind: nftKind, note: 'sales volume', label: nftKind === 'floor' ? 'Floor price and sales volume' : 'Sale price and sales volume', empty: 'Not enough sales for a chart yet.' });
+    let nftKind = 'sale', tf = '15m';
+    const itemGrid = (d.items || []).map((n) => `<div class="item"><b>${esc(n.name || n.id)}</b>
+      <div class="traits">${(n.traits || []).map((t) => `<span>${esc(t.trait)} ${esc(t.value)}</span>`).join('')}</div>
+      <div class="muted mono" style="font-size:12px">${n.owner ? `<a href="${walletHref(n.owner, '', demo)}" data-link>${esc(short(n.owner))}</a>` : '–'}</div></div>`).join('');
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample collection for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}
-      <p><a href="${demoHref('/explore?tab=nfts')}" data-link>← Explore</a></p>
-      <div class="card"><h2>${esc(c.name)}</h2>
-        <div class="grid">
-          <div class="stat"><small>Floor</small><b>${esc(fmtNoid(c.floor_micronoid))}</b></div>
-          <div class="stat"><small>Volume</small><b>${esc(fmtNoid(c.volume_micronoid))}</b></div>
-          <div class="stat"><small>Items</small><b>${n0(c.items)}</b></div>
-          <div class="stat"><small>Owners</small><b>${n0(c.owners)}</b></div>
-          <div class="stat"><small>Age</small><b>${esc(ageShort(c.age_s))}</b></div>
+      ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
+      <p><a href="${demoHref('/explore?tab=nfts')}" data-link>← NFTs</a>
+        ${starBtn(c.id, c.name)}
+        <button type="button" id="sharebtn">Share</button>
+        <button type="button" class="copy" data-copy="${esc(c.id)}" aria-label="Copy address">Copy address</button></p>
+      <div class="split pair"><div>
+        <div class="card"><h2 style="margin:0;border:0;background:none;padding:0">${esc(c.name)} ${enhBadge(c)}</h2>
+          ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
+          ${links ? `<p class="enhlinks">${links}</p>` : ''}
+          <b class="big" style="color:var(--fg)">${esc(fmtNoid(c.floor_micronoid))}</b> <span class="muted">floor${c.floor_usd == null ? '' : ' · ' + esc(usd4(c.floor_usd))}</span>
+          <div class="grid">
+            <div class="stat"><small>Volume</small><b>${esc(fmtNoid(c.volume_micronoid))}</b></div>
+            <div class="stat"><small>Sales</small><b>${n0(c.sales_n)}</b></div>
+            <div class="stat"><small>Items</small><b>${n0(c.items)}</b></div>
+            <div class="stat"><small>Owners</small><b>${n0(c.owners)}</b></div>
+            <div class="stat"><small>Age</small><b>${esc(ageShort(c.age_s))}</b></div>
+          </div>
+        </div>
+        <div class="bookrow">
+          <div class="card"><h2>Price <small>NOID</small></h2>
+            <div class="tfs" data-tabs="nftkind"><button type="button" data-v="sale" class="on">Sale</button><button type="button" data-v="floor">Floor</button></div>
+            <div class="tfs" data-tabs="tf">${[['1m', '1m'], ['5m', '5m'], ['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']].map(([k, label]) => `<button type="button" data-v="${k}" class="${k === '15m' ? 'on' : ''}">${label}</button>`).join('')}<button type="button" class="fit" id="tvfit" title="Fit the loaded candles in the card">Fit</button></div>
+            <div id="tv"><p class="muted">Loading chart…</p></div></div>
+          <div class="card book" id="book"><h2>Book <small id="booksrc">Listings and floor depth</small></h2><div id="bookbody"><p class="muted">Loading book…</p></div></div>
+        </div>
+        <div class="card" id="feedcard"><h2>Sales and transfers <small class="muted">auto-refresh 5s</small></h2>
+          <div class="txfilters" id="txfilters">
+            <button type="button" data-preset="100">>$100</button>
+            <button type="button" data-preset="1000">>$1k</button>
+            <input id="txmin" inputmode="decimal" placeholder="Min USD" aria-label="Minimum USD">
+            <input id="txmax" inputmode="decimal" placeholder="Max USD" aria-label="Maximum USD">
+            <select id="txtype" aria-label="Sale or transfer"><option value="">All</option><option value="sale">Sale</option><option value="transfer">Transfer</option></select>
+          </div>
+          <div id="tape"></div>
+        </div>
+        <div class="card"><h2>Items</h2>${itemGrid ? `<div class="items">${itemGrid}</div>` : '<p class="muted">No items published for this collection yet.</p>'}</div>
+      </div><div class="sidecol">
+        ${e ? '' : enhanceCard(d, demo)}
+        <div class="card"><h2>Stats</h2><div class="kvl">
+          <small>Floor</small><span>${esc(fmtNoid(c.floor_micronoid))}</span>
+          <small>Volume</small><span>${esc(fmtNoid(c.volume_micronoid))}</span>
+          <small>Sales</small><span>${n0(c.sales_n)}</span>
+          <small>Items</small><span>${n0(c.items)}</span>
+          <small>Owners</small><span>${n0(c.owners)}</span>
+          <small>Creator</small><span>${c.creator ? `<a class="mono" href="${walletHref(c.creator, '', demo)}" data-link>${esc(short(c.creator))}</a>` : '<span class="muted">not published</span>'}</span>
+          ${links ? `<small>Links</small><span>${links}</span>` : ''}
         </div></div>
-      <div class="card"><h2>Items</h2>${d.items.length ? `<div class="items">${d.items.map((n) => `<div class="item"><b>${esc(n.name || n.id)}</b><div class="muted mono" style="font-size:12px">${n.owner ? link('address', n.owner, short(n.owner)) : '–'}</div></div>`).join('')}</div>` : '<p class="muted">No items published for this collection yet.</p>'}</div>`;
+      </div></div>`;
+    const txf = { preset: '', min: '', max: '', kind: '' };
+    const passEv = (ev) => {
+      if (txf.kind && ev.kind !== txf.kind) return false;
+      const usd = ev.usd;
+      if (txf.preset) { if (usd == null || usd <= Number(txf.preset)) return false; }
+      else {
+        if (txf.min !== '' && (usd == null || usd < Number(txf.min))) return false;
+        if (txf.max !== '' && (usd == null || usd > Number(txf.max))) return false;
+      }
+      return true;
+    };
+    const paintTape = (events) => {
+      const el = $('tape');
+      if (!el) return;
+      const rows = (events || []).filter(passEv).slice(0, 80);
+      if (!rows.length) { el.innerHTML = '<p class="muted">No sales or transfers match.</p>'; return; }
+      el.innerHTML = `<div class="scroller"><table class="list tape"><tr><th>Age</th><th>Type</th><th>Item</th><th>USD</th><th>Price</th><th>Wallet</th><th>Tx</th></tr>
+        ${rows.map((ev) => `<tr>
+          <td>${esc(ago(ev.ts))}</td>
+          <td class="side ${ev.kind === 'sale' ? 'up' : ''}">${esc(ev.kind)}</td>
+          <td>${esc(ev.item_name || ev.item_id || '–')}</td>
+          <td>${ev.usd == null ? '<span class="muted">–</span>' : esc(money(ev.usd, ev.usd < 1 ? 4 : 2))}</td>
+          <td>${ev.price_micronoid ? esc(fmtNoid(ev.price_micronoid)) : '<span class="muted">–</span>'}</td>
+          <td>${ev.wallet ? `<a class="mono" href="${walletHref(ev.wallet, '', demo)}" data-link>${esc(short(ev.wallet))}</a>` : '<span class="muted">–</span>'}</td>
+          <td>${ev.txid ? `<a href="/tx/${encodeURIComponent(ev.txid)}" data-link>tx</a>` : '<span class="muted">–</span>'}</td>
+        </tr>`).join('')}</table></div>`;
+    };
+    let events = [];
+    const loadActivity = async () => {
+      events = (await api(`collections/${encodeURIComponent(id)}/activity${q}`)).events || [];
+      paintTape(events);
+    };
+    $('sharebtn').onclick = async () => {
+      const url = location.href;
+      try { if (navigator.share) { await navigator.share({ title: c.name, url }); return; } } catch (err) { if (err?.name === 'AbortError') return; }
+      try { await navigator.clipboard.writeText(url); $('sharebtn').textContent = 'Link copied'; } catch { $('sharebtn').textContent = 'Copy the address bar'; }
+    };
+    const filters = $('txfilters');
+    filters.onclick = (ev) => {
+      const b = ev.target.closest('button[data-preset]');
+      if (!b) return;
+      txf.preset = txf.preset === b.dataset.preset ? '' : b.dataset.preset;
+      if (txf.preset) { txf.min = ''; txf.max = ''; $('txmin').value = ''; $('txmax').value = ''; }
+      filters.querySelectorAll('button[data-preset]').forEach((x) => x.classList.toggle('on', x.dataset.preset === txf.preset));
+      paintTape(events);
+    };
+    const watch = (el, fn) => el.addEventListener('input', () => { fn(); paintTape(events); });
+    watch($('txmin'), () => { txf.min = $('txmin').value.trim(); txf.preset = ''; filters.querySelectorAll('button[data-preset]').forEach((x) => x.classList.remove('on')); });
+    watch($('txmax'), () => { txf.max = $('txmax').value.trim(); txf.preset = ''; filters.querySelectorAll('button[data-preset]').forEach((x) => x.classList.remove('on')); });
+    $('txtype').onchange = () => { txf.kind = $('txtype').value; paintTape(events); };
+    const open = () => openTokenChart(id, demo, tf, chartOpts()).catch((err) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; });
+    onTabs('nftkind', (v) => { nftKind = v; open(); });
+    onTabs('tf', (v) => { tf = v; open(); });
+    if ($('tvfit')) $('tvfit').onclick = () => tokenChart?.fit?.();
+    const paintBook = async () => {
+      const el = $('bookbody');
+      if (!el) return;
+      const b = await api(`collections/${encodeURIComponent(id)}/book${q}`);
+      if ($('booksrc')) $('booksrc').textContent = (b.demo ? 'Sample · ' : '') + (b.label || 'Listings and floor depth');
+      const all = [...(b.bids || []), ...(b.asks || [])];
+      const max = all.reduce((m, r) => { const t = BigInt(r.total || 0); return t > m ? t : m; }, 0n);
+      const rows = (list, side) => list.map((r) => {
+        const w = max > 0n ? Number(BigInt(r.total) * 100n / max) : 0;
+        return `<tr class="${side}"><td class="px">${esc(fmtNoid(r.price_micronoid))}</td><td class="num">${n0(r.size)}</td><td class="depth"><span style="width:${Math.max(0, Math.min(100, w))}%"></span>${n0(r.total)}</td></tr>`;
+      }).join('');
+      el.innerHTML = `<table><thead><tr><th>Price</th><th>Count</th><th>Depth</th></tr></thead><tbody>${rows([...(b.asks || [])].reverse(), 'ask')}</tbody></table>
+        <div class="spread">${b.source === 'orders' ? 'NFT orders' : 'Listings and floor depth'}${b.floor_micronoid ? ` · floor ${esc(fmtNoid(b.floor_micronoid))}` : ''}</div>
+        <table><tbody>${rows(b.bids || [], 'bid')}</tbody></table>
+        ${b.bids?.length || b.asks?.length ? '' : '<p class="muted">No listings yet.</p>'}`;
+    };
+    wireEnhance(d, c, demo);
+    await Promise.all([open(), loadActivity().catch((err) => { if ($('tape')) $('tape').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; }), paintBook().catch((err) => { if ($('bookbody')) $('bookbody').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; })]);
+    clearInterval(tokenTimer);
+    tokenTimer = setInterval(() => {
+      if (document.hidden || !$('tape')) return;
+      loadActivity().catch(() => {});
+      paintBook().catch(() => {});
+    }, 5000);
   },
   terms() {
     app.innerHTML = `<div class="card"><h2>Terms</h2>

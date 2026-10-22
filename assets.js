@@ -16,7 +16,12 @@
 //   Trades are stored on (token_id, ts) and folded into 1-minute OHLCV in token_candles.
 //   Charts sum those minutes. 1w buckets start Monday 00:00 UTC. ?before=&limit= pages them.
 //     collections[]: id, name, creator, items, owners, floor_micronoid, volume_micronoid,
-//       created_ts, nfts[{id, name, owner, image}]
+//       created_ts, nfts[{id, name, owner, image, traits[{trait, value}]}],
+//       sales[{txid, item_id, ts, height, price_micronoid, seller, buyer}],
+//       transfers[{txid, item_id, ts, height, from, to}],
+//       listings[{item_id, price_micronoid, seller}]
+//   Sale prices fold into 1-minute OHLCV (kind sale). The current floor is one flat minute
+//   (kind floor) until the node sends a floor series. Both use sales μNOID as volume.
 //   quoteSwap({token_id, side, amount_micronoid|token_amount, slippage_bps, fee_bps, fee_address})
 //     -> { expected_out_token|expected_out_micronoid, min_out_token|min_out_micronoid,
 //          price_impact_pct, spot_price_micronoid, exec_price_micronoid, fee_in_tx, venue }
@@ -24,6 +29,8 @@
 //     unsigned is the bytes the wallet signs. A payload that already carries a signature is refused.
 //   getOpenOrders({token_id}) -> { bids: [{ price_micronoid, token_amount }], asks: [...] }
 //     When this method is missing, the book is derived from pool or curve reserves and labeled as such.
+//   getNftOrders({collection_id}) -> { listings: [{ price_micronoid, item_id, size }], bids: [...] }
+//     When this method is missing, the book groups listings by price and is labeled floor depth.
 //
 // The fee is a separate output to SWAP_FEE_ADDRESS when buildSwap reports fee_in_tx.
 // Until the node can do that, the quote only itemizes the fee. This process never signs.
@@ -65,8 +72,25 @@ module.exports = function assets(db, rpc, priceNow) {
       owners integer not null default 0, floor_micronoid text, volume_micronoid text not null default '0',
       created_ts integer, updated_height integer);
     create table if not exists nft_items (
-      id text primary key, collection_id text not null, name text, owner text, image text);
+      id text primary key, collection_id text not null, name text, owner text, image text, traits text);
     create index if not exists nft_items_col on nft_items(collection_id);
+    create table if not exists nft_sales (
+      txid text primary key, collection_id text not null, item_id text, ts integer not null, height integer,
+      price_micronoid text not null, seller text, buyer text);
+    create index if not exists nft_sales_col_ts on nft_sales(collection_id, ts);
+    create table if not exists nft_transfers (
+      txid text not null, collection_id text not null, item_id text not null default '', ts integer not null, height integer,
+      from_addr text not null default '', to_addr text not null default '',
+      primary key (txid, collection_id, item_id, from_addr, to_addr));
+    create index if not exists nft_transfers_col_ts on nft_transfers(collection_id, ts);
+    create table if not exists nft_listings (
+      collection_id text not null, item_id text not null, price_micronoid text not null, seller text,
+      primary key (collection_id, item_id));
+    create table if not exists nft_candles (
+      collection_id text not null, kind text not null, bucket integer not null,
+      o integer not null, h integer not null, l integer not null, c integer not null,
+      v integer not null, n integer not null, height integer,
+      primary key (collection_id, kind, bucket));
     create table if not exists token_transfers (
       txid text not null, token_id text not null, ts integer not null, height integer,
       from_addr text not null default '', to_addr text not null default '', amount text not null,
@@ -78,7 +102,7 @@ module.exports = function assets(db, rpc, priceNow) {
       v integer not null, n integer not null, height integer,
       primary key (token_id, bucket));
   `);
-  for (const sql of ['alter table tokens add column launch text', 'alter table tokens add column links text']) {
+  for (const sql of ['alter table tokens add column launch text', 'alter table tokens add column links text', 'alter table nft_items add column traits text']) {
     try { db.exec(sql); } catch (e) { if (!/duplicate column/i.test(e.message)) throw e; }
   }
 
@@ -103,7 +127,14 @@ module.exports = function assets(db, rpc, priceNow) {
     transfersFor: db.prepare('select txid, ts, height, from_addr, to_addr, amount from token_transfers where token_id = ? order by ts desc limit 40'),
     cols: db.prepare('select * from nft_collections'),
     col: db.prepare('select * from nft_collections where id = ?'),
-    items: db.prepare('select id, name, owner, image from nft_items where collection_id = ? order by id limit 60'),
+    items: db.prepare('select id, name, owner, image, traits from nft_items where collection_id = ? order by id limit 60'),
+    salesFor: db.prepare('select txid, item_id, ts, height, price_micronoid, seller, buyer from nft_sales where collection_id = ? order by ts desc limit 200'),
+    nftXfers: db.prepare('select txid, item_id, ts, height, from_addr, to_addr from nft_transfers where collection_id = ? order by ts desc limit 200'),
+    listingsFor: db.prepare('select item_id, price_micronoid, seller from nft_listings where collection_id = ?'),
+    salesCount: db.prepare('select count(*) n from nft_sales where collection_id = ?'),
+    nftSalesIn: db.prepare('select price_micronoid, height from nft_sales where collection_id = ? and ts >= ? and ts < ? and price_micronoid is not null order by ts'),
+    nftCandlesBefore: db.prepare('select bucket t, o, h, l, c, v, n from nft_candles where collection_id = ? and kind = ? and bucket < ? order by bucket desc limit cast(? as integer)'),
+    nftCandleOlder: db.prepare('select 1 x from nft_candles where collection_id = ? and kind = ? and bucket < ? limit 1'),
     upToken: db.prepare(`insert or replace into tokens (id, name, ticker, creator, supply, reserve_micronoid, created_height, created_ts, logo, graduated, price_micronoid, curve_target_micronoid, curve_raised_micronoid, curve_virtual_noid, curve_virtual_token, updated_height, launch, links)
       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     upPool: db.prepare('insert or replace into pools (id, token_id, reserve_token, reserve_noid_micronoid, lp_supply, updated_height) values (?, ?, ?, ?, ?, ?)'),
@@ -114,11 +145,16 @@ module.exports = function assets(db, rpc, priceNow) {
     upHolder: db.prepare('insert or replace into token_holders (token_id, address, balance) values (?, ?, ?)'),
     upCol: db.prepare('insert or replace into nft_collections (id, name, creator, items, owners, floor_micronoid, volume_micronoid, created_ts, updated_height) values (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     delItems: db.prepare('delete from nft_items where collection_id = ?'),
-    upItem: db.prepare('insert or replace into nft_items (id, collection_id, name, owner, image) values (?, ?, ?, ?, ?)'),
+    upItem: db.prepare('insert or replace into nft_items (id, collection_id, name, owner, image, traits) values (?, ?, ?, ?, ?, ?)'),
+    upSale: db.prepare('insert or ignore into nft_sales (txid, collection_id, item_id, ts, height, price_micronoid, seller, buyer) values (?, ?, ?, ?, ?, ?, ?, ?)'),
+    upNftXfer: db.prepare('insert or ignore into nft_transfers (txid, collection_id, item_id, ts, height, from_addr, to_addr) values (?, ?, ?, ?, ?, ?, ?)'),
+    delListings: db.prepare('delete from nft_listings where collection_id = ?'),
+    upListing: db.prepare('insert or replace into nft_listings (collection_id, item_id, price_micronoid, seller) values (?, ?, ?, ?)'),
+    upNftCandle: db.prepare('insert or replace into nft_candles (collection_id, kind, bucket, o, h, l, c, v, n, height) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   };
 
   // available: getAssetSnapshot has answered. quote/build: swap RPC is present (not merely "method not found").
-  const status = { available: false, quote: false, build: false, orders: false, error: null, retryAt: 0, dexProbeAt: 0 };
+  const status = { available: false, quote: false, build: false, orders: false, nftOrders: false, error: null, retryAt: 0, dexProbeAt: 0 };
 
   const probeWait = () => {
     const n = Number(process.env.ASSET_PROBE_MS ?? 600_000);
@@ -243,14 +279,40 @@ module.exports = function assets(db, rpc, priceNow) {
         price_micronoid: s.price, curve, pool, trades, holders,
       };
     });
+    const wallets = ['o1acdefghjkmnpqr', 'o1qqqqqqqqqqqq', 'o1payqqqqqqqq'];
     const collections = [
       { id: 'stamps', name: 'Night Stamps', creator: null, items: 100, owners: 40, floor_micronoid: 12n * U, volume_micronoid: 5_000n * U, created_ts: now - 20 * 86400, items_list: ['Ash', 'Mint', 'Quiet', 'North'] },
       { id: 'faces', name: 'Paper Faces', creator: null, items: 24, owners: 10, floor_micronoid: 2n * U, volume_micronoid: 800n * U, created_ts: now - 3 * 86400, items_list: ['Fold', 'Crease'] },
       { id: 'glass', name: 'Empty Glass', creator: null, items: 8, owners: 1, floor_micronoid: null, volume_micronoid: 0n, created_ts: now - 3600, items_list: ['Cup'] },
-    ].map((c) => ({
-      ...c,
-      nfts: c.items_list.map((name, i) => ({ id: `${c.id}-${i + 1}`, name, owner: 'o1acdefghjkmnpqr', image: null })),
-    }));
+    ].map((c) => {
+      const nfts = c.items_list.map((name, i) => ({
+        id: `${c.id}-${i + 1}`, name, owner: wallets[i % 2], image: null,
+        traits: c.floor_micronoid == null ? [] : [
+          { trait: 'Backdrop', value: ['Ash', 'Mint', 'Ink', 'Glass'][i % 4] },
+          { trait: 'Ink', value: name },
+        ],
+      }));
+      const sales = [];
+      const transfers = [];
+      const listings = [];
+      if (c.floor_micronoid) {
+        const floor = c.floor_micronoid;
+        [floor, floor, floor + floor / 4n, floor * 2n, 600n * U, 6000n * U].forEach((price, i) => {
+          const item = nfts[i % nfts.length];
+          sales.push({
+            txid: `${c.id}-sale-${i}`, item_id: item.id, ts: now - 180 * (i + 1), height: null,
+            price_micronoid: price, seller: wallets[(i + 1) % 3], buyer: wallets[i % 3],
+          });
+        });
+        transfers.push({ txid: `${c.id}-xfer-0`, item_id: nfts[0].id, ts: now - 90, height: null, from: wallets[1], to: wallets[0] });
+        listings.push(
+          { item_id: nfts[0].id, price_micronoid: floor, seller: nfts[0].owner },
+          { item_id: nfts[1].id, price_micronoid: floor, seller: nfts[1].owner },
+        );
+        if (nfts[2]) listings.push({ item_id: nfts[2].id, price_micronoid: floor + floor / 4n, seller: nfts[2].owner });
+      }
+      return { ...c, nfts, sales, transfers, listings };
+    });
     return { tokens, collections };
   }
 
@@ -778,6 +840,12 @@ module.exports = function assets(db, rpc, priceNow) {
         created_ts: created, age_s: created ? Math.max(0, now - created) : null,
       };
     });
+    if (params.get('preset') === 'watch') {
+      const raw = params.get('ids') || '';
+      if (raw.length > 8000) throw bad('ids is too long');
+      const ids = new Set(raw.split(',').map((s) => s.trim()).filter((s) => ID.test(s)).slice(0, 200));
+      rows = rows.filter((r) => ids.has(r.id));
+    }
     if (qtext) rows = rows.filter((r) => `${r.name} ${r.id}`.toLowerCase().includes(qtext));
     rows = rows.filter((r) => inRange(bi(r.volume_micronoid), minV, maxV) && inRange(bi(r.floor_micronoid), minF, maxF)
       && inRange(r.items, minI, maxI) && inRange(r.owners, minO, maxO) && inRange(r.age_s, minA, maxA));
@@ -809,6 +877,7 @@ module.exports = function assets(db, rpc, priceNow) {
     const floor = bi(src.floor_micronoid);
     const vol = bi(src.volume_micronoid) || 0n;
     const items = demo ? src.nfts : q.items.all(id);
+    const salesN = demo ? (src.sales || []).length : q.salesCount.get(id).n;
     return {
       demo, live: demo ? false : !!status.available,
       collection: {
@@ -816,10 +885,127 @@ module.exports = function assets(db, rpc, priceNow) {
         items: Number(src.items) || items.length, owners: Number(src.owners) || 0,
         floor_micronoid: floor?.toString() ?? null, floor_usd: usdOf(floor, usd),
         volume_micronoid: vol.toString(), volume_usd: usdOf(vol, usd),
+        sales_n: salesN,
         created_ts: src.created_ts ?? null, age_s: src.created_ts ? Math.max(0, now - Number(src.created_ts)) : null,
       },
-      items: items.map((n) => ({ id: n.id, name: n.name || null, owner: n.owner || null, image: typeof n.image === 'string' && /^https:\/\//.test(n.image) ? n.image : null })),
+      items: items.map((n) => ({ id: n.id, name: n.name || null, owner: n.owner || null, image: typeof n.image === 'string' && /^https:\/\//.test(n.image) ? n.image : null, traits: traitsOf(n) })),
     };
+  }
+
+  function traitsOf(n) {
+    let raw = n.traits;
+    if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = []; } }
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((t) => t && typeof t.trait === 'string' && typeof t.value === 'string').slice(0, 24)
+      .map((t) => ({ trait: t.trait.slice(0, 40), value: t.value.slice(0, 40) }));
+  }
+  function traitsJson(n) {
+    const rows = traitsOf(n);
+    return rows.length ? JSON.stringify(rows) : null;
+  }
+  function findCollection(id, demo, now) {
+    return demo ? demoCatalog(now).collections.find((c) => c.id === id) : q.col.get(id);
+  }
+  // shortcut: demo floor and sale candles are a walk to the current floor, not the sample sales. Replace when the node sends history.
+  function demoNftCandles(col, kind, sec, before, limit, now) {
+    const floor = bi(col.floor_micronoid);
+    if (!floor) return { candles: [], more: false, oldest: null };
+    const end = kind === 'floor' ? floor : floor * 115n / 100n;
+    return demoCandles({ id: col.id + kind, price_micronoid: end, created_ts: col.created_ts }, sec, before, limit, now);
+  }
+  function storedNftPage(id, kind, sec, before, limit, now) {
+    const end = before ?? (now + sec);
+    const per = Math.max(1, sec / 60);
+    const cap = Math.min((limit + 1) * per, 20000);
+    const desc = q.nftCandlesBefore.all(id, kind, end, cap);
+    const reached = desc.length < cap;
+    const mins = desc.reverse();
+    let candles = rollup(mins, sec).filter((c) => c.t < end);
+    if (!reached && candles.length && mins.length && mins[0].t > candles[0].t) candles.shift();
+    if (candles.length > limit) candles = candles.slice(-limit);
+    const oldest = candles[0]?.t ?? null;
+    return { candles, more: oldest != null && !!q.nftCandleOlder.get(id, kind, oldest), oldest };
+  }
+  function nftCandles(id, params) {
+    checkId(id);
+    const tf = params.get('tf') || '15m';
+    if (!Object.hasOwn(TFS, tf)) throw bad('bad tf');
+    const kind = params.get('kind') || 'sale';
+    if (kind !== 'sale' && kind !== 'floor') throw bad('bad kind');
+    const sec = TFS[tf];
+    const demo = isDemo(params);
+    const now = Math.floor(Date.now() / 1000);
+    const col = findCollection(id, demo, now);
+    if (!col) return null;
+    const limit = candleLimit(params);
+    const before = candleBefore(params);
+    const page = demo ? demoNftCandles(col, kind, sec, before, limit, now) : storedNftPage(id, kind, sec, before, limit, now);
+    return { demo, tf, kind, bucket: sec, candles: candleOut(page.candles), more: page.more, oldest: page.oldest, limit };
+  }
+  function groupLevels(list, desc) {
+    const map = new Map();
+    for (const o of list) {
+      const price = strInt(o.price_micronoid);
+      if (!price || BigInt(price) === 0n) continue;
+      const size = strInt(o.size) || strInt(o.token_amount) || 1n;
+      const n = typeof size === 'bigint' ? size : BigInt(size);
+      if (n <= 0n) continue;
+      map.set(price, (map.get(price) || 0n) + n);
+    }
+    const prices = [...map.keys()].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1) * (desc ? -1 : 1));
+    let total = 0n;
+    return prices.slice(0, 12).map((p) => {
+      const size = map.get(p);
+      total += size;
+      return { price_micronoid: p, size: size.toString(), total: total.toString() };
+    });
+  }
+  function nftBookFromOrders(raw) {
+    return { bids: groupLevels(Array.isArray(raw?.bids) ? raw.bids : [], true), asks: groupLevels(Array.isArray(raw?.listings) ? raw.listings : (raw?.asks || []), false) };
+  }
+  async function nftBook(id, params) {
+    checkId(id);
+    const demo = isDemo(params);
+    const now = Math.floor(Date.now() / 1000);
+    const col = findCollection(id, demo, now);
+    if (!col) return null;
+    const floor = bi(col.floor_micronoid);
+    const pack = (book, source) => ({
+      demo, source, floor_micronoid: floor?.toString() ?? null,
+      label: source === 'orders' ? 'NFT orders' : 'Listings and floor depth',
+      bids: book.bids, asks: book.asks,
+    });
+    if (!demo && status.nftOrders) {
+      try {
+        const book = nftBookFromOrders(await rpc('getNftOrders', [{ collection_id: id }]));
+        if (book.bids.length || book.asks.length) return pack(book, 'orders');
+      } catch (e) {
+        if (!missingMethod(e)) throw e;
+        status.nftOrders = false;
+      }
+    }
+    const listings = demo ? (col.listings || []) : q.listingsFor.all(id);
+    return pack({ bids: [], asks: groupLevels(listings, false) }, 'listings');
+  }
+  function nftActivity(id, params) {
+    checkId(id);
+    const demo = isDemo(params);
+    const now = Math.floor(Date.now() / 1000);
+    const col = findCollection(id, demo, now);
+    if (!col) return null;
+    const names = new Map((demo ? col.nfts : q.items.all(id)).map((n) => [n.id, n.name || null]));
+    const usd = noidUsd();
+    const sales = (demo ? col.sales || [] : q.salesFor.all(id)).map((s) => ({
+      ts: Number(s.ts), kind: 'sale', txid: s.txid, item_id: s.item_id || null, item_name: names.get(s.item_id) || null,
+      price_micronoid: String(s.price_micronoid), usd: usdOf(bi(s.price_micronoid), usd),
+      wallet: s.buyer || null, other: s.seller || null,
+    }));
+    const transfers = (demo ? col.transfers || [] : q.nftXfers.all(id)).map((t) => ({
+      ts: Number(t.ts), kind: 'transfer', txid: t.txid, item_id: t.item_id || null, item_name: names.get(t.item_id) || null,
+      price_micronoid: null, usd: null, wallet: (t.to || t.to_addr) || null, other: (t.from || t.from_addr) || null,
+    }));
+    const events = [...sales, ...transfers].sort((a, b) => b.ts - a.ts || (a.txid < b.txid ? -1 : 1)).slice(0, 200);
+    return { demo, events };
   }
 
   function slippageBps(params) {
@@ -1042,8 +1228,33 @@ module.exports = function assets(db, rpc, priceNow) {
           strInt(c.floor_micronoid), strInt(c.volume_micronoid) || '0', Number.isInteger(c.created_ts) ? c.created_ts : null, Number.isInteger(c.updated_height) ? c.updated_height : null);
         if (Array.isArray(c.nfts)) {
           q.delItems.run(String(c.id));
-          for (const n of c.nfts.slice(0, 200)) if (ID.test(String(n.id || ''))) q.upItem.run(String(n.id), String(c.id), n.name ? String(n.name).slice(0, 80) : null, ADDR.test(n.owner || '') ? n.owner : null, typeof n.image === 'string' ? n.image.slice(0, 300) : null);
+          for (const n of c.nfts.slice(0, 200)) if (ID.test(String(n.id || ''))) q.upItem.run(String(n.id), String(c.id), n.name ? String(n.name).slice(0, 80) : null, ADDR.test(n.owner || '') ? n.owner : null, typeof n.image === 'string' ? n.image.slice(0, 300) : null, traitsJson(n));
         }
+        if (Array.isArray(c.sales)) {
+          for (const s of c.sales) {
+            const txid = String(s.txid || '');
+            if (!/^[A-Za-z0-9:_-]{8,80}$/.test(txid) || !Number.isInteger(s.ts) || !strInt(s.price_micronoid)) continue;
+            const info = q.upSale.run(txid, String(c.id), ID.test(String(s.item_id || '')) ? String(s.item_id) : null, s.ts, Number.isInteger(s.height) ? s.height : null, strInt(s.price_micronoid), ADDR.test(s.seller || '') ? s.seller : null, ADDR.test(s.buyer || '') ? s.buyer : null);
+            if (info.changes) bumpNftSale(String(c.id), s.ts);
+          }
+        }
+        if (Array.isArray(c.transfers)) {
+          for (const t of c.transfers) {
+            const txid = String(t.txid || '');
+            if (!/^[A-Za-z0-9:_-]{8,80}$/.test(txid) || !Number.isInteger(t.ts)) continue;
+            q.upNftXfer.run(txid, String(c.id), ID.test(String(t.item_id || '')) ? String(t.item_id) : '', t.ts, Number.isInteger(t.height) ? t.height : null, ADDR.test(t.from || '') ? t.from : '', ADDR.test(t.to || '') ? t.to : '');
+          }
+        }
+        if (Array.isArray(c.listings)) {
+          q.delListings.run(String(c.id));
+          for (const L of c.listings.slice(0, 200)) {
+            if (!ID.test(String(L.item_id || '')) || !strInt(L.price_micronoid)) continue;
+            q.upListing.run(String(c.id), String(L.item_id), strInt(L.price_micronoid), ADDR.test(L.seller || '') ? L.seller : null);
+          }
+        }
+        const floorNow = strInt(c.floor_micronoid);
+        // shortcut: one flat minute for the floor the node reports now. A floor series replaces this.
+        if (floorNow) bumpFloorCandle(String(c.id), floorNow, Number.isInteger(c.updated_height) ? c.updated_height : null);
       }
       db.exec('commit');
       return true;
@@ -1063,6 +1274,7 @@ module.exports = function assets(db, rpc, priceNow) {
     status.quote = !(await gone('quoteSwap'));
     status.build = !(await gone('buildSwap'));
     status.orders = !(await gone('getOpenOrders'));
+    status.nftOrders = !(await gone('getNftOrders'));
   }
 
   async function sync() {
@@ -1083,6 +1295,7 @@ module.exports = function assets(db, rpc, priceNow) {
       status.quote = false;
       status.build = false;
       status.orders = false;
+      status.nftOrders = false;
       status.error = e.message;
       status.retryAt = Date.now() + (missing ? probeWait() : 30_000);
       return false;
@@ -1106,6 +1319,35 @@ module.exports = function assets(db, rpc, priceNow) {
     if (!n) return;
     const safe = (x) => Number(x > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : x);
     q.upCandle.run(tokenId, bucket, safe(o), safe(h), safe(l), safe(c), safe(v), n, height);
+  }
+  function bumpNftSale(id, ts) {
+    const bucket = ts - (ts % 60);
+    let o, h, l, c, v = 0n, n = 0, height = null;
+    for (const r of q.nftSalesIn.all(id, bucket, bucket + 60)) {
+      const price = bi(r.price_micronoid);
+      if (price == null || price <= 0n || price > BigInt(Number.MAX_SAFE_INTEGER)) continue;
+      if (!n) o = h = l = price;
+      else { if (price > h) h = price; if (price < l) l = price; }
+      c = price; v += price; n++;
+      if (Number.isInteger(r.height)) height = r.height;
+    }
+    if (!n) return;
+    const safe = (x) => Number(x > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : x);
+    q.upNftCandle.run(id, 'sale', bucket, safe(o), safe(h), safe(l), safe(c), safe(v), n, height);
+  }
+  function bumpFloorCandle(id, floorStr, height) {
+    const price = Number(floorStr);
+    if (!Number.isFinite(price) || price < 1 || price > Number.MAX_SAFE_INTEGER) return;
+    const now = Math.floor(Date.now() / 1000);
+    const bucket = now - (now % 60);
+    let v = 0, n = 0;
+    for (const r of q.nftSalesIn.all(id, bucket, bucket + 60)) {
+      const p = bi(r.price_micronoid);
+      if (p == null) continue;
+      v += Number(p > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : p);
+      n++;
+    }
+    q.upNftCandle.run(id, 'floor', bucket, price, price, price, price, v, n, height);
   }
 
   function levelsFromOrders(raw) {
@@ -1200,7 +1442,13 @@ module.exports = function assets(db, rpc, priceNow) {
     },
     token: (id, params) => tokenDetail(id, params),
     wallet: (address, params) => walletView(address, params),
-    collections: (_id, params) => listCollections(params),
+    collections: (id, params, sub) => {
+      if (sub === 'candles') return nftCandles(id, params);
+      if (sub === 'book') return nftBook(id, params);
+      if (sub === 'activity') return nftActivity(id, params);
+      if (sub) return null;
+      return id ? collectionDetail(id, params) : listCollections(params);
+    },
     collection: (id, params) => collectionDetail(id, params),
     swap,
   };
