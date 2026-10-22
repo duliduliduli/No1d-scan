@@ -83,7 +83,7 @@ test('indexer + api', async (t) => {
   process.env.LABELS_FILE = labelFile;
   // Candle and watchlist checks add requests on top of the indexer suite.
   process.env.RATE_LIMIT = '1000';
-  const { server, tick, db, compressJson, packStats, issuance } = require('./server.js');
+  const { server, tick, db, compressJson, packStats, issuance, pollUsdc } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
   const get = async (p, opt = {}) => {
     const headers = opt.bare ? opt.headers : { 'sec-fetch-site': 'same-origin', ...opt.headers };
@@ -537,6 +537,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /off until v2\.1/);
   assert.match(homeHtml, /pill enh/);
   assert.match(homeHtml, /Enhanced Token Info/);
+  assert.match(homeHtml, /data-enh="usdc"/);
+  assert.match(homeHtml, /id="book"/);
+  assert.match(homeHtml, /Derived from pool reserves/);
+  assert.match(homeHtml, /Open orders/);
   assert.match(homeHtml, /id="enhform"/);
   assert.match(homeHtml, /Profile review/);
   assert.match(homeHtml, /Sample page\. Payment is not taken/);
@@ -774,15 +778,16 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await post('profile', profileBody({ website: 'https://user:pass@example.com/live' }), K))[0], 400);
   const [, made] = await post('profile', profileBody(), K);
   assert.strictEqual(made.status, 'unpaid');
-  assert.strictEqual(made.usd, 299);
+  assert.strictEqual(made.usd, 100);
+  assert.strictEqual(made.usdc, 100);
   const [, updated] = await post('profile', profileBody({ description: 'Updated night market coin.' }), K);
   assert.strictEqual(updated.id, made.id);
   const creditsBefore = await credits();
   const [, pay] = await post('profile-pay', { id: made.id, method: 'noid' }, K);
   assert.strictEqual(pay.kind, 'profile');
-  assert.strictEqual(pay.usd, 299);
+  assert.strictEqual(pay.usd, 100);
   const microP = Math.round(Number(pay.amount_noid) * 1e6);
-  assert.ok(microP > 1495e6 && microP < 1495e6 + 10000, pay.amount_noid);
+  assert.ok(microP > 500e6 && microP < 500e6 + 10000, pay.amount_noid);
   const taken = new Set(db.prepare('select dust from noid_topups where paid_ref is null and id != ?').all(pay.id).map((r) => r.dust));
   let dust = 4242;
   while (taken.has(dust)) dust++;
@@ -824,7 +829,7 @@ test('indexer + api', async (t) => {
     assert.strictEqual((await post('stripe-webhook', wrong, { 'stripe-signature': sign(wrong) }))[0], 200);
     assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'unpaid');
     assert.strictEqual(await credits(), creditsBefore, 'a short card payment does not buy the profile or credits');
-    const good = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_prof', payment_status: 'paid', client_reference_id: acct.id, amount_total: 29900, currency: 'usd', metadata: { kind: 'profile', profile_id: second.id } } } });
+    const good = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_prof', payment_status: 'paid', client_reference_id: acct.id, amount_total: 10000, currency: 'usd', metadata: { kind: 'profile', profile_id: second.id } } } });
     assert.strictEqual((await post('stripe-webhook', good, { 'stripe-signature': sign(good) }))[0], 200);
     assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'pending');
     assert.strictEqual(await credits(), creditsBefore);
@@ -839,11 +844,120 @@ test('indexer + api', async (t) => {
   assert.match(gcat.token.enhanced.banner, /demo=1/);
   assert.strictEqual(gcat.token.enhanced.twitter, 'https://x.com/ghostcat');
   assert.strictEqual((await get('tokens/qsun?demo=1'))[1].token.enhanced, null);
-  assert.strictEqual((await get('tokens?demo=1'))[1].enhance_usd, 299);
+  assert.strictEqual((await get('tokens?demo=1'))[1].enhance_usd, 100);
+  assert.strictEqual((await get('tokens?demo=1&window=6h'))[1].enhance_usdc, 100);
   const demoImg = await fetch(base + '/api/profile-media/gcat/banner?demo=1');
   assert.strictEqual(demoImg.status, 200);
   assert.match(demoImg.headers.get('content-type'), /image\/png/);
   assert.strictEqual((await fetch(base + '/api/profile-media/qsun/icon?demo=1')).status, 404);
+
+  // Order book: pool or curve reserves until the node exposes getOpenOrders.
+  const [, gcatBook] = await get('tokens/gcat/book?demo=1');
+  assert.strictEqual(gcatBook.demo, true);
+  assert.strictEqual(gcatBook.source, 'reserves');
+  assert.match(gcatBook.label, /pool reserves/);
+  assert.ok(gcatBook.bids.length && gcatBook.asks.length);
+  assert.ok(BigInt(gcatBook.asks[0].price_micronoid) > BigInt(gcatBook.bids[0].price_micronoid));
+  assert.ok(gcatBook.spread_micronoid && gcatBook.trades.length);
+  assert.match((await get('tokens/qsun/book?demo=1'))[1].label, /curve reserves/);
+  const [, liveBook] = await get('tokens/live1/book');
+  assert.strictEqual(liveBook.demo, false);
+  assert.strictEqual(liveBook.source, 'reserves');
+  assert.strictEqual(liveBook.bids.length, 0);
+  assert.ok(liveBook.trades.length);
+  process.env.ASSET_PROBE_MS = '0';
+  node.getOpenOrders = () => ({
+    bids: [{ price_micronoid: '1000', token_amount: '5' }, { price_micronoid: '1000', token_amount: '5' }],
+    asks: [{ price_micronoid: '1200', token_amount: '3' }],
+  });
+  await tick();
+  const [, openBook] = await get('tokens/live1/book?window=1m');
+  assert.strictEqual(openBook.source, 'orders');
+  assert.strictEqual(openBook.label, 'Open orders');
+  assert.strictEqual(openBook.bids[0].size, '10');
+  assert.strictEqual(openBook.asks[0].size, '3');
+  assert.strictEqual(openBook.spread_micronoid, '200');
+  delete node.getOpenOrders;
+  await tick();
+  assert.strictEqual((await get('tokens/live1/book?window=5m'))[1].source, 'reserves');
+  delete process.env.ASSET_PROBE_MS;
+
+  // USDC: off until the address is set. An exact base-unit amount marks the profile pending and does not add credits.
+  const { solanaCredits } = require('./usdc.js');
+  const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const owner = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
+  const solTx = {
+    transaction: { signatures: ['sig1'], message: { instructions: [] } },
+    meta: {
+      preTokenBalances: [{ accountIndex: 0, mint, owner, uiTokenAmount: { amount: '10' } }],
+      postTokenBalances: [
+        { accountIndex: 0, mint, owner, uiTokenAmount: { amount: '100000133' } },
+        { accountIndex: 1, mint: 'other', owner, uiTokenAmount: { amount: '999' } },
+      ],
+    },
+  };
+  assert.deepStrictEqual(solanaCredits(solTx, { address: owner, mint }), [{ tx: 'sig1', amount: '100000123' }]);
+  const ata = 'Ata111111111111111111111111111111111111111';
+  const solToAta = {
+    transaction: { signatures: ['sig2'], message: { instructions: [{ parsed: { type: 'transferChecked', info: { destination: ata, mint, tokenAmount: { amount: '100000123' } } } }] } },
+    meta: {},
+  };
+  assert.deepStrictEqual(solanaCredits(solToAta, { address: ata, mint }), [{ tx: 'sig2', amount: '100000123' }]);
+  assert.deepStrictEqual(solanaCredits({ ...solToAta, meta: { err: 'fail' } }, { address: ata, mint }), []);
+  assert.deepStrictEqual(solanaCredits({
+    transaction: { signatures: ['sig3'], message: { instructions: [{ parsed: { type: 'transferChecked', info: { destination: ata, mint: 'nope', tokenAmount: { amount: '9' } } } }] } },
+    meta: {},
+  }, { address: ata, mint }), []);
+  const [, third] = await post('profile', profileBody({ token_id: 'live3', description: 'Waiting on USDC.' }), K);
+  assert.strictEqual(third.status, 'unpaid');
+  assert.match((await post('profile-pay', { id: third.id, method: 'usdc' }, K))[1].error, /USDC_PAY_ADDRESS/);
+  process.env.USDC_CHAIN = 'solana';
+  process.env.USDC_PAY_ADDRESS = '0x' + '11'.repeat(20);
+  process.env.USDC_RPC_URL = 'http://127.0.0.1:1';
+  assert.match((await post('profile-pay', { id: third.id, method: 'usdc' }, K))[1].error, /does not match/);
+  process.env.USDC_CHAIN = 'base';
+  delete process.env.USDC_RPC_URL;
+  assert.match((await post('profile-pay', { id: third.id, method: 'usdc' }, K))[1].error, /USDC_RPC_URL/);
+  let usdcLog = null;
+  const usdcRpc = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c)).on('end', () => {
+      const call = JSON.parse(body || '{}');
+      const result = call.method === 'eth_blockNumber' ? '0x64'
+        : usdcLog ? [{ transactionHash: '0x' + 'ab'.repeat(32), data: '0x' + BigInt(usdcLog).toString(16) }] : [];
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result }));
+    });
+  });
+  await new Promise((r) => usdcRpc.listen(0, '127.0.0.1', r));
+  try {
+    const payAddr = '0x' + 'ab'.repeat(20);
+    process.env.USDC_CHAIN = 'base';
+    process.env.USDC_PAY_ADDRESS = payAddr;
+    process.env.USDC_RPC_URL = `http://127.0.0.1:${usdcRpc.address().port}`;
+    const [payStatus, order] = await post('profile-pay', { id: third.id, method: 'usdc' }, K);
+    assert.strictEqual(payStatus, 200);
+    assert.strictEqual(order.chain, 'base');
+    assert.strictEqual(order.address, payAddr);
+    assert.strictEqual(order.usdc, 100);
+    assert.match(order.amount_usdc, /^100\./);
+    assert.strictEqual(order.reference, order.amount_base.slice(-6));
+    assert.strictEqual(order.paid, false);
+    assert.strictEqual((await get(`usdc-order/${order.id}`, { headers: K }))[1].amount_base, order.amount_base);
+    usdcLog = (BigInt(order.amount_base) + 1n).toString();
+    assert.strictEqual(await pollUsdc(), 0);
+    assert.strictEqual((await get(`profile/${third.id}`, { headers: K }))[1].status, 'unpaid');
+    usdcLog = order.amount_base;
+    assert.strictEqual(await pollUsdc(), 1);
+    assert.strictEqual((await get(`profile/${third.id}`, { headers: K }))[1].status, 'pending');
+    assert.strictEqual(await credits(), creditsBefore, 'USDC profile payment does not add credits');
+    assert.strictEqual(await pollUsdc(), 0);
+    assert.strictEqual((await get(`usdc-order/${order.id}`, { headers: K }))[1].paid, true);
+  } finally {
+    usdcRpc.close();
+    delete process.env.USDC_CHAIN;
+    delete process.env.USDC_PAY_ADDRESS;
+    delete process.env.USDC_RPC_URL;
+  }
 
   const [, whale] = await get('address/o1whalewhale');
   assert.strictEqual(whale.label.entity, 'Test Whale');

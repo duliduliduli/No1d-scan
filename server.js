@@ -1319,8 +1319,11 @@ if (require.main === module) {
   every(pollMarkets, 3600_000);
   every(sweepHolders, HOLDERS_EVERY_MS);
   every(pollNetwork, 60_000);
+  const watchUsdc = () => bill.pollUsdc().catch((e) => console.error('usdc:', e.message));
+  watchUsdc();
+  setInterval(watchUsdc, 15_000).unref();
   server.listen(Number(process.env.PORT || 8080), process.env.HOST || '127.0.0.1', () =>
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), migrateDb, compressJson, packStats, issuance };
+module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance };

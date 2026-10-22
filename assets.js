@@ -22,6 +22,8 @@
 //          price_impact_pct, spot_price_micronoid, exec_price_micronoid, fee_in_tx, venue }
 //   buildSwap({...quote fields, sender}) -> { unsigned, fee_in_tx }
 //     unsigned is the bytes the wallet signs. A payload that already carries a signature is refused.
+//   getOpenOrders({token_id}) -> { bids: [{ price_micronoid, token_amount }], asks: [...] }
+//     When this method is missing, the book is derived from pool or curve reserves and labeled as such.
 //
 // The fee is a separate output to SWAP_FEE_ADDRESS when buildSwap reports fee_in_tx.
 // Until the node can do that, the quote only itemizes the fee. This process never signs.
@@ -111,7 +113,7 @@ module.exports = function assets(db, rpc, priceNow) {
   };
 
   // available: getAssetSnapshot has answered. quote/build: swap RPC is present (not merely "method not found").
-  const status = { available: false, quote: false, build: false, error: null, retryAt: 0, dexProbeAt: 0 };
+  const status = { available: false, quote: false, build: false, orders: false, error: null, retryAt: 0, dexProbeAt: 0 };
 
   const probeWait = () => {
     const n = Number(process.env.ASSET_PROBE_MS ?? 600_000);
@@ -957,7 +959,8 @@ module.exports = function assets(db, rpc, priceNow) {
   const missingMethod = (e) => /method not found|not supported|unknown method|-32601/i.test(e.message || '');
 
   async function probeDex() {
-    if (Date.now() < status.dexProbeAt) return;
+    // A zero wait probes on this sync even when a longer wait was already scheduled.
+    if (probeWait() > 0 && Date.now() < status.dexProbeAt) return;
     status.dexProbeAt = Date.now() + probeWait();
     const gone = async (method) => {
       try { await rpc(method, [{}], 2_000); return false; }
@@ -965,6 +968,7 @@ module.exports = function assets(db, rpc, priceNow) {
     };
     status.quote = !(await gone('quoteSwap'));
     status.build = !(await gone('buildSwap'));
+    status.orders = !(await gone('getOpenOrders'));
   }
 
   async function sync() {
@@ -984,6 +988,7 @@ module.exports = function assets(db, rpc, priceNow) {
       status.available = false;
       status.quote = false;
       status.build = false;
+      status.orders = false;
       status.error = e.message;
       status.retryAt = Date.now() + (missing ? probeWait() : 30_000);
       return false;
@@ -1009,6 +1014,84 @@ module.exports = function assets(db, rpc, priceNow) {
     q.upCandle.run(tokenId, bucket, safe(o), safe(h), safe(l), safe(c), safe(v), n, height);
   }
 
+  function levelsFromOrders(raw) {
+    const side = (list, desc) => {
+      const map = new Map();
+      for (const o of Array.isArray(list) ? list : []) {
+        const price = strInt(o.price_micronoid);
+        const size = strInt(o.token_amount) || strInt(o.size);
+        if (!price || !size || BigInt(size) === 0n) continue;
+        map.set(price, (map.get(price) || 0n) + BigInt(size));
+      }
+      const prices = [...map.keys()].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1) * (desc ? -1 : 1));
+      let total = 0n;
+      return prices.slice(0, 12).map((p) => {
+        const size = map.get(p);
+        total += size;
+        return { price_micronoid: p, size: size.toString(), total: total.toString() };
+      });
+    };
+    return { bids: side(raw?.bids, true), asks: side(raw?.asks, false) };
+  }
+  // Constant-product ladder. Each level is 0.5% of the token reserve. Price is the marginal fill, not a resting order.
+  function ladderFromReserves(R, T) {
+    const bids = [], asks = [];
+    if (R <= 0n || T <= 1n) return { bids, asks };
+    const step = T / 200n;
+    if (step <= 0n) return { bids, asks };
+    let bidCum = 0n, askCum = 0n;
+    for (let i = 1; i <= 8; i++) {
+      const before = step * BigInt(i - 1);
+      const T1 = T - before;
+      if (T1 > step) {
+        const cost = (R * T / T1) * step / (T1 - step);
+        const price = cost / step;
+        if (price > 0n) { askCum += step; asks.push({ price_micronoid: price.toString(), size: step.toString(), total: askCum.toString() }); }
+      }
+      const T2 = T + before;
+      const out = step * (R * T / T2) / (T2 + step);
+      const bidPrice = out / step;
+      if (bidPrice > 0n) { bidCum += step; bids.push({ price_micronoid: bidPrice.toString(), size: step.toString(), total: bidCum.toString() }); }
+    }
+    return { bids, asks };
+  }
+  function finishBook(book, source, venue, demo, trades) {
+    const bid = book.bids[0] ? BigInt(book.bids[0].price_micronoid) : null;
+    const ask = book.asks[0] ? BigInt(book.asks[0].price_micronoid) : null;
+    const spread = bid != null && ask != null && ask >= bid ? ask - bid : null;
+    const mid = bid != null && ask != null ? (ask + bid) / 2n : null;
+    const where = venue === 'curve' ? 'curve reserves' : 'pool reserves';
+    return {
+      demo, source, venue, label: source === 'orders' ? 'Open orders' : `Derived from ${where}`,
+      spread_micronoid: spread == null ? null : spread.toString(),
+      spread_pct: spread != null && mid > 0n ? Number(spread * 10000n / mid) / 100 : null,
+      bids: book.bids, asks: book.asks, trades: trades.slice(0, 12),
+    };
+  }
+  async function bookView(id, params) {
+    checkId(id);
+    const demo = isDemo(params);
+    const now = Math.floor(Date.now() / 1000);
+    const row = findPresented(id, demo, now);
+    if (!row) return null;
+    const trades = (demo
+      ? [...(indexTrades(demoCatalog(now).tokens.find((t) => t.id === id).trades).get(id) || [])].reverse()
+      : q.tradesFor.all(id)
+    ).slice(0, 12).map(publicTrade);
+    if (!demo && status.orders) {
+      try {
+        const book = levelsFromOrders(await rpc('getOpenOrders', [{ token_id: id }]));
+        if (book.bids.length || book.asks.length) return finishBook(book, 'orders', null, false, trades);
+      } catch (e) {
+        if (!missingMethod(e)) throw e;
+        status.orders = false;
+      }
+    }
+    const reserves = reservesOf(row);
+    if (!reserves) return finishBook({ bids: [], asks: [] }, 'reserves', null, demo, trades);
+    return finishBook(ladderFromReserves(reserves.R, reserves.T), 'reserves', reserves.venue, demo, trades);
+  }
+
   return {
     sync, status,
     tokens: (id, params, sub) => {
@@ -1016,6 +1099,7 @@ module.exports = function assets(db, rpc, priceNow) {
       if (sub === 'trades') return tradeView(id, params);
       if (sub === 'holders') return holderView(id, params);
       if (sub === 'transfers') return transferView(id, params);
+      if (sub === 'book') return bookView(id, params);
       if (sub) return null;
       return id ? tokenDetail(id, params) : listTokens(params);
     },

@@ -23,6 +23,7 @@ const PRICE_MAX_AGE_MS = Number(process.env.PRICE_MAX_AGE_MS || 15 * 60_000);
 
 // livePrice() -> { usd, at } (at = when the price was fetched) or null; tipNow() -> current chain height.
 module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () => null, profiles = null) {
+  const usdcPay = require('./usdc.js')(db, profiles);
   // USD_PER_NOID pins the price. Otherwise new quotes use the live market price, and pause when it is older than
   // PRICE_MAX_AGE_MS. Orders already quoted keep their price and are still settled while the feed is down.
   const priceNow = () => {
@@ -256,7 +257,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
 
   const pricing = () => ({
     credits_per_usd: CREDITS_PER_USD, packs_usd: PACKS_USD, chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY,
-    requests_per_credit: REQUESTS_PER_CREDIT, enhanced_profile_usd: profiles ? profiles.priceUsd() : 299, support: process.env.SUPPORT_EMAIL || null,
+    requests_per_credit: REQUESTS_PER_CREDIT, enhanced_profile_usd: profiles ? profiles.priceUsd() : 100, enhanced_profile_usdc: profiles ? profiles.priceUsdc() : 100, support: process.env.SUPPORT_EMAIL || null,
     card: !!STRIPE && cardActive, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: noid().live, confirmations: CONFIRMATIONS },
     noid_paused: process.env.PAY_ADDRESS && !noid() ? priceNow().paused : null,
   });
@@ -303,6 +304,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       const row = profiles?.ownedUnpaid(acct.id, body?.id);
       if (!row) return null;
       const usd = profiles.priceUsd();
+      if (body.method === 'usdc') return usdcPay.quote(acct, row.id);
       if (body.method === 'card') {
         if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
         const form = new URLSearchParams({
@@ -326,7 +328,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
         return { url: s.url, usd, profile_id: row.id };
       }
       const NOID = noid();
-      if (body.method !== 'noid') throw bad('method must be noid or card');
+      if (body.method !== 'noid') throw bad('method must be usdc, card, or noid');
       if (!NOID) throw bad(process.env.PAY_ADDRESS ? `NOID payments are paused: ${priceNow().paused}. Try again in a few minutes.` : 'NOID payments are not enabled right now', 503);
       if (q.openTopups.get().n >= 1000) throw bad('too many open payments, try again later', 503);
       const base = Math.round((usd / NOID.usdPerNoid) * 1e6);
@@ -342,6 +344,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       throw bad('could not allocate a payment amount, try again', 503);
     },
     'GET profile': (acct, _, id) => profiles ? profiles.view(acct, id) : null,
+    'GET usdc-order': (acct, _, id) => usdcPay.view(acct, id),
     'POST topup': async (acct, body) => {
       if (!acct) throw bad('missing or unknown API key', 401);
       const usd = Number(body.usd);
@@ -381,5 +384,5 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
   };
 
-  return { account, countRequest, chargeChat, settleNoid, stripeWebhook, routes, pricing };
+  return { account, countRequest, chargeChat, settleNoid, stripeWebhook, routes, pricing, pollUsdc: () => usdcPay.poll() };
 };

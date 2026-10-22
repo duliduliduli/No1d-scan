@@ -124,6 +124,14 @@
   .mcard .px { text-align:right; font:700 14px var(--mono) } .mcard .px small, .mcard .who small { display:block; color:var(--muted); font:11px var(--mono); font-weight:400 }
   .mcard .chgs, .mcard .meta { grid-column:2 / -1; color:var(--muted); font:11px var(--mono) }
   .curve { height:6px; background:var(--head); border-radius:4px; overflow:hidden; margin-top:4px } .curve > span { display:block; height:100%; background:var(--accent); box-shadow:var(--glow) }
+  .bookrow { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:14px; align-items:start }
+  @media (max-width:900px) { .bookrow { grid-template-columns:1fr } }
+  .book td { padding:3px 4px; border:0; position:relative }
+  .book td.depth span { position:absolute; right:0; top:1px; bottom:1px; background:rgba(168,245,233,.18) }
+  .book tr.ask td.px, .book td.ask { color:#ff6b6b } .book tr.ask td.depth span { background:rgba(255,107,107,.22) }
+  .book tr.bid td.px, .book td.bid { color:var(--accent) }
+  .book .spread { text-align:center; padding:6px 0; color:var(--muted); border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin:4px 0 }
+  .book h3 { margin:10px 0 4px; font:11px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
   .split { display:grid; grid-template-columns:1fr minmax(280px, 340px); gap:14px; align-items:start }
   .split > * { min-width:0 }
   @media (max-width:800px) { .split { grid-template-columns:1fr } .sidecol { order:-1 } }
@@ -1070,7 +1078,7 @@ function nftCards(list) {
       <span class="meta">Vol ${esc(fmtNoid(c.volume_micronoid))} · ${n0(c.items)} items · ${n0(c.owners)} owners</span></a>`).join('')}</div>`;
 }
 const rangeInputs = (label, a, b, params) => `<label>${label}<span class="pair"><input data-f="${a}" value="${esc(params.get(a) || '')}" placeholder="min" inputmode="decimal" aria-label="${esc(label)} minimum"><input data-f="${b}" value="${esc(params.get(b) || '')}" placeholder="max" inputmode="decimal" aria-label="${esc(label)} maximum"></span></label>`;
-let exGen = 0, exploreTimer = null, tokenTimer = null, tokenChart = null;
+let exGen = 0, exploreTimer = null, tokenTimer = null, usdcTimer = null, tokenChart = null;
 function exploreShell(tab, params) {
   const sorts = tab === 'nfts' ? NFT_SORTS : TOKEN_SORTS;
   const sort = params.get('sort') || (tab === 'nfts' ? 'volume' : 'volume');
@@ -1356,11 +1364,11 @@ function fileB64(file) {
   });
 }
 function enhanceCard(d, demo) {
-  const usd = Number(d.enhance_usd || 299);
+  const usdc = Number(d.enhance_usdc || 100);
   const note = demo
     ? '<p class="fine">Sample page. Payment is not taken.</p>'
-    : '<p class="fine">Log in with the API key from API &amp; Credits. After payment the profile waits for review and stays hidden until it is approved.</p>';
-  return `<div class="card" id="enhform"><h2>Enhanced Token Info <small>$${usd}</small></h2>
+    : '<p class="fine">Log in with the API key from API &amp; Credits. USDC is watched on chain. Card and NOID also work. The profile stays hidden until an admin approves it.</p>';
+  return `<div class="card" id="enhform"><h2>Enhanced Token Info <small>${usdc} USDC</small></h2>
     <p>A banner, an icon, a short description, and https links for a website and X. Unpaid profiles show none of these.</p>
     ${note}
     <form>
@@ -1369,8 +1377,8 @@ function enhanceCard(d, demo) {
       <label>X<input name="twitter" inputmode="url" placeholder="https://x.com/name" autocomplete="off"></label>
       <label>Icon <span class="muted">PNG, JPG or WebP · 512×512 max · 256 KB</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp" required></label>
       <label>Banner <span class="muted">PNG, JPG or WebP · 1500×500 max · under 1 MB</span><input name="banner" type="file" accept="image/png,image/jpeg,image/webp" required></label>
-      <p class="fee">One-time $${usd}. Card or NOID.</p>
-      <div class="row"><button type="button" data-enh="card">Pay by card</button><button type="button" data-enh="noid">Pay with NOID</button></div>
+      <p class="fee">One-time ${usdc} USDC. Send the exact amount. Card and NOID also accepted.</p>
+      <div class="row"><button type="button" data-enh="usdc">Pay ${usdc} USDC</button><button type="button" data-enh="card">Card</button><button type="button" data-enh="noid">NOID</button></div>
       <p id="enhmsg" class="muted"></p>
     </form></div>`;
 }
@@ -1394,6 +1402,19 @@ function wireEnhance(d, t, demo) {
       });
       const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh });
       if (pay.url) { location.href = pay.url; return; }
+      if (pay.method === 'usdc') {
+        msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b> is the last digits. A different amount is not matched. This page watches the transfer.`;
+        clearInterval(usdcTimer);
+        usdcTimer = setInterval(async () => {
+          try {
+            const st = await api('usdc-order/' + pay.id);
+            if (!st?.paid || !$('enhmsg')) return;
+            clearInterval(usdcTimer);
+            $('enhmsg').textContent = 'USDC payment confirmed. The profile stays hidden until an admin approves it.';
+          } catch {}
+        }, 5000);
+        return;
+      }
       msg.innerHTML = `Send exactly <b>${esc(pay.amount_noid)} NOID</b> to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_noid)} It stays in review until an admin approves it.`;
     } catch (err) {
       msg.textContent = err.message;
@@ -2069,10 +2090,13 @@ const pages = {
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
           <div>5m ${chgHtml(t.change['5m'])} · 1h ${chgHtml(t.change['1h'])} · 6h ${chgHtml(t.change['6h'])} · 24h ${chgHtml(t.change['24h'])}</div>
         </div></div></div>
+        <div class="bookrow">
         <div class="card"><h2>Price <small>NOID per token</small></h2>
           <div class="tfs" data-tabs="tf">${[['1m', '1m'], ['5m', '5m'], ['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']].map(([tf, label]) => `<button type="button" data-v="${tf}" class="${tf === '15m' ? 'on' : ''}">${label}</button>`).join('')}<button type="button" class="fit" id="tvfit" title="Fit the loaded candles in the card">Fit</button></div>
           <div id="tv"><p class="muted">Loading chart…</p></div></div>
-        <div class="card"><h2>Trades <small class="muted">auto-refresh 15s</small></h2><div id="tape"></div></div>
+        <div class="card book" id="book"><h2>Book <small id="booksrc">Open orders or derived from pool reserves</small></h2><div id="bookbody"><p class="muted">Loading book…</p></div></div>
+        </div>
+        <div class="card"><h2>Trades <small class="muted">auto-refresh 5s</small></h2><div id="tape"></div></div>
         <div class="card"><h2>Holders <small class="muted">${n0(t.holders_n)} · top 10 hold ${esc(t.top10_pct)}%</small></h2>${d.holders.length ? `<div class="bars">${d.holders.map((h) => `<a class="bar" href="/address/${encodeURIComponent(h.address)}" data-link><span class="name">${esc(h.address)}</span><span class="val">${esc(h.share)}%</span><span class="track"><span class="fill" data-w="${Math.min(100, h.share || 0)}"></span></span></a>`).join('')}</div>` : '<p class="muted">Top holders are not published for this token yet.</p>'}</div>
       </div><div class="sidecol">
         ${tradeOn ? '<div id="swappane"></div>' : tradeLocked(d.swap)}
@@ -2110,11 +2134,34 @@ const pages = {
     await openTokenChart(id, demo, '15m');
     if (tradeOn && $('swappane')) mountSwap(d, id);
     wireEnhance(d, t, demo);
+    const paintBook = async () => {
+      const el = $('bookbody');
+      if (!el) return;
+      const b = await api(`tokens/${encodeURIComponent(id)}/book${q}`);
+      const bookLabel = b.label || (b.source === 'orders' ? 'Open orders' : 'Derived from pool reserves');
+      if ($('booksrc')) $('booksrc').textContent = (b.demo ? 'Sample · ' : '') + bookLabel;
+      const rows = (list, side) => list.map((r) => {
+        const w = max > 0n ? Number(BigInt(r.total) * 100n / max) : 0;
+        return `<tr class="${side}"><td class="px">${esc(fmtNoid(r.price_micronoid))}</td><td class="num">${n0(r.size)}</td><td class="depth"><span style="width:${Math.max(0, Math.min(100, w))}%"></span>${n0(r.total)}</td></tr>`;
+      }).join('');
+      const all = [...(b.bids || []), ...(b.asks || [])];
+      const max = all.reduce((m, r) => { const t = BigInt(r.total || 0); return t > m ? t : m; }, 0n);
+      const spread = b.spread_micronoid ? `${fmtNoid(b.spread_micronoid)}${b.spread_pct == null ? '' : ` · ${Number(b.spread_pct).toFixed(2)}%`}` : '–';
+      const trades = (b.trades || []).slice(0, 8).map((tr) => `<tr><td class="${tr.side === 'sell' ? 'ask' : 'bid'}">${esc(tr.side)}</td><td>${esc(fmtNoid(tr.price_micronoid))}</td><td class="num">${n0(tr.token_amount)}</td><td>${esc(ago(tr.ts))}</td></tr>`).join('');
+      el.innerHTML = `<table><tbody>${rows([...(b.asks || [])].reverse(), 'ask')}</tbody></table>
+        <div class="spread">Spread ${esc(spread)}</div>
+        <table><tbody>${rows(b.bids || [], 'bid')}</tbody></table>
+        ${b.bids?.length || b.asks?.length ? '' : '<p class="muted">No depth yet.</p>'}
+        <h3>Recent trades</h3>
+        ${trades ? `<table><tbody>${trades}</tbody></table>` : '<p class="muted">No trades yet.</p>'}`;
+    };
+    paintBook().catch((e) => { if ($('bookbody')) $('bookbody').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; });
     clearInterval(tokenTimer);
     tokenTimer = setInterval(async () => {
       if (document.hidden || !$('tape')) return;
       try { paintTape((await api(`tokens/${encodeURIComponent(id)}/trades${q}`)).trades || []); } catch {}
-    }, 15_000);
+      paintBook().catch(() => {});
+    }, 5_000);
   },
   async collection(id) {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
@@ -2278,7 +2325,7 @@ function feePartsView(t) {
 
 async function render() {
   const [, type, id] = location.pathname.split('/');
-  feed?.close(); feed = null; clearInterval(ticker); clearInterval(exploreTimer); clearInterval(tokenTimer); exploreTimer = null; tokenTimer = null;
+  feed?.close(); feed = null; clearInterval(ticker); clearInterval(exploreTimer); clearInterval(tokenTimer); clearInterval(usdcTimer); exploreTimer = null; tokenTimer = null; usdcTimer = null;
   unmountPriceChart(); unmountTokenChart(); unmountGlobe();
   const onEx = type === 'explore' || type === 'token' || type === 'collection';
   for (const a of document.querySelectorAll('#menu nav a, a.explore')) {

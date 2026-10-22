@@ -6,9 +6,14 @@ const images = require('./images.js');
 const ID = /^[A-Za-z0-9:_-]{1,80}$/;
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 
+function priceUsdc() {
+  const n = Number(process.env.ENHANCED_PROFILE_USDC ?? 100);
+  return Number.isInteger(n) && n >= 1 && n <= 1_000_000 ? n : 100;
+}
 function priceUsd() {
-  const n = Number(process.env.ENHANCED_PROFILE_USD ?? 299);
-  return Number.isInteger(n) && n >= 1 && n <= 100_000 ? n : 299;
+  if (process.env.ENHANCED_PROFILE_USD == null || process.env.ENHANCED_PROFILE_USD === '') return priceUsdc();
+  const n = Number(process.env.ENHANCED_PROFILE_USD);
+  return Number.isInteger(n) && n >= 1 && n <= 100_000 ? n : priceUsdc();
 }
 
 function cleanText(s) {
@@ -104,11 +109,11 @@ module.exports = function profiles(db) {
     if (open && open.account !== acct.id) throw bad('someone else has already started an enhanced profile for this token');
     if (open) {
       q.updateUnpaid.run(f.description, f.website, f.twitter, f.icon.bytes, f.icon.type, f.banner.bytes, f.banner.type, open.id, acct.id);
-      return { id: open.id, status: 'unpaid', usd: priceUsd(), token_id: f.token_id };
+      return { id: open.id, status: 'unpaid', usd: priceUsd(), usdc: priceUsdc(), token_id: f.token_id };
     }
     const id = randomBytes(8).toString('hex');
     q.insert.run(id, f.token_id, acct.id, f.description, f.website, f.twitter, f.icon.bytes, f.icon.type, f.banner.bytes, f.banner.type, Date.now());
-    return { id, status: 'unpaid', usd: priceUsd(), token_id: f.token_id };
+    return { id, status: 'unpaid', usd: priceUsd(), usdc: priceUsdc(), token_id: f.token_id };
   }
 
   function ownedUnpaid(account, id) {
@@ -131,7 +136,7 @@ module.exports = function profiles(db) {
   function view(acct, id) {
     const row = q.byId.get(id || '');
     if (!row || !acct || row.account !== acct.id) return null;
-    return { id: row.id, token_id: row.token_id, status: row.status, usd: priceUsd(), description: row.description, website: row.website, twitter: row.twitter };
+    return { id: row.id, token_id: row.token_id, status: row.status, usd: priceUsd(), usdc: priceUsdc(), description: row.description, website: row.website, twitter: row.twitter };
   }
 
   function adminOk(token) {
@@ -175,7 +180,7 @@ module.exports = function profiles(db) {
       };
       return { ...t, enhanced: full, logo: full.icon };
     };
-    const next = { ...out, enhance_usd: priceUsd() };
+    const next = { ...out, enhance_usd: priceUsd(), enhance_usdc: priceUsdc() };
     if (next.tokens) next.tokens = next.tokens.map(apply);
     if (next.token) next.token = apply(next.token);
     return next;
@@ -199,5 +204,5 @@ module.exports = function profiles(db) {
     return kind === 'icon' ? { bytes: row.icon, type: row.icon_type } : { bytes: row.banner, type: row.banner_type };
   }
 
-  return { create, ownedUnpaid, markPaid, view, adminOk, adminList, review, decorate, image, adminImage, priceUsd };
+  return { create, ownedUnpaid, markPaid, view, adminOk, adminList, review, decorate, image, adminImage, priceUsd, priceUsdc };
 };
