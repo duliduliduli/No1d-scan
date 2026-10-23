@@ -363,6 +363,7 @@ test('indexer + api', async (t) => {
   const [, allMiners] = await get('miners?window=all');
   assert.deepStrictEqual(allMiners.miners.map((m) => m.miner).sort(), ['o1minereven', 'o1minerodd']);
   assert.strictEqual(allMiners.blocks, tip + 1);
+  assert.ok(allMiners.warning == null);
   const [, series] = await get('history?window=all');
   assert.ok(series.points.length >= 1 && series.points[0].hashrate > 0 && series.points[0].block_time === 60);
   const [, mp] = await get('mempool');
@@ -591,6 +592,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="addrchart"/);
   assert.match(homeHtml, /arcDashAnimateTime/);
   assert.match(homeHtml, /1Y/);
+  assert.doesNotMatch(homeHtml, /mined more than half/);
   assert.match(homeHtml, /Countries of peers connected to this explorer's node/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
   assert.match(homeHtml, /Get Enhanced/);

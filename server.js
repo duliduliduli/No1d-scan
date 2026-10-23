@@ -988,8 +988,7 @@ const routes = {
     const rows = q.minersSince.all(since);
     const total = rows.reduce((s, r) => s + r.blocks, 0);
     const miners = rows.slice(0, 15).map((r) => ({ ...r, share: total ? r.blocks / total : 0, entity: labelFor(r.miner)?.entity || null }));
-    const hot = miners.find((r) => r.share > 0.5);
-    return { window: params.get('window') || '24h', blocks: total, miner_count: rows.length, miners, warning: hot ? `${hot.entity || hot.miner || 'One miner'} mined more than half the blocks in this window.` : null };
+    return { window: params.get('window') || '24h', blocks: total, miner_count: rows.length, miners };
   },
 
   // Time series for charts: hashrate, block time, difficulty, active slots per bucket.

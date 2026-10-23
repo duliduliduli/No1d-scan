@@ -30,7 +30,7 @@
   body { margin:0; color:var(--fg); font:15px/1.55 system-ui, sans-serif; min-height:100vh;
     background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%23a8f5e9' stroke-opacity='.045'%3E%3Cpath d='M0 40h60l20 20h60M120 0v30l30 30v60M240 150h-50l-30 30v60M0 200h40l30-30h40M200 0v20l-20 20'/%3E%3Cg fill='%23a8f5e9' fill-opacity='.08' stroke='none'%3E%3Ccircle cx='60' cy='40' r='2.5'/%3E%3Ccircle cx='150' cy='120' r='2.5'/%3E%3Ccircle cx='190' cy='150' r='2.5'/%3E%3Ccircle cx='110' cy='170' r='2.5'/%3E%3Ccircle cx='180' cy='40' r='2.5'/%3E%3C/g%3E%3C/svg%3E") }
   a { color:var(--accent); text-decoration:none } a:hover { text-shadow:var(--glow) }
-  header, main, footer { max-width:1100px; margin:0 auto; padding:16px }
+  header, main, footer { max-width:min(1100px, 100%); margin:0 auto; padding:16px; min-width:0 }
   header { display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--line) }
   header h1 { margin:0; font:700 15px var(--mono); letter-spacing:.14em; text-transform:uppercase } header h1 a { color:var(--accent) }
   header h1 a::before { content:''; display:inline-block; width:8px; height:8px; background:var(--accent); box-shadow:var(--glow); margin-right:10px; vertical-align:1px }
@@ -51,7 +51,7 @@
   input { flex:1; padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono); outline:none }
   input::placeholder { color:var(--muted) }
   input:focus { border-color:var(--accent); box-shadow:var(--glow) }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap:10px }
   .card { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:14px 16px; margin-bottom:14px; overflow:visible; max-width:100% }
   .stat small { color:var(--muted); display:block; font:12px var(--mono); letter-spacing:.08em; text-transform:uppercase }
   .stat b { font:700 20px var(--mono); overflow-wrap:anywhere }
@@ -91,12 +91,12 @@
   .empty { padding:28px 8px 12px; text-align:center } .empty b { display:block; margin-bottom:8px; color:var(--accent); font:700 15px var(--mono); letter-spacing:.04em }
   .exbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0 } .exbar input, .exbar select { flex:1; min-width:0 }
   .filters { margin:8px 0 12px } .filters summary { cursor:pointer; font:600 12px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--accent) }
-  .fgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; margin-top:10px }
+  .fgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap:8px; margin-top:10px }
   .fgrid label { display:flex; flex-direction:column; gap:4px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
   .fgrid .pair { display:flex; gap:6px } .fgrid input { width:100%; min-width:0 }
   button.sort { border:0; background:none; padding:0; color:var(--muted); font:600 12px var(--mono); letter-spacing:.06em; box-shadow:none }
   button.sort.on, button.sort:hover { color:var(--accent); box-shadow:none }
-  body.widepage header, body.widepage main, body.widepage footer { max-width:1440px }
+  body.widepage header, body.widepage main, body.widepage footer { max-width:min(1440px, 100%) }
   .wide { display:none } @media (min-width:900px) { .wide { display:block } .narrow { display:none } }
   .scroller { overflow-x:auto; overflow-y:clip; max-width:100%; }
   .tok { width:100% } .tok td, .tok th { word-break:normal; white-space:nowrap; padding:8px 6px }
@@ -119,7 +119,7 @@
   .who { display:flex; gap:8px; align-items:center; min-width:0 }
   .logo { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; flex:none; background:var(--head); border:1px solid var(--accent); color:var(--accent); font:700 11px var(--mono); overflow:hidden }
   .logo img { width:100%; height:100%; object-fit:cover }
-  .mcard { display:grid; grid-template-columns:36px 1fr auto; gap:2px 10px; padding:12px 0; border-bottom:1px solid var(--line); color:inherit; text-decoration:none }
+  .mcard { display:grid; grid-template-columns:36px minmax(0,1fr) auto; gap:2px 10px; padding:12px 0; border-bottom:1px solid var(--line); color:inherit; text-decoration:none }
   .mcard:hover { text-shadow:none; background:rgba(168,245,233,.04) }
   .mcard .who { flex-direction:column; align-items:flex-start }
   .mcard .px { text-align:right; font:700 14px var(--mono) } .mcard .px small, .mcard .who small { display:block; color:var(--muted); font:11px var(--mono); font-weight:400 }
@@ -154,7 +154,7 @@
   button.star.on { color:var(--gold); border-color:var(--gold) }
   .mcard .px button.star { margin:0 0 4px; display:inline-block }
   .tape td.side { font-weight:700 }
-  .statrow { display:grid; grid-template-columns:repeat(auto-fit, minmax(108px, 1fr)); gap:8px; margin-top:12px }
+  .statrow { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(108px, 100%), 1fr)); gap:8px; margin-top:12px }
   .statrow .stat b { display:block; font-size:14px }
   .statrow .stat b small, .statrow .stat small.muted { display:block; font-weight:400 }
   .txfilters { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 8px }
@@ -208,7 +208,7 @@
   #enhform .row { margin-top:12px }
   #enhform textarea { min-height:64px; padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono) }
   #admin img.logo { width:48px; height:48px }
-  .items { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px }
+  .items { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(140px, 100%), 1fr)); gap:10px }
   .item { border:1px solid var(--line); border-radius:4px; padding:10px; background:var(--head) }
   .traits { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px }
   .traits span { font:10px var(--mono); border:1px solid var(--line); border-radius:99px; padding:2px 6px; color:var(--muted) }
@@ -226,7 +226,7 @@
   .price-head { display:flex; gap:24px; flex-wrap:wrap; align-items:baseline }
   .price-head .big { font:700 30px var(--mono); color:var(--fg) }
   /* Checkout */
-  .delta { display:grid; grid-template-columns:repeat(auto-fit, minmax(90px, 1fr)); gap:8px } .delta div { text-align:center; padding:8px; border:1px solid var(--line); border-radius:4px } .delta small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase } .delta b { font:700 15px var(--mono) }
+  .delta { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(90px, 100%), 1fr)); gap:8px } .delta div { text-align:center; padding:8px; border:1px solid var(--line); border-radius:4px; min-width:0 } .delta small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase } .delta b { font:700 15px var(--mono); overflow-wrap:anywhere }
   .checkout { border:1px solid var(--accent); border-radius:6px; padding:0; overflow:hidden; margin-top:14px; box-shadow:var(--glow) }
   .checkout .head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 16px; background:var(--head); border-bottom:1px solid var(--line) }
   .checkout .head b { font:700 13px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--accent) }
@@ -236,12 +236,12 @@
   .checkout .body { display:grid; grid-template-columns:200px 1fr; gap:20px; padding:16px }
   @media (max-width:640px) { .checkout .body { grid-template-columns:1fr } }
   .qr { background:#fff; padding:10px; border-radius:6px; width:200px; height:200px; display:grid; place-items:center } .qr svg { width:100%; height:100% }
-  .kvl { display:grid; grid-template-columns:auto 1fr; gap:8px 16px; align-items:baseline; font-size:14px } .kvl small { color:var(--muted); font:11px var(--mono); letter-spacing:.08em; text-transform:uppercase }
+  .kvl { display:grid; grid-template-columns:minmax(0,max-content) minmax(0,1fr); gap:8px 16px; align-items:baseline; font-size:14px } .kvl > * { min-width:0; overflow-wrap:anywhere } .kvl small { color:var(--muted); font:11px var(--mono); letter-spacing:.08em; text-transform:uppercase }
   .amt { font:700 26px var(--mono); color:var(--gold); user-select:all }
   .status { display:flex; gap:10px; align-items:center; padding:12px 16px; border-top:1px solid var(--line); font:13px var(--mono) }
   .spin { width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite } @keyframes spin { to { transform:rotate(360deg) } }
   .ok { color:#3ddc97 } :root[data-theme="light"] .ok { color:#0d8a54 }
-  .trust { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-top:12px; font-size:13px; color:var(--muted) } .trust b { color:var(--fg); display:block; font-size:13px }
+  .trust { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap:10px; margin-top:12px; font-size:13px; color:var(--muted) } .trust b { color:var(--fg); display:block; font-size:13px }
   .up { color:#3ddc97 } .down { color:#ff6b6b }
   .ichart .tip .o, .pxchart .pxtip .o { font-weight:400; color:var(--muted) }
   /* Square price chart: full card width on a phone, capped so a desktop card stays a square. */
@@ -257,7 +257,7 @@
   .globe { position:relative; padding:0; height:min(66vh, 640px); overflow:hidden; background:radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%), var(--card) }
   @media (pointer:coarse) { .globe { height:52vh } }
   @media (max-width:640px) { .globe .event { bottom:auto; top:12px; right:12px; left:auto } }
-  .globe #globe { position:absolute; inset:0 }
+  .globe #globe { position:absolute; inset:0; overflow:hidden; max-width:100% }
   .globe .over { position:absolute; left:12px; right:12px; top:12px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; z-index:2 }
   .chip { background:color-mix(in srgb, var(--card) 78%, transparent); border:1px solid var(--line); border-radius:4px; padding:6px 10px; font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); backdrop-filter:blur(6px) }
   .chip b { display:block; font-size:16px; letter-spacing:0; text-transform:none; color:var(--fg) }
@@ -280,7 +280,7 @@
   .ichart .axis { display:flex; justify-content:space-between; gap:8px; font:11px var(--mono); color:var(--muted); margin-top:6px }
   /* Bar chart */
   .bars { display:flex; flex-direction:column; gap:10px }
-  .bar { display:grid; grid-template-columns:1fr auto; gap:4px 12px; color:var(--fg); text-decoration:none !important }
+  .bar { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; color:var(--fg); text-decoration:none !important; min-width:0 }
   .bar .name { font:13px var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
   .bar .val { font:12px var(--mono); color:var(--muted) }
   .bar .track { grid-column:1 / -1; height:8px; background:var(--head); border-radius:4px; overflow:hidden }
@@ -419,7 +419,6 @@
       linear-gradient(color-mix(in srgb, var(--accent) 9%, transparent) 1px, transparent 1px),
       linear-gradient(90deg, color-mix(in srgb, var(--accent) 9%, transparent) 1px, transparent 1px);
     background-size:32px 32px, 32px 32px;
-    background-attachment:fixed;
   }
   :root[data-theme="light"] body {
     background-color:var(--bg);
@@ -453,7 +452,7 @@
   h2::before { content:none }
   header, footer { border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); background:color-mix(in srgb, var(--card) 72%, transparent); box-shadow:0 0 18px color-mix(in srgb, var(--accent) 12%, transparent) }
   footer { margin-bottom:24px }
-  body { overflow-x:clip }
+  html, body { overflow-x:clip; max-width:100% }
   #search { width:100% } #search input { width:100%; min-width:0 }
   .livebar { letter-spacing:.08em }
   th, td { border-bottom:1px solid color-mix(in srgb, var(--accent) 28%, transparent) }
@@ -484,21 +483,24 @@
   svg.spark polyline { stroke:var(--accent); filter:drop-shadow(0 0 3px var(--accent)) }
   svg.spark.down polyline { stroke:#ff6b6b; filter:drop-shadow(0 0 3px #ff6b6b) }
   .pxspark { margin-left:auto; min-width:140px } .pxspark svg.spark { width:160px; height:48px }
-  .hudstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(104px, 1fr)); gap:8px; margin:0 0 12px }
-  .hudstats .chip { pointer-events:auto }
-  .globe { overflow:hidden }
-  .hudring { position:absolute; left:50%; top:44%; width:min(78%, 540px); aspect-ratio:1; transform:translate(-50%, -50%); pointer-events:none; z-index:2 }
+  .hudstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(104px, 100%), 1fr)); gap:8px; margin:0 0 12px; min-width:0 }
+  .hudstats .chip { pointer-events:auto; min-width:0; overflow:hidden }
+  .chip, .stat small, .tile small { overflow-wrap:anywhere }
+  .globe { overflow:hidden; max-width:100%; min-width:0 }
+  .globe #globe, .globe canvas, .glead, .gcalls { width:100%; max-width:100% }
+  .hudring { position:absolute; left:50%; top:44%; width:min(78%, 540px); max-width:100%; height:auto; aspect-ratio:1; transform:translate(-50%, -50%); pointer-events:none; z-index:2 }
   .hudring line, .hudring circle, .hudring ellipse { fill:none; stroke:color-mix(in srgb, var(--accent) 62%, transparent); stroke-width:.7 }
   .hudring text { fill:color-mix(in srgb, var(--accent) 88%, white); font:7px var(--mono); text-anchor:middle; dominant-baseline:middle }
   .glead, .gcalls { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; overflow:hidden }
   .glead line { stroke:color-mix(in srgb, var(--accent) 85%, transparent); stroke-width:1 }
-  .gcall { position:absolute; font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--accent); white-space:nowrap; text-shadow:0 0 8px color-mix(in srgb, var(--accent) 55%, transparent) }
+  .gcall { position:absolute; max-width:calc(100% - 12px); overflow:hidden; text-overflow:ellipsis; font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--accent); white-space:nowrap; text-shadow:0 0 8px color-mix(in srgb, var(--accent) 55%, transparent) }
   .gcall.home { color:var(--fg); letter-spacing:.16em }
-  .gltools { display:none; position:absolute; right:10px; top:46%; transform:translateY(-50%); z-index:4; flex-direction:column; gap:6px }
+  .gltools { display:none; position:absolute; right:6px; top:46%; transform:translateY(-50%); z-index:4; flex-direction:column; gap:6px; max-width:40px }
   .globe.ready .gltools { display:flex }
-  .gltools button { width:32px; height:32px; padding:0; line-height:1; font-size:14px }
+  .gltools button { width:32px; height:32px; min-width:0; padding:0; line-height:1; font-size:14px }
   .gltools button[aria-pressed="true"] { color:var(--accent); box-shadow:0 0 10px color-mix(in srgb, var(--accent) 45%, transparent) }
-  .globe .legend { z-index:3; background:color-mix(in srgb, var(--bg) 70%, transparent) }
+  .globe .legend, .globe .event { z-index:3; max-width:calc(100% - 16px); overflow-wrap:anywhere }
+  .globe .legend { background:color-mix(in srgb, var(--bg) 70%, transparent) }
   .tabs.seg, .tfs { display:inline-flex; flex-wrap:wrap; gap:2px; max-width:100%; padding:3px; border:1px solid color-mix(in srgb, var(--accent) 55%, transparent) }
   .tabs.seg button, .tfs button { border:0; border-bottom:0; border-radius:999px; padding:4px 9px; background:transparent; color:var(--muted); box-shadow:none }
   .tabs.seg button.on, .tfs button.on { background:var(--accent); color:var(--bg); border-bottom:0; box-shadow:0 0 12px color-mix(in srgb, var(--accent) 45%, transparent) }
@@ -533,11 +535,18 @@
   .leg span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
   pre.mono { white-space:pre-wrap; overflow-wrap:anywhere; max-width:100% }
   .watch.on { background:var(--accent); color:var(--bg) }
+  header > *, main > *, .grid > *, .tiles > *, .hudstats > *, .statrow > *, .fgrid > *, .delta > *, .kvl > *, .price-head > *, .split > *, .bookrow > *, .mcard > *, .plot > *, .donutrow > *, .livebar > *, .row > *, .addrhead > *, .bar > *, .ichart, .card, .promorow, .promobar, .promohead, section.promo, .scroller { min-width:0 }
+  .promorow, .promobar, .scroller, section.promo, .promohead { max-width:100% }
+  .promohead.crawl, section.promo { overflow-x:clip; contain:inline-size }
+  table.list td a { display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom }
+  .mono, code, pre, td { overflow-wrap:anywhere; max-width:100% }
   @media (max-width:800px) {
     .tiles, .card > .grid { grid-template-columns:repeat(2, minmax(0, 1fr)) }
     table.list .opt { display:none }
     .scroller { overflow-x:clip }
     .pxspark { min-width:0; max-width:100% }
+    .list td a.mono, table.list a { max-width:100% }
+    table:not(.list) th { white-space:normal }
   }
   @media (max-width:420px) {
     .donutrow { flex-direction:column; align-items:flex-start }
@@ -1065,8 +1074,7 @@ function pct(v) { return v == null ? '<span class="muted">–</span>' : `<b clas
 function minersCard(m) {
   if (!m?.miners?.length) return `<h2>Top miners</h2>${m ? tabs('mwin', WINDOW_TABS, m.window, 'seg') : ''}<p class="muted">No blocks in this window yet (history may still be loading).</p>`;
   const top = m.miners[0].blocks;
-  const warn = m.warning ? `<p class="msg err">${esc(m.warning)}</p>` : '';
-  return `<h2>Top miners <small class="muted">${n0(m.blocks)} blocks · ${n0(m.miner_count)} miners</small></h2>${tabs('mwin', WINDOW_TABS, m.window, 'seg')}${warn}<div class="bars" style="margin-top:12px">${m.miners.map((r) => {
+  return `<h2>Top miners <small class="muted">${n0(m.blocks)} blocks · ${n0(m.miner_count)} miners</small></h2>${tabs('mwin', WINDOW_TABS, m.window, 'seg')}<div class="bars" style="margin-top:12px">${m.miners.map((r) => {
     const inner = `<span class="name">${esc(r.entity || r.miner || 'unknown')}</span><span class="val">${(r.share * 100).toFixed(1)}% · ${n0(r.blocks)} blocks</span>
       <span class="track"><span class="fill" data-w="${((r.blocks / top) * 100).toFixed(1)}"></span></span>`;
     return r.miner ? `<a class="bar" href="/address/${encodeURIComponent(r.miner)}" data-link title="${esc(r.miner)}">${inner}</a>` : `<div class="bar">${inner}</div>`;
@@ -1256,7 +1264,9 @@ function placeCalls() {
     if (el) el.hidden = !ok;
     if (!ok) return;
     const dx = p.x - cx, dy = p.y - cy, len = Math.hypot(dx, dy) || 1, dist = it.home ? 16 : 36;
-    const lx = Math.min(w - 78, Math.max(4, p.x + (dx / len) * dist));
+    el.style.maxWidth = `${Math.max(48, w - 8)}px`;
+    const tw = Math.min(el.offsetWidth || 72, w - 8);
+    const lx = Math.min(Math.max(4, w - tw - 4), Math.max(4, p.x + (dx / len) * dist));
     const ly = Math.min(h - 18, Math.max(4, p.y + (dy / len) * dist - 8));
     el.style.left = `${lx}px`; el.style.top = `${ly}px`;
     lines.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${(lx + 8).toFixed(1)}" y2="${(ly + 5).toFixed(1)}"/>`);
