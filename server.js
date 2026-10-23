@@ -212,7 +212,9 @@ const q = {
   addrHourly: db.prepare(`select (h.ts / 3600) * 3600 t,
     sum(case when a.dir = 'in' then -cast(a.amount as integer) else cast(a.amount as integer) end) net
     from addr_tx a join headers h on h.height = a.height where a.address = ? group by t order by t`),
-  addrRecent: db.prepare(`select lower(hex(txid)) txid, height, dir, amount from addr_tx where address = ? order by height desc, rowid desc limit 25`),
+  addrRecent: db.prepare(`select lower(hex(a.txid)) txid, a.height, a.dir, a.amount, h.ts
+    from addr_tx a left join headers h on h.height = a.height where a.address = ? order by a.height desc, a.rowid desc limit 40`),
+  addrSpan: db.prepare(`select min(h.ts) first_ts, max(h.ts) last_ts from addr_tx a join headers h on h.height = a.height where a.address = ?`),
   minedCount: db.prepare('select count(*) n from headers where miner = ?'),
   payoutsFor: db.prepare('select payout, count(*) blocks, sum(cast(amount as integer)) amount from miner_payouts where miner = ? group by payout order by amount desc'),
   burnedSum: db.prepare('select sum(cast(burned as integer)) s, count(burned) n from tx_index'),
@@ -764,7 +766,7 @@ checkDb();
 
 // Candle interval -> [seconds per candle, how far back the unpaged chart used to show].
 const CANDLES = { '15m': [900, 86400], '1h': [3600, 4 * 86400], '4h': [14400, 16 * 86400], '1d': [86400, 120 * 86400], '1w': [604800, 3 * 365 * 86400] }; // ~100 candles each
-const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
+const WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400, all: 1e10 };
 const CANDLE_SOURCE = 'CoinPaprika price of SafeTrade NOID/USDT, sampled every 3 minutes';
 const MONDAY = 4 * 86400; // weeks start on Monday (1970-01-05), not on the epoch's Thursday
 const PAGE_MAX = 5000;
@@ -953,6 +955,7 @@ const routes = {
     ]);
     const balance = slots.reduce((sum, s) => sum + BigInt(s.value ?? 0), 0n);
     const totals = q.addrTotals.get(addr);
+    const span = q.addrSpan.get(addr);
     const label = labelFor(addr);
     return {
       address: addr, balance_micronoid: balance.toString(), rank: q.richRank.get(addr)?.rank ?? null, slots, activity,
@@ -962,6 +965,8 @@ const routes = {
         partial: true,
         note: 'Totals, the hourly net and payout destinations come only from block bodies this explorer stored. They are not a full wallet balance.',
         sent_micronoid: String(totals.sent), received_micronoid: String(totals.received), tx_count: totals.n,
+        first_ts: span?.first_ts ?? null, last_ts: span?.last_ts ?? null,
+        tip: q.headerTop.get()?.h ?? null,
         hourly: q.addrHourly.all(addr).map((r) => ({ t: r.t, net_micronoid: String(r.net) })),
         recent: q.addrRecent.all(addr),
         payouts: q.payoutsFor.all(addr).map((r) => ({ payout: r.payout, blocks: r.blocks, amount_micronoid: String(r.amount) })),
@@ -991,7 +996,7 @@ const routes = {
   async history(_, params) {
     const w = params.get('window') || '24h';
     const now = Math.floor(Date.now() / 1000);
-    const bucket = { '24h': 3600, '7d': 3 * 3600, '30d': 86400, all: 86400 }[w] ?? 3600;
+    const bucket = { '24h': 3600, '7d': 3 * 3600, '30d': 86400, '1y': 86400, all: 86400 }[w] ?? 3600;
     return { window: w, bucket, points: q.history.all({ b: bucket, since: now - (WINDOWS[w] ?? WINDOWS['24h']) }), sync: history };
   },
 
@@ -1018,7 +1023,7 @@ const routes = {
     if (page) return pricePage(page.before, page.limit);
     const w = params.get('window') || '24h';
     const now = Math.floor(Date.now() / 1000);
-    const bucket = { '24h': 180, '7d': 900, '30d': 3600, all: 21600 }[w] ?? 180;
+    const bucket = { '24h': 180, '7d': 900, '30d': 3600, '1y': 21600, all: 21600 }[w] ?? 180;
     const since = now - (WINDOWS[w] ?? WINDOWS['24h']);
     const ticks = q.ticks.all({ b: bucket, since }).map((p) => ({ t: p.t, usd: p.usd, hi: p.hi, lo: p.lo, volume_24h_usd: p.volume_24h, market_cap_usd: p.supply ? (p.supply / 1e6) * p.usd : null }));
     const first = q.firstTick.get().t ?? now;
@@ -1073,7 +1078,7 @@ const routes = {
   async supply(_, params) {
     const w = params.get('window') || '30d';
     // 1h is not a chart tab; without this it used to fall through to the 30-day scan.
-    const spec = { '1h': [300, 3600], '24h': [900, 86400], '7d': [3600, 7 * 86400], '30d': [21600, 30 * 86400], all: [86400, 1e10] }[w]
+    const spec = { '1h': [300, 3600], '24h': [900, 86400], '7d': [3600, 7 * 86400], '30d': [21600, 30 * 86400], '1y': [86400, 365 * 86400], all: [86400, 1e10] }[w]
       ?? [21600, 30 * 86400];
     const [bucket, span] = spec;
     const points = [];

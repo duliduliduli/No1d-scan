@@ -35,7 +35,7 @@
   header h1 { margin:0; font:700 15px var(--mono); letter-spacing:.14em; text-transform:uppercase } header h1 a { color:var(--accent) }
   header h1 a::before { content:''; display:inline-block; width:8px; height:8px; background:var(--accent); box-shadow:var(--glow); margin-right:10px; vertical-align:1px }
   nav { display:flex; gap:16px } nav a { font:600 12px var(--mono); letter-spacing:.1em; text-transform:uppercase }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center } .row input { flex:1; min-width:200px }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center } .row input { flex:1; min-width:0 }
   .price td, .price th { white-space:normal }
   .msgs { display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow-y:auto; margin-bottom:12px }
   .msg { padding:10px 14px; border-radius:6px; white-space:pre-wrap; line-height:1.55; max-width:85% }
@@ -44,7 +44,7 @@
   .msg.err { border-color:#ff6b6b; color:#ffb3b3 }
   button:disabled { opacity:.72; cursor:not-allowed }
   :focus-visible { outline:2px solid var(--accent); outline-offset:2px }
-  form { flex:1; display:flex; min-width:240px }
+  form { flex:1; display:flex; min-width:0 }
   button { padding:9px 14px; border:1px solid var(--accent); border-radius:3px; background:transparent; color:var(--accent); font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; cursor:pointer } button:hover { box-shadow:var(--glow) }
   .big { font:700 22px var(--mono); color:var(--gold); user-select:all } .addr { font:14px var(--mono); user-select:all; word-break:break-all }
   code { font:13px var(--mono); background:var(--head); padding:1px 5px; border-radius:3px }
@@ -52,16 +52,16 @@
   input::placeholder { color:var(--muted) }
   input:focus { border-color:var(--accent); box-shadow:var(--glow) }
   .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:14px 16px; margin-bottom:14px; overflow-x:auto }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:14px 16px; margin-bottom:14px; overflow:visible; max-width:100% }
   .stat small { color:var(--muted); display:block; font:12px var(--mono); letter-spacing:.08em; text-transform:uppercase }
   .stat b { font:700 20px var(--mono); overflow-wrap:anywhere }
   .grid:first-child .card:nth-child(2) b { color:var(--gold) }
   .stat b .mono { font-size:inherit }
-  table { width:100%; border-collapse:collapse } th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top }
-  th { color:var(--muted); font:600 12px var(--mono); letter-spacing:.06em; text-transform:uppercase; white-space:nowrap } td { word-break:break-all }
+  table { width:100%; border-collapse:collapse }   th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { color:var(--muted); font:600 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; white-space:nowrap } td { overflow-wrap:anywhere }
   .list td { white-space:nowrap } .list td a.mono { display:inline-block; max-width:26ch; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom }
   tr:hover td { background:rgba(168,245,233,.04) }
-  .mono { font-family:var(--mono); font-size:14px } .muted { color:var(--muted) }
+  .mono { font-family:var(--mono); font-size:14px; overflow-wrap:anywhere } .muted { color:var(--muted) }
   /* Card titles become panel header strips. */
   h2 { margin:-14px -16px 12px; padding:10px 16px; background:var(--head); border-bottom:1px solid var(--line); color:var(--accent); font:700 13px var(--mono); letter-spacing:.1em; text-transform:uppercase }
   h2::before { content:''; display:inline-block; width:7px; height:7px; background:var(--accent); box-shadow:var(--glow); margin-right:9px; vertical-align:1px }
@@ -89,7 +89,7 @@
   a.entry:hover { text-shadow:none } a.entry p { margin:0 0 10px } a.entry .go { font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--accent) }
   .demo-banner { margin:0 0 12px; padding:8px 12px; border:1px solid var(--gold); border-radius:4px; color:var(--gold); font:12px var(--mono) }
   .empty { padding:28px 8px 12px; text-align:center } .empty b { display:block; margin-bottom:8px; color:var(--accent); font:700 15px var(--mono); letter-spacing:.04em }
-  .exbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0 } .exbar input, .exbar select { flex:1; min-width:140px }
+  .exbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0 } .exbar input, .exbar select { flex:1; min-width:0 }
   .filters { margin:8px 0 12px } .filters summary { cursor:pointer; font:600 12px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--accent) }
   .fgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; margin-top:10px }
   .fgrid label { display:flex; flex-direction:column; gap:4px; font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
@@ -436,7 +436,7 @@
     box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent), 0 0 18px color-mix(in srgb, var(--accent) 14%, transparent);
     clip-path:polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
   }
-  #excard, .card:has(.more) { clip-path:none }
+  #excard, .card:has(.more) { clip-path:none; overflow:visible }
   section.promo {
     background:color-mix(in srgb, var(--gold) 12%, color-mix(in srgb, var(--card) 82%, transparent));
     border-color:color-mix(in srgb, var(--gold) 72%, transparent);
@@ -446,8 +446,15 @@
   .winnums small, .kvl small, .delta small, .dock a, .dock button, .pairnav button, .tabs button, .mtabs button, .tfs button {
     font-family:var(--mono); letter-spacing:.14em; text-transform:uppercase;
   }
-  .stat b, .tile b, .big, td, .mcard .subpx, .price-head .big { letter-spacing:0; text-transform:none; font-family:system-ui, sans-serif }
+  td, .mcard .subpx, .chip b { letter-spacing:0; text-transform:none; font-family:var(--mono) }
+  .stat b, .tile b, .big, .price-head .big, .bal { letter-spacing:0; text-transform:none; font-family:var(--mono) }
   .price-head .big { color:var(--accent); text-shadow:0 0 14px color-mix(in srgb, var(--accent) 45%, transparent) }
+  h2 { margin:0 0 12px; padding:0; background:none; border:0; color:var(--accent); font:600 11px/1.3 var(--mono); letter-spacing:.18em }
+  h2::before { content:none }
+  header, footer { border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); background:color-mix(in srgb, var(--card) 72%, transparent); box-shadow:0 0 18px color-mix(in srgb, var(--accent) 12%, transparent) }
+  footer { margin-bottom:24px }
+  body { overflow-x:clip }
+  #search { width:100% } #search input { width:100%; min-width:0 }
   .livebar { letter-spacing:.08em }
   th, td { border-bottom:1px solid color-mix(in srgb, var(--accent) 28%, transparent) }
   .tabs button, .mtabs button, .tfs button, .pairnav button {
@@ -492,6 +499,49 @@
   .gltools button { width:32px; height:32px; padding:0; line-height:1; font-size:14px }
   .gltools button[aria-pressed="true"] { color:var(--accent); box-shadow:0 0 10px color-mix(in srgb, var(--accent) 45%, transparent) }
   .globe .legend { z-index:3; background:color-mix(in srgb, var(--bg) 70%, transparent) }
+  .tabs.seg, .tfs { display:inline-flex; flex-wrap:wrap; gap:2px; max-width:100%; padding:3px; border:1px solid color-mix(in srgb, var(--accent) 55%, transparent) }
+  .tabs.seg button, .tfs button { border:0; border-bottom:0; border-radius:999px; padding:4px 9px; background:transparent; color:var(--muted); box-shadow:none }
+  .tabs.seg button.on, .tfs button.on { background:var(--accent); color:var(--bg); border-bottom:0; box-shadow:0 0 12px color-mix(in srgb, var(--accent) 45%, transparent) }
+  .tiles, .card > .grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px }
+  .tiles .stat, .card .stat, .tile { border:1px solid color-mix(in srgb, var(--accent) 48%, transparent); background:color-mix(in srgb, var(--bg) 42%, transparent); padding:8px 10px; min-width:0; box-shadow:none; clip-path:polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px) }
+  .stat b, .tile b { font:700 16px/1.25 var(--mono); overflow-wrap:anywhere }
+  .bal { margin:0 0 8px; font:700 clamp(26px, 8vw, 40px)/1.1 var(--mono); color:var(--fg); overflow-wrap:anywhere }
+  .bal .unit { margin-left:6px; color:var(--accent); font-size:.45em; letter-spacing:.12em }
+  .addrhead { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0 }
+  .addrhead .clip { flex:1 1 8ch; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:700 18px var(--mono) }
+  .addrhead .watch { margin-left:auto }
+  .fine { margin:8px 0 0; color:var(--muted); font:11px/1.4 var(--mono); overflow-wrap:anywhere }
+  .clip { display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom }
+  table.list { table-layout:fixed; width:100%; font:12px var(--mono) }
+  table.list th, table.list td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; overflow-wrap:normal; font-family:var(--mono); font-size:12px; padding:7px 6px }
+  table.list td.amt.up { color:#3ddc97 } table.list td.amt.down { color:#ff6b6b }
+  table.list .ok { color:var(--accent) }
+  a.viewall, button.viewall { display:flex; width:100%; justify-content:center; margin-top:12px; background:transparent; border:1px solid color-mix(in srgb, var(--accent) 70%, transparent); color:var(--accent); letter-spacing:.16em }
+  .ichart .plot { display:flex; gap:8px; min-width:0 }
+  .ichart .ylabs { flex:0 1 auto; max-width:30%; min-width:0; display:flex; flex-direction:column; justify-content:space-between; font:10px var(--mono); color:var(--muted) }
+  .ichart .ylabs span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right }
+  .ichart .plotin { position:relative; flex:1; min-width:0 }
+  .ichart .gridl { stroke:color-mix(in srgb, var(--accent) 28%, transparent); stroke-width:1; vector-effect:non-scaling-stroke }
+  .ichart .yh { position:absolute; left:0; right:0; height:1px; background:color-mix(in srgb, var(--accent) 70%, transparent); opacity:0; pointer-events:none }
+  .ichart.hover .yh { opacity:1 }
+  .ichart .tip { max-width:min(240px, 80vw); white-space:normal }
+  .donutrow { display:flex; gap:16px; align-items:center; min-width:0 }
+  .donut { width:108px; height:108px; border-radius:50%; flex:none; -webkit-mask:radial-gradient(circle 34px, transparent 98%, #000 100%); mask:radial-gradient(circle 34px, transparent 98%, #000 100%) }
+  .legs { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px }
+  .leg { display:grid; grid-template-columns:10px minmax(0,1fr) auto auto; gap:8px; align-items:center; font:12px var(--mono); min-width:0 }
+  .leg i { width:8px; height:8px; background:var(--accent) }
+  .leg span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  pre.mono { white-space:pre-wrap; overflow-wrap:anywhere; max-width:100% }
+  .watch.on { background:var(--accent); color:var(--bg) }
+  @media (max-width:800px) {
+    .tiles, .card > .grid { grid-template-columns:repeat(2, minmax(0, 1fr)) }
+    table.list .opt { display:none }
+    .scroller { overflow-x:clip }
+    .pxspark { min-width:0; max-width:100% }
+  }
+  @media (max-width:420px) {
+    .donutrow { flex-direction:column; align-items:flex-start }
+  }
   @media (prefers-reduced-motion: reduce) {
     .dot, .ichart svg, tr.new td, .flash, .skel { animation:none }
     .ichart svg { clip-path:none }
@@ -503,7 +553,7 @@
 <header>
   <h1><a href="/" data-link>NOID Scan</a></h1>
   <a class="explore" href="/explore" data-link>Explore</a>
-  <form id="search"><input name="q" placeholder="Height, block hash, txid or o1… address" aria-label="Search" autocomplete="off"></form>
+  <form id="search"><input name="q" placeholder="Search blocks, txs, addresses…" aria-label="Search" autocomplete="off"></form>
   <div class="menu" id="menu">
     <button id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="menunav">☰</button>
     <nav id="menunav">
@@ -572,8 +622,18 @@ function noid(v) {
   return `${neg ? '-' : ''}${(a / 1000000n).toLocaleString('en-US')}${frac ? '.' + frac : ''} NOID`;
 }
 const when = (t) => t ? new Date((t < 1e12 ? t * 1000 : t)).toLocaleString() : '–';
-const short = (h) => h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '–';
-const link = (type, id, text) => `<a href="/${type}/${encodeURIComponent(id)}" data-link class="mono">${esc(text ?? id)}</a>`;
+const short = (h, head = 6, tail = 6) => {
+  const s = String(h ?? '');
+  if (!s) return '–';
+  if (s.length <= head + tail + 1) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+};
+const link = (type, id, text) => {
+  const full = String(id ?? '');
+  const idLike = /^o1[0-9a-z]{6,}$/.test(full) || /^[0-9a-f]{32,}$/i.test(full);
+  const shown = text != null ? text : (idLike ? short(full) : full);
+  return `<a href="/${type}/${encodeURIComponent(id)}" data-link class="mono clip" title="${esc(full)}">${esc(shown)}</a>`;
+};
 
 // Generic renderer so unknown/new node fields still show up.
 const copyBtn = (v) => `<button class="copy" data-copy="${esc(v)}" title="Copy" aria-label="Copy ${esc(v)}">⧉</button>`;
@@ -600,7 +660,7 @@ const TX_COLS = ['height', 'txid', 'output_sum_micronoid', 'fee_micronoid', 'inp
 const label = (k) => LABELS[k] ?? k.replace(/_micronoid$/, '').replace(/_/g, ' ');
 const kv = (o) => `<table>${Object.entries(o || {}).map(([k, v]) => `<tr><th>${esc(label(k))}</th><td>${val(k, v)}</td></tr>`).join('')}</table>`;
 const rows = (list, cols) => list?.length
-  ? `<table class="list"><tr>${cols.map((c) => `<th>${esc(label(c))}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c) => `<td>${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
+  ? `<table class="list"><tr>${cols.map((c, i) => `<th class="${i >= 4 ? 'opt' : ''}">${esc(label(c))}</th>`).join('')}</tr>${list.map((r) => `<tr>${cols.map((c, i) => `<td class="${i >= 4 ? 'opt' : ''}">${val(c, r[c])}</td>`).join('')}</tr>`).join('')}</table>`
   : '<p class="muted">Nothing here.</p>';
 
 // ---- live helpers
@@ -620,6 +680,33 @@ function setNum(id, n) {
   requestAnimationFrame(step);
 }
 const ago = (ts) => { const s = Math.max(0, Math.round(Date.now() / 1000 - (ts > 1e12 ? ts / 1000 : ts))); return s < 120 ? `${s}s ago` : s < 7200 ? `${Math.round(s / 60)}m ago` : s < 172800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`; };
+const ymd = (t) => {
+  if (!t) return '–';
+  const d = new Date(t < 1e12 ? t * 1000 : t);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+};
+function noidNum(v) {
+  if (v == null || v === '') return null;
+  try {
+    const n = BigInt(v), neg = n < 0n, a = neg ? -n : n;
+    return (neg ? -1 : 1) * (Number(a / 1000000n) + Number(a % 1000000n) / 1e6);
+  } catch { return null; }
+}
+const DONUT_COLORS = ['#a8f5e9', '#3ddc97', '#7dcaa8', '#f7b733', '#5ee0c5', '#c8fff4'];
+function donutLegend(parts) {
+  const rows = (parts || []).filter((p) => p.n > 0);
+  const total = rows.reduce((s, p) => s + p.n, 0);
+  if (!(total > 0)) return '';
+  let at = 0;
+  const stops = rows.map((p, i) => {
+    const pct = 100 * p.n / total, start = at;
+    at += pct;
+    return `${DONUT_COLORS[i % DONUT_COLORS.length]} ${start.toFixed(2)}% ${at.toFixed(2)}%`;
+  }).join(', ');
+  const legend = rows.map((p, i) => `<div class="leg"><i style="background:${DONUT_COLORS[i % DONUT_COLORS.length]}"></i><span>${esc(p.label)}</span><b>${(100 * p.n / total).toFixed(2)}%</b><span>${esc(p.text)}</span></div>`).join('');
+  return `<div class="donutrow"><div class="donut" style="background:conic-gradient(${stops})" role="img" aria-label="Holdings"></div><div class="legs">${legend}</div></div>`;
+}
 const money = (x, d = 2) => x == null ? '–' : '$' + Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const usd4 = (x) => money(x, x < 1 ? 4 : 2);
 // $0.0₅3239 means five zeros after the decimal, then those digits. One leading zero stays a normal price.
@@ -657,28 +744,34 @@ function si(v, unit) {
   const k = Math.min(Math.max(Math.floor(Math.log10(Math.abs(v) || 1) / 3), 0), 6);
   return `${(v / 1000 ** k).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${['', 'K', 'M', 'G', 'T', 'P', 'E'][k]}${unit}`;
 }
-const BUCKET_FMT = { '24h': 'hour', '7d': 'dayhour', '30d': 'day', all: 'day' };
-const tabs = (name, opts, on) => `<div class="tabs" data-tabs="${name}">${opts.map(([v, l]) => `<button data-v="${v}" class="${v === on ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+const BUCKET_FMT = { '24h': 'hour', '7d': 'dayhour', '30d': 'day', '1y': 'day', all: 'day' };
+const tabs = (name, opts, on, cls = '') => `<div class="tabs${cls ? ' ' + cls : ''}" data-tabs="${name}">${opts.map(([v, l]) => `<button type="button" data-v="${v}" class="${v === on ? 'on' : ''}">${l}</button>`).join('')}</div>`;
 // Wire a tab group: clicking a tab marks it and calls fn(value).
 function onTabs(name, fn) {
   for (const b of document.querySelectorAll(`[data-tabs="${name}"] button[data-v]`)) b.onclick = () => {
     b.parentNode.querySelectorAll('button[data-v]').forEach((x) => x.classList.toggle('on', x === b)); fn(b.dataset.v);
   };
 }
-const WINDOW_TABS = [['24h', '24 h'], ['7d', '7 d'], ['30d', '30 d'], ['all', 'All time']];
+const WINDOW_TABS = [['24h', '1D'], ['7d', '1W'], ['30d', '1M'], ['1y', '1Y'], ['all', 'ALL']];
 let chartSeq = 0;
 // pts: [[x, y], ...]; fx/fy name entries of FMT for the axis and tooltip.
 function ichart(pts, fx, fy, h = 110) {
   pts = pts.filter((p) => Number.isFinite(p[1]));
   if (pts.length < 2) return '<p class="muted">Collecting data… (fills in as new blocks arrive)</p>';
   const id = `cg${++chartSeq}`, ys = pts.map((p) => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
-  const xy = pts.map((p, i) => `${((i / (pts.length - 1)) * 600).toFixed(1)},${(h - 6 - ((p[1] - lo) / span) * (h - 12)).toFixed(1)}`).join(' ');
+  const yOf = (v) => h - 6 - ((v - lo) / span) * (h - 12);
+  const xy = pts.map((p, i) => `${((i / (pts.length - 1)) * 600).toFixed(1)},${yOf(p[1]).toFixed(1)}`).join(' ');
+  const mid = (lo + hi) / 2;
   return `<div class="ichart" data-pts="${esc(JSON.stringify(pts))}" data-fx="${fx}" data-fy="${fy}" data-lo="${lo}" data-hi="${hi}" data-h="${h}">
+    <div class="plot"><div class="ylabs" aria-hidden="true"><span>${esc(FMT[fy](hi))}</span><span>${esc(FMT[fy](mid))}</span><span>${esc(FMT[fy](lo))}</span></div>
+    <div class="plotin">
     <svg viewBox="0 0 600 ${h}" preserveAspectRatio="none" style="height:${h}px" aria-hidden="true">
-      <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".32"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs>
+      <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".38"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs>
+      <line class="gridl" x1="0" y1="6" x2="600" y2="6"/><line class="gridl" x1="0" y1="${(h / 2).toFixed(1)}" x2="600" y2="${(h / 2).toFixed(1)}"/><line class="gridl" x1="0" y1="${h - 6}" x2="600" y2="${h - 6}"/>
       <polygon class="area" points="0,${h} ${xy} 600,${h}" fill="url(#${id})"/><polyline class="line" pathLength="1" points="${xy}"/></svg>
-    <div class="xh" style="height:${h}px"></div><div class="pt"></div><div class="tip"></div>
-    <div class="axis"><span>${esc(FMT[fx](pts[0][0]))}</span><span>low ${esc(FMT[fy](lo))} · high ${esc(FMT[fy](hi))}</span><span>${esc(FMT[fx](pts.at(-1)[0]))}</span></div></div>`;
+    <div class="xh" style="height:${h}px"></div><div class="yh"></div><div class="pt"></div><div class="tip"></div>
+    </div></div>
+    <div class="axis"><span>${esc(FMT[fx](pts[0][0]))}</span><span>${esc(FMT[fx](pts[Math.floor((pts.length - 1) / 2)][0]))}</span><span>${esc(FMT[fx](pts.at(-1)[0]))}</span></div></div>`;
 }
 function chartHover(e) {
   const c = e.target.closest?.('.ichart');
@@ -690,6 +783,8 @@ function chartHover(e) {
   const [x, y] = pts[i], lo = +c.dataset.lo, hi = +c.dataset.hi, h = +c.dataset.h;
   const px = ohlc ? ((i + 0.5) / pts.length) * r.width : (i / (pts.length - 1)) * r.width, py = h - 6 - ((y - lo) / (hi - lo || 1)) * (h - 12);
   c.querySelector('.xh').style.left = `${px}px`;
+  const yh = c.querySelector('.yh');
+  if (yh) yh.style.top = `${py}px`;
   Object.assign(c.querySelector('.pt').style, { left: `${px}px`, top: `${py}px` });
   const tip = c.querySelector('.tip');
   Object.assign(tip.style, { left: `${Math.min(Math.max(px, 70), r.width - 70)}px`, top: `${py}px` });
@@ -710,7 +805,7 @@ function priceSeries(h, key, height = 170) {
 }
 // Interactive NOID/USD chart (line or candles). TradingView lightweight-charts, vendored: pinch, wheel and drag.
 const CANDLE_TABS = [['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']];
-const PX_WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, all: 1e10 };
+const PX_WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400, all: 1e10 };
 let pxChart = null, lwReady = null;
 function loadLw() {
   if (window.LightweightCharts) return Promise.resolve();
@@ -751,7 +846,7 @@ function chartTheme() {
     },
   };
 }
-const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button></div>
+const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line', 'seg')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h', 'seg')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button></div>
   <div id="${name}c" style="margin-top:10px"><p class="muted">Loading chart…</p></div>`;
 // Pages of /api/price (3-minute samples) or /api/candles. Older pages use before= the oldest time we have.
 async function pxFetch(mode, spec, before, limit) {
@@ -779,7 +874,7 @@ function wirePriceBox(name) {
   onTabs(name + 'm', (m) => {
     mode = m;
     spec = m === 'line' ? '24h' : '1h';
-    $(name + 't').innerHTML = tabs(name, m === 'line' ? WINDOW_TABS : CANDLE_TABS, spec);
+    $(name + 't').innerHTML = tabs(name, m === 'line' ? WINDOW_TABS : CANDLE_TABS, spec, 'seg');
     onTabs(name, pick);
     open();
   });
@@ -968,10 +1063,10 @@ function wirePriceBox(name) {
 function pct(v) { return v == null ? '<span class="muted">–</span>' : `<b class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2)}%</b>`; }
 
 function minersCard(m) {
-  if (!m?.miners?.length) return `<h2>Top miners</h2>${m ? tabs('mwin', WINDOW_TABS, m.window) : ''}<p class="muted">No blocks in this window yet (history may still be loading).</p>`;
+  if (!m?.miners?.length) return `<h2>Top miners</h2>${m ? tabs('mwin', WINDOW_TABS, m.window, 'seg') : ''}<p class="muted">No blocks in this window yet (history may still be loading).</p>`;
   const top = m.miners[0].blocks;
   const warn = m.warning ? `<p class="msg err">${esc(m.warning)}</p>` : '';
-  return `<h2>Top miners <small class="muted">${n0(m.blocks)} blocks · ${n0(m.miner_count)} miners</small></h2>${tabs('mwin', WINDOW_TABS, m.window)}${warn}<div class="bars" style="margin-top:12px">${m.miners.map((r) => {
+  return `<h2>Top miners <small class="muted">${n0(m.blocks)} blocks · ${n0(m.miner_count)} miners</small></h2>${tabs('mwin', WINDOW_TABS, m.window, 'seg')}${warn}<div class="bars" style="margin-top:12px">${m.miners.map((r) => {
     const inner = `<span class="name">${esc(r.entity || r.miner || 'unknown')}</span><span class="val">${(r.share * 100).toFixed(1)}% · ${n0(r.blocks)} blocks</span>
       <span class="track"><span class="fill" data-w="${((r.blocks / top) * 100).toFixed(1)}"></span></span>`;
     return r.miner ? `<a class="bar" href="/address/${encodeURIComponent(r.miner)}" data-link title="${esc(r.miner)}">${inner}</a>` : `<div class="bar">${inner}</div>`;
@@ -1048,11 +1143,16 @@ function globeColors() {
   globe.atmosphereColor(acc).globeMaterial().color.set(cssv('--card'));
   globe.hexPolygonColor(({ properties: p }) => G.peers.has(p.cc) ? acc : G.seen.has(p.cc) ? alpha(acc, 0.45) : alpha(acc, 0.13))
     .pointColor(() => acc).ringColor((r) => (t) => alpha(r.burst ? gold : acc, (1 - t) * (r.burst ? 1 : 0.7)))
-    .arcColor((a) => (a?.burst ? [alpha(gold, 0.9), gold] : [alpha(acc, 0.55), acc]));
+    .arcColor((a) => (a?.burst ? [alpha(gold, 0.95), gold] : a?.pulse ? [alpha(acc, 0.05), acc] : [alpha(acc, 0.35), alpha(acc, 0.55)]));
 }
 function holdArcs() {
   if (!G.home) return [];
   return arcSpots().map((s) => ({ from: s, to: G.home, hold: true, burst: false, gap: 0, born: 0, life: 1e15 }));
+}
+// shortcut: one traveling dash per peer country on top of a faint solid arc. Reduced motion keeps only the solid arc.
+function pulseArcs() {
+  if (!G.home || motionReduce()) return [];
+  return arcSpots().map((s, i) => ({ from: s, to: G.home, pulse: true, burst: false, gap: (i * 0.21) % 1, born: 0, life: 1e15 }));
 }
 function globeLayers() {
   const pts = [...G.peers].map(([cc, count]) => ({ ...spot(cc), cc, count })).filter((p) => p.lat != null);
@@ -1081,10 +1181,11 @@ async function mountGlobe(net) {
     .hexPolygonLabel(({ properties: p }) => peerLabel(p.cc, p.ADMIN))
     .pointLat('lat').pointLng('lng').pointAltitude((d) => d.home ? 0.02 : 0.015 + Math.min(d.count || 0, 12) * 0.012)
     .pointLabel((d) => d.home ? '<b>YOUR NODE</b><br>this explorer’s node, country level' : peerLabel(d.cc, countries.find((f) => f.properties.cc === d.cc)?.properties.ADMIN || d.cc))
-    .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 4 : 2.5)).ringPropagationSpeed((r) => (motionReduce() ? 0 : r.burst ? 6 : 2)).ringRepeatPeriod((r) => (r.burst ? 9e9 : r.home ? 1200 : 1800))
+    .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 3.4 : 2.4)).ringPropagationSpeed((r) => (motionReduce() ? 0 : r.burst ? 6 : 1.15)).ringRepeatPeriod((r) => (r.burst ? 9e9 : 1700))
     .arcStartLat((a) => a.from.lat).arcStartLng((a) => a.from.lng).arcEndLat((a) => a.to.lat).arcEndLng((a) => a.to.lng)
-    .arcDashLength(1).arcDashGap(0).arcDashAnimateTime(0)
-    .arcStroke(globeMobile() ? 0.28 : 0.4).arcAltitudeAutoScale(0.35).arcsTransitionDuration(0);
+    .arcDashLength((a) => (a.pulse ? 0.16 : 1)).arcDashGap((a) => (a.pulse ? 0.84 : 0))
+    .arcDashAnimateTime((a) => (a.pulse && !motionReduce() ? 2400 : 0)).arcDashInitialGap((a) => a.gap || 0)
+    .arcStroke((a) => (a.pulse ? 0.7 : globeMobile() ? 0.28 : 0.4)).arcAltitudeAutoScale(0.35).arcsTransitionDuration(0);
   globe.hexPolygonUseDots?.(true);
   const ctl = globe.controls();
   G.spin = !motionReduce();
@@ -1214,7 +1315,7 @@ function pushArc(kind) {
   });
   return true;
 }
-function syncArcs() { if (globe) globe.arcsData([...holdArcs(), ...(motionReduce() ? [] : G.arcs)]); }
+function syncArcs() { if (globe) globe.arcsData([...holdArcs(), ...pulseArcs(), ...(motionReduce() ? [] : G.arcs)]); }
 // Steady traffic: fill to several arcs quickly, then one new arc every 150–300ms, never above the cap.
 function arcTick(now) {
   arcRAF = requestAnimationFrame(arcTick);
@@ -1410,6 +1511,20 @@ addEventListener('click', (e) => {
   e.stopPropagation();
   toggleStar(b.dataset.star);
 }, true);
+const ADDR_WATCH = 'noid-addr-watch';
+function addrWatched(id) {
+  try { return new Set(JSON.parse(localStorage.getItem(ADDR_WATCH) || '[]')).has(id); } catch { return false; }
+}
+function toggleAddrWatch(id, btn) {
+  let set;
+  try { set = new Set(JSON.parse(localStorage.getItem(ADDR_WATCH) || '[]')); } catch { set = new Set(); }
+  if (set.has(id)) set.delete(id); else set.add(id);
+  try { localStorage.setItem(ADDR_WATCH, JSON.stringify([...set])); } catch {}
+  const on = set.has(id);
+  btn.classList.toggle('on', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.textContent = on ? '★ Watching' : '☆ Watch';
+}
 function starBtn(id, name) {
   const on = starSet().has(id);
   return `<button type="button" class="star${on ? ' on' : ''}" data-star="${esc(id)}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${on ? 'Remove' : 'Add'} ${esc(name || id)} ${on ? 'from' : 'to'} watchlist">${on ? '★' : '☆'}</button>`;
@@ -2387,12 +2502,12 @@ function tradeTable(trades, demo, tokenId, dense) {
     <td class="side ${tr.side === 'sell' ? 'down' : 'up'}">${esc(tr.side)}</td>
     <td>${tr.usd == null ? '<span class="muted">–</span>' : esc(money(tr.usd, tr.usd < 1 ? 4 : 2))}</td>
     <td class="num">${esc(Number(tr.token_amount).toLocaleString())}</td>
-    <td>${esc(fmtNoid(tr.noid_micronoid))}</td>
-    <td>${esc(fmtNoid(tr.price_micronoid))}</td>
-    <td>${tr.trader ? `<a class="mono" href="${walletHref(tr.trader, tokenId || tr.token_id, demo)}" data-link>${esc(short(tr.trader))}</a>` : '<span class="muted">–</span>'}</td>
-    <td>${tr.txid ? `<a href="/tx/${encodeURIComponent(tr.txid)}" data-link>tx</a>` : '<span class="muted">–</span>'}</td>
+    <td class="opt">${esc(fmtNoid(tr.noid_micronoid))}</td>
+    <td class="opt">${esc(fmtNoid(tr.price_micronoid))}</td>
+    <td class="opt">${tr.trader ? `<a class="mono" href="${walletHref(tr.trader, tokenId || tr.token_id, demo)}" data-link>${esc(short(tr.trader))}</a>` : '<span class="muted">–</span>'}</td>
+    <td class="opt">${tr.txid ? `<a href="/tx/${encodeURIComponent(tr.txid)}" data-link>tx</a>` : '<span class="muted">–</span>'}</td>
   </tr>`).join('');
-  const desk = `<div class="scroller tape-desk"><table class="list tape"><tr><th>Age</th><th>Type</th><th>USD</th><th>Token</th><th>NOID</th><th>Price</th><th>Maker</th><th>Tx</th></tr>${rows}</table></div>`;
+  const desk = `<div class="scroller tape-desk"><table class="list tape"><tr><th>Age</th><th>Type</th><th>USD</th><th>Token</th><th class="opt">NOID</th><th class="opt">Price</th><th class="opt">Maker</th><th class="opt">Tx</th></tr>${rows}</table></div>`;
   if (!dense) return desk;
   const mob = list.map((tr) => `<tr>
     <td class="${tr.side === 'sell' ? 'down' : 'up'}">${tr.side === 'sell' ? '▼' : '▲'} ${esc(ago(tr.ts))}</td>
@@ -2441,7 +2556,7 @@ const pages = {
       return;
     }
     let chartWin = '24h', minerWin = '24h';
-    const stat = (k, id, v, tip) => `<div class="card stat" title="${esc(tip)}"><small>${k}</small><b id="${id}">${v}</b></div>`;
+    const stat = (k, id, v, tip) => `<div class="stat" title="${esc(tip)}"><small>${k}</small><b id="${id}">${v}</b></div>`;
     const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, TX_COLS)}` : '';
     app.innerHTML = `
       <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
@@ -2470,7 +2585,7 @@ const pages = {
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
         <div style="margin:12px 0 0">${priceBox('pwin')}</div>
         <p style="margin:8px 0 0;text-align:right"><a href="/market" data-link>Full market analytics →</a></p></div>
-      ${s ? `<div class="grid">
+      ${s ? `<div class="card"><h2>Live stats</h2><div class="tiles">
         ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
         ${stat('Last block', 'ago', b ? esc(ago(b.blocks[0]?.timestamp)) : '–', 'Time since the newest block was mined.')}
         ${stat('Circulating supply', 'supply', esc(noid(s.chain.circulating_supply_micronoid)), 'All NOID currently in existence.')}
@@ -2492,8 +2607,8 @@ const pages = {
         ${stat('Mempool', 'mp', '…', 'Transactions waiting to be mined, and the minimum fee rate accepted.')}
         ${stat('Connected peers', 'peers', esc(s.peers), 'Other nodes this explorer’s node is talking to.')}
         ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
-      </div>` : `<div class="card"><h2>Overview</h2>${errp(s0)}</div>`}
-      <div class="card"><h2>Network history</h2>${tabs('cwin', WINDOW_TABS, '24h')}</div>
+      </div></div>` : `<div class="card"><h2>Overview</h2>${errp(s0)}</div>`}
+      <div class="card"><h2>Network history</h2>${tabs('cwin', WINDOW_TABS, '24h', 'seg')}</div>
       <div class="grid" id="charts">${hi ? charts(hi) : errp(hi0)}</div>
       <div class="card" id="miners">${mi ? minersCard(mi) : `<h2>Top miners</h2>${errp(mi0)}`}</div>
       <div class="card"><h2>Latest blocks</h2><div id="blocks">${rows(b.blocks, BLOCK_COLS)}</div>
@@ -2561,7 +2676,17 @@ const pages = {
     const b = await api('block/' + encodeURIComponent(id));
     const txs = Object.values(b.retained || {}).find(Array.isArray);
     const others = b.others?.length ? b.others.map((o) => `${link('block', o.hash, short(o.hash))} <span class="muted">${esc(o.kind)} · ${esc(o.reason)} · ${esc(when(o.replaced_at))}</span>`).join('<br>') : '<span class="muted">none</span>';
-    app.innerHTML = `<div class="card"><h2>Block ${esc(b.header.height)} ${b.canonical ? '' : '<small class="muted">not canonical</small>'}</h2>${kv(b.header)}</div>
+    const miner = b.header?.miner;
+    const txList = b.retained ? Object.values(b.retained).find(Array.isArray) : null;
+    app.innerHTML = `<div class="card"><h2>Block</h2>
+        <p class="bal">${esc(n0(b.header.height))}${b.canonical ? '' : ' <small class="muted">not canonical</small>'}</p>
+        <div class="tiles">
+          <div class="stat"><small>Time</small><b>${esc(ago(b.header.timestamp))}</b></div>
+          <div class="stat"><small>Miner</small><b>${miner ? link('address', miner) : '<span class="muted">–</span>'}</b></div>
+          <div class="stat"><small>Txs</small><b>${txList ? n0(txList.length) : '–'}</b></div>
+          <div class="stat"><small>First seen</small><b>${b.first_seen ? esc(ymd(b.first_seen)) : '–'}</b></div>
+        </div>
+        ${kv(b.header)}</div>
       <div class="card"><h2>Archive</h2><div class="kvl">
         <small>First seen</small><span>${esc(when(b.first_seen))}</span>
         <small>Canonical</small><span>${b.canonical ? 'yes, this is the node’s block at this height' : 'no'}${b.orphan ? ` · ${esc(b.orphan.reason)} ${esc(when(b.orphan.replaced_at))}` : ''}</span>
@@ -2582,7 +2707,9 @@ const pages = {
         ${to.map(([a, amt]) => `<small>To</small><span>${link('address', a)}${copyBtn(a)} <span class="muted">${esc(noid(amt))}</span></span>`).join('')}
       </div></div>` : '';
     const parts = feePartsView(details);
-    app.innerHTML = `${flow}${parts}<div class="card"><h2>Transaction</h2>${kv(ptr)}</div>
+    app.innerHTML = `${flow}${parts}<div class="card"><h2>Transaction</h2>
+      <p class="addrhead"><span class="mono clip" title="${esc(id)}">${esc(short(id))}</span>${copyBtn(id)}</p>
+      ${kv(ptr)}</div>
       <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
   },
   'api-access': () => go('/account'),
@@ -2598,18 +2725,18 @@ const pages = {
       ? `<div class="bars">${rl.rows.map((r) => `<a class="bar" href="/address/${encodeURIComponent(r.address)}" data-link title="${esc(r.address)}"><span class="name">#${r.rank} ${esc(r.entity || '—')} <span class="mono">${esc(short(r.address))}</span></span><span class="val">${esc(noid(r.balance))} · ${(100 * (r.share || 0)).toFixed(2)}% · ${n0(r.slots)} slots</span><span class="track"><span class="fill" data-w="${(100 * r.balance / rl.rows[0].balance).toFixed(1)}"></span></span></a>`).join('')}</div>`
       : '<p class="muted">Available after the first Live State sweep (a few minutes after start).</p>');
     const card = (title, html, id = '') => `<div class="card"${id ? ` id="${id}"` : ''}><h2>${title}</h2>${html}</div>`;
-    const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h')}<div id="${name}c" style="margin-top:10px">${h._err ? errp(h) : priceSeries(h, key)}</div>`);
+    const chartCard = (title, name, key, h, note = '') => card(`${title} ${note}`, `${tabs(name, WINDOW_TABS, '24h', 'seg')}<div id="${name}c" style="margin-top:10px">${h._err ? errp(h) : priceSeries(h, key)}</div>`);
     const supplyBody = su._err ? errp(su) : (su.points.length > 1 ? ichart(su.points.map((x) => [x.t, x.supply / 1e6]), 'day', 'num', 130) : '<p class="muted">Collecting…</p>');
     const holdersBody = ho._err ? errp(ho) : (ho.points.length > 1 ? ichart(ho.points.map((x) => [x.t, x.holders]), 'day', 'count', 130) : '<p class="muted">Collecting: one point per sweep, every ' + Math.round(ho.sweep.every_ms / 60000) + ' minutes.</p>');
     app.innerHTML = `
-      <div class="grid">
-        <div class="card stat"><small>NOID price</small>${p ? `<b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small>` : errp(pr)}</div>
-        <div class="card stat" title="Price × circulating supply from this node"><small>Market cap</small>${p && supplyNoid != null ? `<b>${esc(money(supplyNoid * p.usd, 0))}</b>` : errp(s._err ? s : pr)}</div>
-        <div class="card stat"><small>24h volume</small>${p ? `<b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small>` : errp(pr)}</div>
-        <div class="card stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small>${ho._err ? errp(ho) : `<b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'approx. · swept ' + ago(ho.latest.ts) : ho.sweep.running ? 'first sweep ' + Math.round(100 * (ho.sweep.progress || 0)) + '% done' : 'first sweep pending'}</small>`}</div>
-        <div class="card stat"><small>All-time high</small>${p ? `<b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small>` : errp(pr)}</div>
-        <div class="card stat"><small>Circulating supply</small>${s._err ? errp(s) : `<b>${esc(noid(supplyMicro))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small>`}</div>
-      </div>
+      <div class="card"><h2>Market</h2><div class="tiles">
+        <div class="stat"><small>NOID price</small>${p ? `<b>${esc(usd4(p.usd))}</b><small>${pct(p.change['24h'])} 24h</small>` : errp(pr)}</div>
+        <div class="stat" title="Price × circulating supply from this node"><small>Market cap</small>${p && supplyNoid != null ? `<b>${esc(money(supplyNoid * p.usd, 0))}</b>` : errp(s._err ? s : pr)}</div>
+        <div class="stat"><small>24h volume</small>${p ? `<b>${esc(money(p.volume_24h_usd, 0))}</b><small>${pct(p.volume_change_24h_pct)} vs prior 24h</small>` : errp(pr)}</div>
+        <div class="stat" title="Addresses holding any NOID, from a sweep of the whole Live State"><small>Holders</small>${ho._err ? errp(ho) : `<b>${ho.latest ? n0(ho.latest.holders) : '…'}</b><small class="muted">${ho.latest ? 'approx. · swept ' + ago(ho.latest.ts) : ho.sweep.running ? 'first sweep ' + Math.round(100 * (ho.sweep.progress || 0)) + '% done' : 'first sweep pending'}</small>`}</div>
+        <div class="stat"><small>All-time high</small>${p ? `<b>${esc(usd4(p.ath_usd))}</b><small class="muted">${esc(p.ath_date ? new Date(p.ath_date).toLocaleDateString() : '')} · ${pct(p.from_ath_pct)} from ATH</small>` : errp(pr)}</div>
+        <div class="stat"><small>Circulating supply</small>${s._err ? errp(s) : `<b>${esc(noid(supplyMicro))}</b><small class="muted">no max supply · 1 NOID/block forever after year 8</small>`}</div>
+      </div></div>
       ${card('Price change', p ? `<div class="delta">${['15m', '1h', '6h', '24h', '7d', '30d'].map((k) => `<div><small>${k}</small>${pct(p.change[k])}</div>`).join('')}</div>` : errp(pr))}
       ${card(`NOID / USD <small class="muted">${!pr._err && pr.ticks_since ? 'every 3 minutes since ' + esc(FMT.day(pr.ticks_since)) + '; daily before that' : ''}</small>`, priceBox('px'))}
       <div class="grid">
@@ -2617,8 +2744,8 @@ const pages = {
         ${chartCard('24h volume', 'vo', 'vol', pr)}
       </div>
       <div class="grid">
-        ${card(`Holders over time${!ho._err && ho.first ? ` <small class="muted">tracked since ${esc(new Date(ho.first * 1000).toLocaleDateString())}; longer windows show the same data until then</small>` : ''}`, `${tabs('hw', WINDOW_TABS, '30d')}<div id="hwc" style="margin-top:10px">${holdersBody}</div>`)}
-        ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d')}<div id="swc" style="margin-top:10px">${supplyBody}</div>`)}
+        ${card(`Holders over time${!ho._err && ho.first ? ` <small class="muted">tracked since ${esc(new Date(ho.first * 1000).toLocaleDateString())}; longer windows show the same data until then</small>` : ''}`, `${tabs('hw', WINDOW_TABS, '30d', 'seg')}<div id="hwc" style="margin-top:10px">${holdersBody}</div>`)}
+        ${card('Circulating supply', `${tabs('sw', WINDOW_TABS, '30d', 'seg')}<div id="swc" style="margin-top:10px">${supplyBody}</div>`)}
       </div>
       ${card('Concentration', ho._err ? errp(ho) : ho.latest?.holders ? `<div class="delta">
           <div><small>Top 10 hold</small><b>${(100 * ho.latest.top10 / ho.latest.supply).toFixed(1)}%</b></div>
@@ -2639,10 +2766,10 @@ const pages = {
   async mempool() {
     const m = await api('mempool');
     const flat = (m.txs || []).map((t) => ({ tx_hash: t.tx_hash, fee_micronoid: t.fee_micronoid, base: t.fee_parts?.base ?? null, inputs: t.fee_parts?.inputs ?? null, outputs: t.fee_parts?.outputs ?? null, growth_or_tip: t.fee_parts?.growth_or_tip ?? null, n_inputs: t.n_inputs, n_outputs: t.n_outputs }));
-    app.innerHTML = `<div class="grid">
-        <div class="card stat"><small>Pending transactions</small><b>${n0(m.size)}</b></div>
-        <div class="card stat"><small>Fees waiting</small><b>${esc(noid(m.total_fees_micronoid))}</b></div>
-        <div class="card stat" title="Lowest fee the node accepts right now"><small>Fee floor</small><b>${esc(m.fee_floor == null ? '–' : n0(m.fee_floor))}</b></div></div>
+    app.innerHTML = `<div class="card"><h2>Mempool</h2><div class="tiles">
+        <div class="stat"><small>Pending transactions</small><b>${n0(m.size)}</b></div>
+        <div class="stat"><small>Fees waiting</small><b>${esc(noid(m.total_fees_micronoid))}</b></div>
+        <div class="stat" title="Lowest fee the node accepts right now"><small>Fee floor</small><b>${esc(m.fee_floor == null ? '–' : n0(m.fee_floor))}</b></div></div></div>
       <div class="card"><h2>Fees right now <small class="muted">minimum accepted by the network · NOID fees are rule-based, not an auction</small></h2>
         ${rows(m.fees.map((f) => ({ shape: f.shape, fee_micronoid: f.fee_micronoid, burn_slots: f.burn_slots, base: f.fee_parts?.base, inputs: f.fee_parts?.inputs, outputs: f.fee_parts?.outputs, growth_or_tip: f.fee_parts?.growth_or_tip })), ['shape', 'fee_micronoid', 'base', 'inputs', 'outputs', 'growth_or_tip', 'burn_slots'])}
         <p class="muted">${esc(m.relay || '')} Base is 5,000 μNOID, plus 100 per input and 700 per output. Anything above that is growth (burned) or a tip. "New slots" are outputs that grow the Live State.</p></div>
@@ -2659,11 +2786,11 @@ const pages = {
       const net = s.network, height = Number(s.chain.height);
       // Until block 3,223,778 miners get 90% of the subsidy; the other 10% goes to the allocation schedule.
       const minerShare = height < 3223778 ? 0.9 : 1, reward = (Number(s.mining.block_reward_micronoid) / 1e6) * minerShare;
-      app.innerHTML = `<div class="grid">
-        <div class="card stat"><small>Network hashrate</small><b>${esc(si(net.hashrate, 'H/s'))}</b></div>
-        <div class="card stat"><small>Difficulty</small><b>${esc(si(net.difficulty_work, 'H'))}</b></div>
-        <div class="card stat"><small>Avg block time</small><b>${esc(net.avg_block_time?.toFixed(1) ?? '–')} s</b></div>
-        <div class="card stat" title="${minerShare < 1 ? 'Miners receive 90% of the block subsidy until block 3,223,778' : ''}"><small>Miner reward / block</small><b>${esc(reward.toLocaleString())} NOID</b></div></div>
+      app.innerHTML = `<div class="card"><h2>Network</h2><div class="tiles">
+        <div class="stat"><small>Network hashrate</small><b>${esc(si(net.hashrate, 'H/s'))}</b></div>
+        <div class="stat"><small>Difficulty</small><b>${esc(si(net.difficulty_work, 'H'))}</b></div>
+        <div class="stat"><small>Avg block time</small><b>${esc(net.avg_block_time?.toFixed(1) ?? '–')} s</b></div>
+        <div class="stat" title="${minerShare < 1 ? 'Miners receive 90% of the block subsidy until block 3,223,778' : ''}"><small>Miner reward / block</small><b>${esc(reward.toLocaleString())} NOID</b></div></div></div>
       <div class="card"><h2>Mining calculator <small class="muted">estimates from live network numbers; the defaults are example values, not a tested rig</small></h2>
         <div class="grid">
           <label class="stat"><small>Your hashrate</small><div class="row"><input id="mh" type="number" min="0" step="any" value="100"><select id="mu"><option value="1e6">MH/s</option><option value="1e9" selected>GH/s</option><option value="1e12">TH/s</option></select></div></label>
@@ -3136,22 +3263,33 @@ const pages = {
     const back = token
       ? `<a href="${demoHref('/token/' + encodeURIComponent(token))}" data-link>← Token</a>`
       : `<a href="${demoHref('/explore')}" data-link>← Tokens</a>`;
+    const watching = addrWatched(w.address);
+    const donut = donutLegend((w.holdings || []).map((h) => ({
+      label: h.ticker || h.name || h.token_id,
+      n: h.value_usd > 0 ? Number(h.value_usd) : Number(h.balance) || 0,
+      text: h.value_usd != null ? money(h.value_usd, h.value_usd < 1 ? 2 : 0) : n0(h.balance),
+    })));
     app.innerHTML = `${w.demo ? '<p class="demo-banner">Sample wallet for layout preview. Not on chain.</p>' : ''}
       <p>${back}</p>
-      <div class="card"><h2>Wallet <small>${esc(short(w.address))}</small></h2>
-        <p class="mono">${esc(w.address)}${copyBtn(w.address)} · <a href="/address/${encodeURIComponent(w.address)}" data-link>NOID address</a></p>
-        <div class="grid">
+      <div class="card"><h2>Wallet</h2>
+        <div class="addrhead">
+          <span class="mono clip" title="${esc(w.address)}">${esc(short(w.address))}</span>
+          ${copyBtn(w.address)}
+          <a href="/address/${encodeURIComponent(w.address)}" data-link>Chain</a>
+          <button type="button" class="watch${watching ? ' on' : ''}" id="addrwatch" aria-pressed="${watching ? 'true' : 'false'}" aria-label="Watch">${watching ? '★ Watching' : '☆ Watch'}</button>
+        </div>
+        <div class="tiles">
           <div class="stat"><small>PnL${token ? ` · ${esc(token)}` : ''}</small><b class="${(pnl.pnl_usd || 0) < 0 ? 'down' : 'up'}">${esc(pnlUsd)}</b></div>
           <div class="stat"><small>Buys / sells</small><b>${n0(w.activity?.buys)} / ${n0(w.activity?.sells)}</b></div>
           <div class="stat"><small>Remaining</small><b>${n0(pnl.remaining_token)}</b></div>
           <div class="stat"><small>Last trade</small><b>${esc(pnl.last_ts ? ago(pnl.last_ts) : '–')}</b></div>
         </div>
-        <p class="muted">PnL is NOID from sells, minus NOID spent on buys, plus the remaining tokens at the current price. It uses the newest indexed trades.</p>
+        <p class="fine">PnL is NOID from sells, minus NOID spent on buys, plus the remaining tokens at the current price. It uses the newest indexed trades.</p>
       </div>
-      <div class="card"><h2>Holdings</h2>${w.holdings?.length ? `<div class="scroller"><table class="list"><tr><th>Token</th><th>Balance</th><th>Value</th></tr>
-        ${w.holdings.map((h) => `<tr><td><a href="${demoHref('/token/' + encodeURIComponent(h.token_id))}" data-link>${esc(h.ticker || h.name)}</a></td><td class="num">${n0(h.balance)}</td><td>${h.value_usd == null ? esc(fmtNoid(h.value_micronoid)) : esc(money(h.value_usd, 0))}</td></tr>`).join('')}
-        </table></div>` : '<p class="muted">No token balances in the latest holder snapshot.</p>'}</div>
-      <div class="card"><h2>Trades <small>${token ? esc(token) : 'all indexed'}</small></h2>${tradeTable(w.trades, w.demo, token || null)}</div>`;
+      ${donut ? `<div class="card"><h2>Token holdings</h2>${donut}</div>` : ''}
+      ${w.trades?.length ? `<div class="card"><h2>Trades <small>${token ? esc(token) : 'all indexed'}</small></h2>${tradeTable(w.trades, w.demo, token || null, true)}</div>` : ''}`;
+    const watchBtn = $('addrwatch');
+    if (watchBtn) watchBtn.onclick = () => toggleAddrWatch(w.address, watchBtn);
   },
   async collection(id) {
     await ensureStars();
@@ -3382,31 +3520,141 @@ const pages = {
       <p><a href="/terms" data-link>Terms of Service</a></p></div>`;
   },
 
-  async address(id, page = 1) {
-    const a = await api(`address/${encodeURIComponent(id)}?page=${page}`);
-    const { transactions, ...summary } = a.activity || {};
+  async address(id) {
+    const qs = new URLSearchParams(location.search);
+    const page = Math.max(Number(qs.get('page')) || 1, 1);
+    const demo = qs.get('demo') === '1';
+    const showAll = qs.get('tx') === 'all';
+    const [a, s0, w0] = await Promise.all([
+      api(`address/${encodeURIComponent(id)}?page=${page}`),
+      part('stats'),
+      part(`wallet/${encodeURIComponent(id)}${demo ? '?demo=1' : ''}`),
+    ]);
     const ar = a.archive || {};
-    const hourly = (ar.hourly || []).map((p) => [p.t, Number(p.net_micronoid) / 1e6]);
-    app.innerHTML = `<div class="card"><h2>Address ${a.label?.entity ? `<small>${esc(a.label.entity)}</small>` : ''}</h2><p class="mono">${esc(a.address)}${copyBtn(a.address)}</p>
-        ${a.label?.note ? `<p class="muted">${esc(a.label.note)}</p>` : ''}
-        <div class="grid"><div class="stat"><small>Balance (Live State)</small><b>${esc(noid(a.balance_micronoid))}</b></div>
-        <div class="stat"><small>Live slots</small><b>${a.slots.length}</b></div>
-        <div class="stat"><small>Blocks mined</small><b>${n0(a.blocks_mined)}</b></div>
-        ${a.rank ? `<div class="stat"><small>Rich list rank</small><b>#${n0(a.rank)}</b></div>` : ''}</div></div>
-      <div class="card"><h2>Archive <small class="muted">partial · our stored bodies only</small></h2>
-        <p class="muted">${esc(ar.note || '')}</p>
-        <div class="grid">
-          <div class="stat"><small>Received in archive</small><b>${esc(noid(ar.received_micronoid))}</b></div>
-          <div class="stat"><small>Sent in archive</small><b>${esc(noid(ar.sent_micronoid))}</b></div>
-          <div class="stat"><small>Archived transfers</small><b>${n0(ar.tx_count)}</b></div>
+    const px = s0._err ? null : s0.price?.usd;
+    const balN = noidNum(a.balance_micronoid);
+    const usdLine = px != null && balN != null ? `≈ ${money(balN * px, 2)} USD` : '';
+    const watching = addrWatched(a.address);
+    const hourly = (ar.hourly || []).map((p) => [p.t, Number(p.net_micronoid) / 1e6]).filter((p) => Number.isFinite(p[1]));
+    let run = 0;
+    const cum = hourly.map(([t, y]) => [t, (run += y)]);
+    const seen = ar.first_ts || ar.last_ts ? `<div class="tiles">
+        ${ar.first_ts ? `<div class="stat"><small>First seen</small><b>${esc(ymd(ar.first_ts))}</b></div>` : ''}
+        ${ar.last_ts ? `<div class="stat"><small>Last active</small><b>${esc(ago(ar.last_ts))}</b></div>` : ''}
+      </div>` : '';
+    const pay = (ar.payouts || []).slice(0, 4).map((p) => `${link('address', p.payout)} <span class="muted">${n0(p.blocks)} blocks</span>`).join(' · ');
+    const extra = [a.rank ? `Rich list #${n0(a.rank)}` : '', a.blocks_mined ? `${n0(a.blocks_mined)} blocks mined` : '', a.label?.note || ''].filter(Boolean).join(' · ');
+    const parts = ((!w0._err && w0.holdings) || []).map((h) => ({
+      label: h.ticker || h.name || h.token_id,
+      n: h.value_usd > 0 ? Number(h.value_usd) : Number(h.balance) || 0,
+      text: h.value_usd != null ? money(h.value_usd, h.value_usd < 1 ? 2 : 0) : n0(h.balance),
+    }));
+    const donut = donutLegend(parts);
+    const byId = new Map();
+    for (const r of ar.recent || []) byId.set(r.txid, { txid: r.txid, height: r.height, ts: r.ts, dir: r.dir, amount: r.amount, who: null });
+    for (const t of a.activity?.transactions || []) {
+      const txid = t.txid || t.tx_hash;
+      if (!txid) continue;
+      const prev = byId.get(txid);
+      const who = t.input_owner && t.input_owner !== a.address ? t.input_owner : null;
+      if (prev) { if (who) prev.who = who; continue; }
+      byId.set(txid, { txid, height: t.height ?? t.block_height, ts: t.timestamp, dir: t.coinbase ? 'miner' : (t.dir || ''), amount: t.output_sum_micronoid ?? t.amount_micronoid ?? t.amount, who });
+    }
+    const txRows = [...byId.values()].sort((x, y) => (Number(y.height) || 0) - (Number(x.height) || 0) || (Number(y.ts) || 0) - (Number(x.ts) || 0));
+    const shown = showAll ? txRows : txRows.slice(0, 8);
+    const hasWho = shown.some((r) => r.who);
+    const tip = ar.tip;
+    const txBody = shown.map((r) => {
+      const incoming = r.dir === 'out' || r.dir === 'miner';
+      const outgoing = r.dir === 'in';
+      const signed = r.amount == null || r.amount === '' ? '' : `${incoming ? '+' : outgoing ? '−' : ''}${noid(r.amount).replace(/^-/, '')}`;
+      const side = incoming ? 'up' : outgoing ? 'down' : '';
+      const conf = tip != null && r.height != null ? Number(tip) - Number(r.height) + 1 : null;
+      return `<tr data-dir="${incoming ? 'in' : outgoing ? 'out' : ''}">
+        <td>${link('tx', r.txid)}</td>
+        <td>${r.ts ? esc(ago(r.ts)) : '<span class="muted">–</span>'}</td>
+        <td class="${side}">${incoming ? '+' : outgoing ? '−' : '·'}</td>
+        <td class="amt ${side}">${signed ? esc(signed) : '<span class="muted">–</span>'}</td>
+        ${hasWho ? `<td class="opt">${r.who ? link('address', r.who) : '<span class="muted">–</span>'}</td>` : ''}
+        <td class="opt">${r.height != null ? link('block', r.height) : '<span class="muted">–</span>'}</td>
+        <td class="opt ok">${conf > 0 ? '✓' : '<span class="muted">–</span>'}</td>
+      </tr>`;
+    }).join('');
+    const txHead = `<tr><th>Txid</th><th>Time</th><th>Type</th><th>Amount</th>${hasWho ? '<th class="opt">Counterparty</th>' : ''}<th class="opt">Block</th><th class="opt">Confirmations</th></tr>`;
+    const moreQs = new URLSearchParams(qs);
+    moreQs.set('tx', 'all');
+    const nextQs = new URLSearchParams(qs);
+    nextQs.set('page', String(page + 1));
+    nextQs.set('tx', 'all');
+    const activityMore = a.activity?.total_pages > page || (a.activity?.total > (a.activity?.transactions?.length || 0) && page === 1);
+    const view = !showAll && txRows.length > shown.length
+      ? `<a class="viewall" href="/address/${encodeURIComponent(a.address)}?${moreQs}" data-link>View all transactions</a>`
+      : activityMore ? `<a class="viewall" href="/address/${encodeURIComponent(a.address)}?${nextQs}" data-link>View all transactions</a>` : '';
+    const slots = a.slots || [];
+    const balText = noid(a.balance_micronoid).replace(/ NOID$/, '');
+    app.innerHTML = `<div class="card"><h2>Address ${a.label?.entity ? `<small>${esc(a.label.entity)}</small>` : ''}</h2>
+        <div class="addrhead">
+          <span class="mono clip" title="${esc(a.address)}">${esc(short(a.address))}</span>
+          ${copyBtn(a.address)}
+          <button type="button" id="addrqrbtn" aria-label="Show QR code">QR</button>
+          <button type="button" class="watch${watching ? ' on' : ''}" id="addrwatch" aria-pressed="${watching ? 'true' : 'false'}" aria-label="Watch">${watching ? '★ Watching' : '☆ Watch'}</button>
         </div>
-        <h2>Hourly net <small class="muted">NOID, partial</small></h2>
-        ${hourly.length > 1 ? ichart(hourly, 'dayhour', 'num', 140) : '<p class="muted">Not enough archived hours for a chart yet.</p>'}
-        ${ar.payouts?.length ? `<h2>Miner payout destinations</h2>${rows(ar.payouts.map((p) => ({ payout: p.payout, blocks: p.blocks, amount_micronoid: p.amount_micronoid })), ['payout', 'blocks', 'amount_micronoid'])}` : ''}
-        ${ar.recent?.length ? `<h2>Recent archived transfers</h2>${rows(ar.recent, ['height', 'txid', 'dir', 'amount'])}` : ''}
+        <div id="addrqr" hidden></div>
+        ${seen}
+        ${extra ? `<p class="fine">${esc(extra)}</p>` : ''}
+        ${pay ? `<p class="fine">Miner payout destinations: ${pay}</p>` : ''}
       </div>
-      <div class="card"><h2>Live slots</h2>${rows(a.slots, ['slot_index', 'value', 'creation_id'])}</div>
-      <div class="card"><h2>Recent activity</h2>${kv(summary)}${rows(transactions, TX_COLS)}</div>`;
+      <div class="card"><h2>Balance</h2>
+        <p class="bal">${esc(balText)} <span class="unit">NOID</span></p>
+        ${usdLine ? `<p class="fine">${esc(usdLine)}</p>` : ''}
+        <div class="tiles">
+          <div class="stat"><small>Received</small><b>${esc(noid(ar.received_micronoid))}</b></div>
+          <div class="stat"><small>Sent</small><b>${esc(noid(ar.sent_micronoid))}</b></div>
+          <div class="stat"><small>Txns</small><b>${n0(ar.tx_count)}</b></div>
+          <div class="stat"><small>UTXOs</small><b>${n0(slots.length)}</b></div>
+        </div>
+        ${ar.note ? `<p class="fine">${esc(ar.note)}</p>` : ''}
+      </div>
+      ${cum.length > 1 ? `<div class="card"><h2>Balance over time</h2>
+        <div class="tabs seg" data-tabs="adrange" id="adrange">${[['1d', '1D'], ['1w', '1W'], ['1m', '1M'], ['1y', '1Y'], ['all', 'ALL']].map(([v, l]) => `<button type="button" data-v="${v}" class="${v === 'all' ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div id="addrchart"></div>
+        <p class="fine">Running net of stored block bodies. Not the live balance.</p>
+      </div>` : ''}
+      ${donut ? `<div class="card"><h2>Token holdings</h2>${donut}</div>` : ''}
+      ${shown.length ? `<div class="card"><h2>Transactions</h2>
+        <div class="tabs" data-tabs="txdir"><button type="button" data-v="all" class="on">All</button><button type="button" data-v="in">In</button><button type="button" data-v="out">Out</button></div>
+        <table class="list" id="addrtab"><thead>${txHead}</thead><tbody>${txBody}</tbody></table>
+        ${view}
+      </div>` : ''}
+      ${slots.length ? `<div class="card"><h2>Live slots</h2>${rows(slots, ['slot_index', 'value', 'creation_id'])}</div>` : ''}`;
+    const paintRange = (range) => {
+      const el = $('addrchart');
+      if (!el) return;
+      const end = cum.at(-1)?.[0] || 0;
+      const span = { '1d': 86400, '1w': 7 * 86400, '1m': 30 * 86400, '1y': 365 * 86400, all: Infinity }[range] ?? Infinity;
+      const pts = span === Infinity ? cum : cum.filter((p) => p[0] >= end - span);
+      el.innerHTML = pts.length > 1 ? ichart(pts, span >= 86400 * 30 || span === Infinity ? 'day' : 'dayhour', 'num', 168) : '<p class="muted">Not enough archived hours in this range.</p>';
+    };
+    if (cum.length > 1) { paintRange('all'); onTabs('adrange', paintRange); }
+    onTabs('txdir', (v) => {
+      const rows = $('addrtab')?.tBodies?.[0]?.rows;
+      for (const tr of rows || []) tr.hidden = v !== 'all' && tr.dataset.dir !== v;
+    });
+    const watchBtn = $('addrwatch');
+    if (watchBtn) watchBtn.onclick = () => toggleAddrWatch(a.address, watchBtn);
+    const qrBtn = $('addrqrbtn');
+    if (qrBtn) qrBtn.onclick = async () => {
+      const box = $('addrqr');
+      if (!box) return;
+      if (!box.hidden) { box.hidden = true; return; }
+      box.hidden = false;
+      if (box.dataset.ready) return;
+      if (!window.qrcode) await loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js').catch(() => {});
+      let svg = '';
+      try { const q = qrcode(0, 'M'); q.addData(a.address); q.make(); svg = q.createSvgTag({ scalable: true, margin: 0 }); } catch {}
+      box.innerHTML = svg ? `<div class="qr">${svg}</div>` : '<p class="muted">QR unavailable. Copy still has the full address.</p>';
+      box.dataset.ready = '1';
+    };
   },
 
   async economics() {
