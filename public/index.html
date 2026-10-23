@@ -69,7 +69,6 @@
   svg { width:100%; height:90px; display:block } polyline { fill:none; stroke:var(--accent); stroke-width:1.5; filter:drop-shadow(0 0 3px var(--accent)) }
   polygon { fill:url(#glow-fill) }
   footer { color:var(--muted); font:13px/1.6 var(--mono) }
-  footer .entity { display:block; margin-top:2px; font-size:11px }
   /* Live feed */
   .livebar { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:12px; font:12px var(--mono); color:var(--muted); letter-spacing:.06em }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:var(--glow); animation:pulse 1.6s infinite }
@@ -465,6 +464,12 @@
     clip-path:polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
   }
   #excard, .card:has(.more) { clip-path:none; overflow:visible }
+  .menu nav { background:color-mix(in srgb, var(--card) 97%, transparent); backdrop-filter:blur(16px) }
+  .stack { display:flex; flex-direction:column; gap:8px }
+  .stack textarea, .stack input { width:100%; min-width:0; font:13px var(--mono) }
+  .tpls { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(168px, 100%), 1fr)); gap:8px }
+  .tpls h3 { margin:0 0 6px; color:var(--accent); font:600 11px/1.3 var(--mono); letter-spacing:.12em; text-transform:uppercase }
+  .tpls p { margin:0; color:var(--muted); font:13px/1.45 system-ui, sans-serif }
   section.promo {
     background:color-mix(in srgb, var(--gold) 12%, color-mix(in srgb, var(--card) 82%, transparent));
     border-color:color-mix(in srgb, var(--gold) 72%, transparent);
@@ -522,12 +527,9 @@
   .chip, .stat small, .tile small { overflow-wrap:anywhere }
   .globe { overflow:hidden; max-width:100%; min-width:0 }
   .globe #globe, .globe canvas, .glead, .gcalls { width:100%; max-width:100% }
-  .hudring { position:absolute; left:50%; top:44%; width:min(78%, 540px); max-width:100%; height:auto; aspect-ratio:1; transform:translate(-50%, -50%); pointer-events:none; z-index:2 }
-  .hudring line, .hudring circle, .hudring ellipse { fill:none; stroke:color-mix(in srgb, var(--accent) 62%, transparent); stroke-width:.7 }
-  .hudring text { fill:color-mix(in srgb, var(--accent) 88%, white); font:7px var(--mono); text-anchor:middle; dominant-baseline:middle }
   .glead, .gcalls { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; overflow:hidden }
   .glead line { stroke:color-mix(in srgb, var(--accent) 85%, transparent); stroke-width:1 }
-  .gcall { position:absolute; max-width:calc(100% - 12px); overflow:hidden; text-overflow:ellipsis; font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--accent); white-space:nowrap; text-shadow:0 0 8px color-mix(in srgb, var(--accent) 55%, transparent) }
+  .gcall { position:absolute; visibility:hidden; max-width:calc(100% - 56px); overflow:hidden; text-overflow:ellipsis; font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--accent); white-space:nowrap; text-shadow:0 0 8px color-mix(in srgb, var(--accent) 55%, transparent) }
   .gcall.home { color:var(--fg); letter-spacing:.16em }
   .gltools { display:none; position:absolute; right:6px; top:46%; transform:translateY(-50%); z-index:4; flex-direction:column; gap:6px; max-width:40px }
   .globe.ready .gltools { display:flex }
@@ -627,7 +629,7 @@
   <a href="/alerts" data-link data-dock="alerts">Alerts</a>
   <button type="button" id="dockmenu">Menu</button>
 </nav>
-<footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them. <a href="/terms" data-link>Terms</a> · <a href="/privacy" data-link>Privacy</a><span class="entity">© 2026 Duli Media LLC</span></footer>
+<footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them. <a href="/terms" data-link>Terms</a> · <a href="/privacy" data-link>Privacy</a></footer>
 <script>
 const app = document.getElementById('app');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -1519,21 +1521,43 @@ function placeCalls() {
     callKey = key;
     host.innerHTML = items.map((it, i) => `<div class="gcall${it.home ? ' home' : ''}" data-i="${i}">${esc(it.label)}</div>`).join('');
   }
-  const cx = w / 2, cy = h / 2, lines = [];
+  const lines = [];
+  const gap = 6;
+  const hits = (a, b) => a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+  const taken = [{ x: w - 46, y: Math.max(8, h * 0.46 - 86), w: 44, h: 176 }];
   items.forEach((it, i) => {
     const el = host.querySelector(`[data-i="${i}"]`);
+    if (!el) return;
     let p;
     try { p = globe.getScreenCoords(it.lat, it.lng, 0.02); } catch { p = null; }
-    const ok = p && p.x > -40 && p.y > -40 && p.x < w + 40 && p.y < h + 40;
-    if (el) el.hidden = !ok;
+    const ok = p && p.x > -20 && p.y > -20 && p.x < w + 20 && p.y < h + 20;
+    el.style.visibility = 'hidden';
     if (!ok) return;
-    const dx = p.x - cx, dy = p.y - cy, len = Math.hypot(dx, dy) || 1, dist = it.home ? 16 : 36;
-    el.style.maxWidth = `${Math.max(48, w - 8)}px`;
-    const tw = Math.min(el.offsetWidth || 72, w - 8);
-    const lx = Math.min(Math.max(4, w - tw - 4), Math.max(4, p.x + (dx / len) * dist));
-    const ly = Math.min(h - 18, Math.max(4, p.y + (dy / len) * dist - 8));
-    el.style.left = `${lx}px`; el.style.top = `${ly}px`;
-    lines.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${(lx + 8).toFixed(1)}" y2="${(ly + 5).toFixed(1)}"/>`);
+    el.style.maxWidth = `${Math.max(48, w - 56)}px`;
+    const tw = Math.min(el.offsetWidth || 72, w - 56);
+    const th = el.offsetHeight || 14;
+    const dirs = it.home
+      ? [[-1, -0.35], [-1, 0.45], [-0.15, -1], [0, -1], [-1, 1]]
+      : [[1, -0.4], [-1, -0.4], [0, -1], [1, 0.45], [-1, 0.45], [0, 1]];
+    let box = null;
+    for (const dist of [it.home ? 20 : 36, 58, 86, 118]) {
+      for (const [sx, sy] of dirs) {
+        const rawX = p.x + sx * dist - (sx < 0 ? tw : sx === 0 ? tw / 2 : 0);
+        const rawY = p.y + sy * dist * 0.62 - th / 2;
+        const cand = {
+          x: Math.min(w - tw - 50, Math.max(6, rawX)),
+          y: Math.min(h - th - 28, Math.max(50, rawY)),
+          w: tw, h: th,
+        };
+        if (taken.every((b) => !hits(cand, b))) { box = cand; break; }
+      }
+      if (box) break;
+    }
+    if (!box) return;
+    taken.push(box);
+    el.style.visibility = 'visible';
+    el.style.left = `${box.x}px`; el.style.top = `${box.y}px`;
+    lines.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${(box.x + 8).toFixed(1)}" y2="${(box.y + 5).toFixed(1)}"/>`);
   });
   lead.setAttribute('viewBox', `0 0 ${w} ${h}`);
   lead.innerHTML = lines.join('');
@@ -1628,20 +1652,6 @@ function unmountGlobe() {
   globe?._destructor?.(); globe = null;
   G.arcs = []; G.bursts = [];
 }
-function hudRing() {
-  const ticks = [];
-  for (let d = 0; d < 360; d += 15) {
-    const a = (d - 90) * Math.PI / 180, r1 = d % 45 === 0 ? 88 : 92, r2 = 97;
-    const xy = (r) => `${(100 + r * Math.cos(a)).toFixed(1)},${(100 + r * Math.sin(a)).toFixed(1)}`;
-    ticks.push(`<line x1="${xy(r1).split(',')[0]}" y1="${xy(r1).split(',')[1]}" x2="${xy(r2).split(',')[0]}" y2="${xy(r2).split(',')[1]}"/>`);
-  }
-  const labels = [0, 45, 90, 135, 180, 225, 270, 315].map((d) => {
-    const a = (d - 90) * Math.PI / 180, r = 80;
-    return `<text x="${(100 + r * Math.cos(a)).toFixed(1)}" y="${(100 + r * Math.sin(a)).toFixed(1)}">${d}°</text>`;
-  }).join('');
-  return `<svg class="hudring" viewBox="0 0 200 200" aria-hidden="true">${ticks.join('')}<circle cx="100" cy="100" r="70"/><ellipse cx="100" cy="100" rx="70" ry="24"/><ellipse cx="100" cy="100" rx="24" ry="70"/><line x1="100" y1="30" x2="100" y2="170"/><line x1="30" y1="100" x2="170" y2="100"/>${labels}</svg>`;
-}
-
 // Wallet / DEX adapter. Live swaps stay hidden until the server reports the node
 // methods and this provider exists. Expected, once Parano1d publishes it:
 //   window.parano1d.request({ method: 'account' }) -> { address: 'o1…' }
@@ -1805,15 +1815,19 @@ function starBtn(id, name) {
 }
 let promoIds = new Set();
 const PAID = 'Paid promotion. Not a recommendation or endorsement by NOID Scan.';
-const SOLD = 'Sold by Duli Media LLC';
 const enhBadge = (t) => t?.enhanced ? `<span class="pill enh" title="${esc(PAID)}">Enhanced</span>` : '';
 const promoBadge = () => `<span class="pill promo" title="${esc(PAID)}">Promoted</span>`;
 const paidMarks = (t) => [enhBadge(t), promoIds.has(t?.id) ? promoBadge() : ''].filter(Boolean).join(' ');
+// shortcut: the screener row uses one bolt. The 1 is a live boost until the API sends a count.
+const listBolt = (t) => {
+  const promo = promoIds.has(t?.id), enh = !!t?.enhanced;
+  if (!promo && !enh) return '';
+  const kind = [promo && 'Promoted', enh && 'Enhanced'].filter(Boolean).join(' · ');
+  return `<span class="bolt" title="${esc(kind)}. ${esc(PAID)}" aria-label="${esc(kind)}">⚡${promo ? ' 1' : ''}</span>`;
+};
 const httpsLink = (url, label) => url && /^https:\/\//.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : '';
 const sprout = () => '<svg class="sprout" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14V7M8 7C8 4 5 3 3 4c2 2 3 3 5 3zm0 0c0-3 3-5 5-3-2 2-3 3-5 3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
 const lockIco = () => '<svg class="lock" viewBox="0 0 16 16" aria-label="Locked in a pool"><rect x="3.5" y="7" width="9" height="6.5" rx="1" fill="none" stroke="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor"/></svg>';
-// shortcut: a live boost has no count, so the bolt is 1 or absent until the API publishes one.
-const bolt = (id) => promoIds.has(id) ? '<span class="bolt" title="Promoted">⚡ 1</span>' : '';
 let showRank = true, mobTab = '';
 function splitBar(lName, lVal, rName, rVal, lRaw, rRaw) {
   let l = 0n, r = 0n;
@@ -1892,7 +1906,7 @@ function tokenTable(list, sort, dir, window, page, pageSize) {
   const head = `<tr><th></th><th>Token</th><th>Price</th>${sortTh('age', 'Age', sort, dir)}${sortTh('txns', 'Txns', sort, dir)}${sortTh('makers', 'Makers', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('liquidity', 'Liquidity', sort, dir)}${sortTh('mcap', 'MCap', sort, dir)}${sortTh('fdv', 'FDV', sort, dir)}${chgTh('5m', sort, dir, window)}${chgTh('1h', sort, dir, window)}${chgTh('6h', sort, dir, window)}${chgTh('24h', sort, dir, window)}<th>Launch</th><th class="opt">Backing</th></tr>`;
   const body = list.map((t, i) => `<tr>
       <td>${starBtn(t.id, t.name)}</td>
-      <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b> ${paidMarks(t)}<small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
+      <td><span class="rank">${(page - 1) * pageSize + i + 1}</span><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.name)}</b> ${listBolt(t)}<small class="muted">${esc(t.ticker)}</small></span></a>${copyBtn(t.id)}</td>
       <td>${sparkSvg(t.spark)}${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
       <td>${esc(ageLabel(t))}</td><td class="num">${n0(t.txns)}</td><td class="num">${n0(t.makers)}</td>
       ${numCell(t.volume_micronoid)}${numCell(t.liquidity_micronoid)}${numCell(t.mcap_micronoid)}${numCell(t.fdv_micronoid)}
@@ -1904,8 +1918,8 @@ function tokenTable(list, sort, dir, window, page, pageSize) {
 function tokenCards(list, page, pageSize) {
   return `<div class="narrow">${list.map((t, i) => `<a class="mcard" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>
       ${showRank ? `<span class="rank">${(page - 1) * pageSize + i + 1}</span>` : ''}${logoHtml(t)}
-      <span class="who"><span class="l1"><b>${esc(t.ticker)}</b> <span class="muted">${sprout()}${esc(ageShort(t.age_s))}</span> ${bolt(t.id)} ${starBtn(t.id, t.name)}</span>
-        <span class="l2">${esc(t.name)} ${paidMarks(t)}</span></span>
+      <span class="who"><span class="l1"><b>${esc(t.ticker)}</b> <span class="muted">${sprout()}${esc(ageShort(t.age_s))}</span> ${listBolt(t)} ${starBtn(t.id, t.name)}</span>
+        <span class="l2">${esc(t.name)}</span></span>
       <span class="px">${sparkSvg(t.spark)}<b class="subpx">${esc(t.price_usd == null ? '–' : subUsd(t.price_usd))}</b>
         <span class="chgpair"><span>1H ${chgHtml(t.change?.['1h'])}</span><span>24H ${chgHtml(t.change?.['24h'])}</span></span>
         <span class="chipsline"><span class="pill">Liq ${esc(compactNoid(t.liquidity_micronoid))}</span><span class="pill">Vol ${esc(compactNoid(t.volume_micronoid))}</span><span class="pill">MCap ${esc(compactNoid(t.mcap_micronoid))}</span></span></span></a>`).join('')}</div>`;
@@ -1914,7 +1928,7 @@ function nftTable(list, sort, dir) {
   const head = `<tr><th></th><th>Collection</th>${sortTh('floor', 'Floor', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('items', 'Items', sort, dir)}${sortTh('owners', 'Owners', sort, dir)}${sortTh('age', 'Age', sort, dir)}</tr>`;
   const body = list.map((c) => `<tr>
       <td>${starBtn(c.id, c.name)}</td>
-      <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a> ${paidMarks(c)}</td>
+      <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a> ${listBolt(c)}</td>
       ${numCell(c.floor_micronoid)}${numCell(c.volume_micronoid)}
       <td class="num">${n0(c.items)}</td><td class="num">${n0(c.owners)}</td><td>${esc(c.created_ts ? ago(c.created_ts) : ageShort(c.age_s))}</td></tr>`).join('');
   return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
@@ -1922,8 +1936,8 @@ function nftTable(list, sort, dir) {
 function nftCards(list, page, pageSize) {
   return `<div class="narrow">${list.map((c, i) => `<a class="mcard" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>
       ${showRank ? `<span class="rank">${(page - 1) * pageSize + i + 1}</span>` : ''}<span class="logo">${esc(c.name.slice(0, 2))}</span>
-      <span class="who"><span class="l1"><b>${esc(c.name.split(' ')[0])}</b> <span class="muted">${sprout()}${esc(ageShort(c.age_s))}</span> ${bolt(c.id)} ${starBtn(c.id, c.name)}</span>
-        <span class="l2">${esc(c.name)} ${paidMarks(c)}</span></span>
+      <span class="who"><span class="l1"><b>${esc(c.name.split(' ')[0])}</b> <span class="muted">${sprout()}${esc(ageShort(c.age_s))}</span> ${listBolt(c)} ${starBtn(c.id, c.name)}</span>
+        <span class="l2">${esc(c.name)}</span></span>
       <span class="px"><b class="subpx">${esc(c.floor_usd == null ? '–' : subUsd(c.floor_usd))}</b>
         <span class="chgpair"><span>1H ${chgHtml(null)}</span><span>24H ${chgHtml(null)}</span></span>
         <span class="chipsline"><span class="pill">Vol ${esc(compactNoid(c.volume_micronoid))}</span><span class="pill">Items ${n0(c.items)}</span><span class="pill">Owners ${n0(c.owners)}</span></span></span></a>`).join('')}</div>`;
@@ -2430,19 +2444,19 @@ function wireEnhance(d, t, demo, page) {
       const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh, chain: form.chain?.value, page });
       if (pay.url) { location.href = pay.url; return; }
       if (pay.method === 'usdc') {
-        msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b> is the last digits. A different amount is not matched. This page watches the transfer.<br>${esc(SOLD)}`;
+        msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b> is the last digits. A different amount is not matched. This page watches the transfer.`;
         clearInterval(usdcTimer);
         usdcTimer = setInterval(async () => {
           try {
             const st = await api('usdc-order/' + pay.id);
             if (!st?.paid || !$('enhmsg')) return;
             clearInterval(usdcTimer);
-            $('enhmsg').innerHTML = `USDC payment confirmed. The profile stays hidden until an admin approves it.<br>${esc(SOLD)}`;
+            $('enhmsg').innerHTML = `USDC payment confirmed. The profile stays hidden until an admin approves it.`;
           } catch {}
         }, 5000);
         return;
       }
-      msg.innerHTML = `Send exactly <b>${esc(pay.amount_noid)} NOID</b> to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_noid)} It stays in review until an admin approves it.<br>${esc(SOLD)}`;
+      msg.innerHTML = `Send exactly <b>${esc(pay.amount_noid)} NOID</b> to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_noid)} It stays in review until an admin approves it.`;
     } catch (err) {
       msg.textContent = err.message;
       b.disabled = false;
@@ -2477,14 +2491,14 @@ function wireBoost(kind, id, demo) {
     try {
       const made = await api('boost', { asset_id: id, kind, pack: b.dataset.boost });
       const pay = await api('boost-pay', { id: made.id, method: 'usdc', chain: form.querySelector('[name="chain"]')?.value });
-      msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b>. The slot stays hidden until an admin approves it, then it ends on its own.<br>${esc(SOLD)}`;
+      msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b>. The slot stays hidden until an admin approves it, then it ends on its own.`;
       clearInterval(usdcTimer);
       usdcTimer = setInterval(async () => {
         try {
           const st = await api('usdc-order/' + pay.id);
           if (!st?.paid || !$('boostmsg')) return;
           clearInterval(usdcTimer);
-          $('boostmsg').innerHTML = `USDC payment confirmed. The slot stays hidden until an admin approves it, then it ends on its own.<br>${esc(SOLD)}`;
+          $('boostmsg').innerHTML = `USDC payment confirmed. The slot stays hidden until an admin approves it, then it ends on its own.`;
         } catch {}
       }, 5000);
     } catch (err) {
@@ -2507,10 +2521,10 @@ function homeStrip(tokens, cols) {
     <p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>
     <div class="tabs" data-tabs="homekind"><button type="button" data-v="tokens" class="on">Tokens</button><button type="button" data-v="nfts">NFTs</button></div>
     <div id="homestrip-tokens">${tok.slice(0, 5).map((t) => `<a class="mcard" style="display:grid" href="/token/${encodeURIComponent(t.id)}?demo=1" data-link>
-      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${paidMarks(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
+      ${logoHtml(t)}<span class="who"><b>${esc(t.name)}</b> ${listBolt(t)}<small>${esc(t.ticker)} · ${esc(ageLabel(t))}</small></span>
       <span class="px">${esc(fmtNoid(t.price_micronoid))}<small>${chgHtml(t.change['24h'])}</small></span></a>`).join('')}</div>
     <div id="homestrip-nfts" hidden>${nft.slice(0, 5).map((c) => `<a class="mcard" style="display:grid" href="/collection/${encodeURIComponent(c.id)}?demo=1" data-link>
-      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${paidMarks(c)}<small>${esc(ageShort(c.age_s))}</small></span>
+      <span class="logo">${esc(c.name.slice(0, 2))}</span><span class="who"><b>${esc(c.name)}</b> ${listBolt(c)}<small>${esc(ageShort(c.age_s))}</small></span>
       <span class="px">${esc(fmtNoid(c.floor_micronoid))}<small>floor</small></span></a>`).join('')}</div>
     <p id="homestrip-more"><a href="/explore?demo=1" data-link>All sample tokens →</a></p></div>`;
 }
@@ -2854,7 +2868,7 @@ const pages = {
           <div class="chip">Peers<b id="gpeers">${s ? n0(s.peers) : '–'}</b></div>
           <div class="chip">Countries<b id="gcc">${net ? n0(net.peers.length) : '–'}</b></div>
       </div>
-      <div class="card globe">${hudRing()}<div id="globe"><div class="glmsg">Loading network globe…</div></div>
+      <div class="card globe"><div id="globe"></div>
         <svg class="glead" id="glead" aria-hidden="true"></svg><div class="gcalls" id="gcalls"></div>
         <div class="gltools">
           <button type="button" id="glzoomin" aria-label="Zoom in">+</button>
@@ -3321,7 +3335,7 @@ const pages = {
     if (livePromo) promoIds.add(t.id);
     const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
-      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.<br><span class="muted">${esc(SOLD)}</span></p>` : '';
+      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.</p>` : '';
     const where = t.pool ? `Pooled · ${fmtNoid(t.pool.reserve_noid_micronoid)}` : (t.curve ? `Launchpad · ${t.curve.progress}%` : (t.launch === 'direct' ? 'Direct issue' : 'Not published'));
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}${paidBack}
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
@@ -3614,7 +3628,7 @@ const pages = {
       <div class="traits">${(n.traits || []).map((t) => `<span>${esc(t.trait)} ${esc(t.value)}</span>`).join('')}</div>
       <div class="muted mono" style="font-size:12px">${n.owner ? `<a href="${walletHref(n.owner, '', demo)}" data-link>${esc(short(n.owner))}</a>` : '–'}</div></div>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
-      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.<br><span class="muted">${esc(SOLD)}</span></p>` : '';
+      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.</p>` : '';
     const colPanel = (evs) => {
       const sales = (evs || []).filter((ev) => ev.kind === 'sale');
       const xf = (evs || []).filter((ev) => ev.kind === 'transfer');
@@ -3805,7 +3819,6 @@ const pages = {
   terms() {
     app.innerHTML = `<div class="card"><h2>Terms of Service</h2>
       <p class="muted">DRAFT pending legal review.</p>
-      <p>Duli Media LLC, a California LLC, is the operator of this site.</p>
       <p>NOID Scan is a block explorer. It does not hold NOID, tokens, NFTs or wallet keys, and it cannot move funds on your behalf.</p>
       <p>A swap quote, when the panel is shown, lists the front-end fee as a rate and an amount before you sign. That fee is a separate output to the explorer's published address when the Parano1d transaction can carry one. Until then the fee is only a line on the quote. You sign and submit from your own wallet. This site does not match orders and does not take custody of either side.</p>
       <p>Nothing here is investment, financial or trading advice. Listings are whatever the connected node reports. A demo banner means the rows are sample data and are not on chain.</p>
@@ -3816,7 +3829,6 @@ const pages = {
   privacy() {
     app.innerHTML = `<div class="card"><h2>Privacy</h2>
       <p class="muted">DRAFT pending legal review.</p>
-      <p>Duli Media LLC, a California LLC, is the operator of this site.</p>
       <p>An account is an API key. The server stores a hash of that key, not a name or an email. An enhanced-profile or promoted-slot order stores the account id, the amount, the chain, and, once it matches, the transaction id. Card payments are taken by Stripe. This page is not a finished privacy policy.</p>
       <p><a href="/terms" data-link>Terms of Service</a></p></div>`;
   },
@@ -3983,15 +3995,65 @@ const pages = {
         <p class="muted">Heights whose body was already pruned before this explorer stored it. Recovery retries the node, then any archive peers in ARCHIVE_PEERS.</p>
         ${rows(g.gaps || [], ['height', 'kind', 'tries', 'last_error'])}</div>`;
   },
-  receipts() {
-    app.innerHTML = `<div class="card"><h2>Receipts</h2>
-        <p>This explorer cannot verify a receipt. The node does not expose a receipt method to it.</p>
-        <p>On a machine with the Parano1d CLI: <code>parano1d-cli receipt TXID</code> and <code>parano1d-cli verify</code>. Contract receipts stay verifiable after the block body is pruned.</p></div>`;
+  async receipts() {
+    const flags = (rows) => `<div class="tiles">${rows.map(([k, on]) => `<div class="stat"><small>${esc(k)}</small><b class="${on ? 'up' : 'down'}">${on ? 'Yes' : 'No'}</b></div>`).join('')}</div>`;
+    const show = (r) => {
+      const v = r.result || {};
+      if (r.kind === 'contract') {
+        const pay = v.payout;
+        return `${flags([['Valid', !!v.valid], ['Close', !!v.terminal], ['Canonical', v.canonical !== false]])}
+          <p class="fine">${v.txid ? link('tx', v.txid) : '–'}${v.height != null ? ` · ${link('block', v.height)}` : ''} · fee ${esc(noid(v.fee_micronoid))}${pay ? ` · ${esc(noid(pay.amount_micronoid))} to ${link('address', pay.address)}` : ''}</p>`;
+      }
+      const s = v.authenticated_summary;
+      return `${flags([['Merkle proof', !!v.merkle_valid], ['On this chain', !!v.canonical], ['Confirmed', !!v.confirmed]])}
+        ${v.error ? `<p class="msg err">${esc(v.error)}</p>` : ''}
+        ${s ? `<p class="fine">${s.txid ? link('tx', s.txid) : ''}${s.claimed_height != null ? ` · ${link('block', s.claimed_height)}` : ''} · fee ${esc(noid(s.fee_micronoid))}</p>
+          ${(s.outputs || []).map((o) => `<p class="fine">${esc(noid(o.amount_micronoid))} to ${link('address', o.owner)}</p>`).join('')}` : ''}`;
+    };
+    app.innerHTML = `<div class="card" id="rcpt"><h2>Receipts</h2>
+        <p>Paste a payment or contract receipt. This node checks it with <code>verifyReceipt</code> or <code>verifyObjectReceipt</code>.</p>
+        <div class="stack">
+          <label>Receipt hex<textarea id="rcpthex" rows="6" spellcheck="false" autocapitalize="off" placeholder="Hex from a saved receipt"></textarea></label>
+          <label>Transaction id<input id="rcpttx" spellcheck="false" autocapitalize="off" placeholder="64 hex characters"></label>
+          <div class="row"><button type="button" id="rcptgo">Check</button></div>
+          <div id="rcptout"></div>
+        </div>
+        <p class="fine">A txid is not a receipt. The node can export one only from its own wallet (<code>walletExportReceipt</code>), and this page does not open that. A pruned block body cannot be rebuilt into a receipt here.</p></div>`;
+    $('rcptgo').onclick = async () => {
+      const out = $('rcptout');
+      const hex = $('rcpthex').value.replace(/\s+/g, '');
+      const txid = $('rcpttx').value.trim().toLowerCase();
+      out.innerHTML = '<p class="muted">Checking…</p>';
+      try {
+        const parts = [];
+        if (hex) parts.push(show(await api('receipts', hex.length > 262144 ? { receipt: hex, kind: 'contract' } : { receipt: hex })));
+        if (txid) {
+          if (!/^[0-9a-f]{64}$/.test(txid)) throw new Error('A txid is 64 hex characters.');
+          const t = await api('tx/' + txid);
+          const kind = t.details?.contract;
+          parts.push(`<p>The node points at this transaction in ${link('block', t.height)}.${kind === 'call' || kind === 'close' ? ` The stored body marks it as a contract ${esc(kind)}.` : ''} That pointer is not a receipt.</p>`);
+        }
+        if (!parts.length) throw new Error('Paste a receipt or a transaction id.');
+        out.innerHTML = parts.join('');
+      } catch (e) { out.innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
+    };
   },
-  contracts() {
-    app.innerHTML = `<div class="card"><h2>Contracts</h2>
-        <p>Parano1d contracts use a 16-instruction integer ABI. This page does not compile, simulate or verify one.</p>
-        <p>The six templates are refundable payments, timelocked vaults, delegated allowance, budgets, recurring payments and gradual release. Verification is <code>parano1d-cli receipt</code> / <code>parano1d-cli verify</code>.</p></div>`;
+  async contracts() {
+    const data = await api('contracts');
+    const seen = data.seen || [];
+    const groups = new Map();
+    for (const row of seen) {
+      const k = row.contract === 'close' ? 'Close' : 'Call';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(row);
+    }
+    const lists = [...groups].map(([k, rows]) => `<div class="card"><h2>${esc(k)}</h2><table class="list"><thead><tr><th>Tx</th><th>Block</th><th>Fee</th><th>Time</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${link('tx', r.txid)}</td><td>${link('block', r.height)}</td><td>${esc(noid(r.fee))}</td><td>${r.ts ? esc(ago(r.ts)) : '<span class="muted">–</span>'}</td></tr>`).join('')}</tbody></table></div>`).join('');
+    const cards = (data.templates || []).map((t) => `<article class="tile"><h3>${esc(t.name)}</h3><p>${esc(t.about)}</p></article>`).join('');
+    const note = seen.length
+      ? 'These are contract transactions in block bodies this explorer stored, grouped as call or close. The body does not name the template.'
+      : 'No contract transaction is in a block body this explorer stored. A body only says call or close, and the node drops it after about 42 blocks. The template name stays in the opening, which that list does not include.';
+    const proto = data.protocol ? `<p class="fine">${data.protocol.active ? 'Calls are active on the next block.' : 'Calls are not active on the next block.'}${data.protocol.activation_height != null ? ` Activation height ${n0(data.protocol.activation_height)}.` : ''}${data.protocol.abi_version != null ? ` ABI ${esc(data.protocol.abi_version)}.` : ''}</p>` : '';
+    app.innerHTML = `<div class="card"><h2>Contracts</h2><p class="muted">${esc(note)}</p>${proto}</div>${lists}<div class="tpls">${cards}</div>`;
   },
   async admin() {
     app.innerHTML = `<div class="card" id="admin"><h2>Profile review</h2>

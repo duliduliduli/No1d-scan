@@ -26,7 +26,7 @@ const aiServer = http.createServer((req, res) => {
     res.end(JSON.stringify({ choices: [{ message }] }));
   });
 });
-let tip = 99, fork = '';
+let tip = 99, fork = '', contractHeight = null;
 const holes = new Set(); // heights the fake node has no header for // `fork` changes hashes from height 98 up to simulate a reorg
 const hash = (h) => H(h, h >= 98 ? fork : '');
 // Target 2^240 little-endian -> 2^16 expected hashes per block; blocks 60 s apart; two alternating miners.
@@ -38,7 +38,9 @@ const node = {
   blockCount: () => tip,
   getBlockHash: ([h]) => header(h)?.hash ?? null,
   getBlockHeader: ([h]) => (holes.has(h) ? null : header(h)),
-  getBlockDetails: ([h]) => header(h) && { header: header(h), retained: h > tip - 42 ? { reward_micronoid: 5e6, transactions: [tx(h)] } : null },
+  getBlockDetails: ([h]) => header(h) && { header: header(h), retained: h > tip - 42 ? { reward_micronoid: 5e6, transactions: [{ ...tx(h), ...(h === contractHeight ? { contract: 'call' } : {}) }] } : null },
+  verifyReceipt: ([hex]) => ({ merkle_valid: hex === 'abcd', canonical: hex === 'abcd', confirmed: hex === 'abcd', error: hex === 'abcd' ? null : 'bad proof', authenticated_summary: hex === 'abcd' ? { txid: 'ab'.repeat(32), claimed_height: 70, fee_micronoid: 10, outputs: [{ amount_micronoid: 5, owner: PAY_ADDR }] } : undefined }),
+  verifyObjectReceipt: ([hex]) => ({ valid: hex === 'eeff', height: 71, txid: 'cd'.repeat(32), terminal: false, fee_micronoid: 5000, canonical: true }),
   getTx: ([id]) => (id === H('tx70') ? { tx_hash: id, height: 70, block_hash: hash(70), tx_position: 0 } : null),
   getChainInfo: () => ({ height: tip, active_slot_count: 10, circulating_supply_micronoid: '123000000' }),
   getPeerCount: () => 8,
@@ -616,17 +618,21 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="listbar"/);
   assert.match(homeHtml, /aria-label="USDC chain"/);
   assert.match(homeHtml, /native USDC on the chain you pick/);
-  assert.match(homeHtml, /© 2026 Duli Media LLC/);
   assert.match(homeHtml, /href="\/privacy"/);
-  assert.match(homeHtml, /Sold by Duli Media LLC/);
   assert.match(homeHtml, /DRAFT pending legal review/);
-  assert.match(homeHtml, /is the operator of this site/);
+  assert.doesNotMatch(homeHtml, /Duli Media LLC/);
+  assert.doesNotMatch(homeHtml, /hudring|hudRing/);
+  assert.match(homeHtml, /color-mix\(in srgb, var\(--card\) 97%, transparent\)/);
+  assert.match(homeHtml, /id="rcpthex"/);
+  assert.match(homeHtml, /verifyReceipt/);
+  assert.match(homeHtml, /aria-label="\$\{esc\(kind\)\}"/);
+  const tokenCardSrc = homeHtml.slice(homeHtml.indexOf('function tokenCards'), homeHtml.indexOf('function nftTable'));
+  assert.match(tokenCardSrc, /listBolt\(t\)/);
+  assert.doesNotMatch(tokenCardSrc, /paidMarks|>Enhanced</);
   const siteHead = homeHtml.slice(homeHtml.indexOf('<header>'), homeHtml.indexOf('</header>'));
   assert.doesNotMatch(siteHead, /Duli Media LLC/);
   const billingSrc = require('fs').readFileSync(require('path').join(__dirname, 'billing.js'), 'utf8');
-  const creditCard = billingSrc.slice(billingSrc.indexOf('async function stripeCheckout'), billingSrc.indexOf('function stripeWebhook'));
-  assert.doesNotMatch(creditCard, /Duli Media LLC/);
-  assert.match(billingSrc, /payment_intent_data\[description\]': 'Sold by Duli Media LLC'/);
+  assert.doesNotMatch(billingSrc, /Duli Media LLC/);
 
   // 64-bit creation ids must survive parsing: two consecutive ids are different slots, not the same payment.
   const { parseRpc } = require('./server.js');
@@ -1281,8 +1287,16 @@ test('indexer + api', async (t) => {
   const [, eco] = await get('economics');
   assert.strictEqual(eco.schedule[1].noid, '11.30');
   assert.strictEqual(eco.schedule.at(-1).height, 8620137);
-  assert.strictEqual((await get('receipts'))[1].available, false);
-  assert.ok((await get('contracts'))[1].templates.includes('timelocked vaults'));
+  assert.ok((await get('receipts'))[1].verify.includes('verifyReceipt'));
+  assert.strictEqual((await post('receipts', { receipt: 'zz' }))[0], 400);
+  assert.strictEqual((await post('receipts', { receipt: 'abcd' }))[1].result.merkle_valid, true);
+  assert.strictEqual((await post('receipts', { receipt: 'eeff', kind: 'contract' }))[1].result.valid, true);
+  contractHeight = tip + 1;
+  tip += 1;
+  await tick();
+  const [, cts] = await get('contracts');
+  assert.ok(cts.templates.some((t) => /timelocked vault/i.test(t.name)));
+  assert.ok(cts.seen.some((r) => r.height === contractHeight && r.contract === 'call' && r.txid === H(`tx${contractHeight}`)));
   assert.ok((await get('orphans?limit=2'))[1].orphans.length >= 1);
   assert.strictEqual((await get('gaps?limit=1'))[1].gaps.length, 1);
 

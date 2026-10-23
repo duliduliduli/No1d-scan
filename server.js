@@ -66,7 +66,7 @@ function ensureAux(database) {
       id integer primary key, tip_before integer, tip_after integer, at integer not null, depth integer not null);
     create table if not exists meta (k text primary key, v text not null);
     create table if not exists tx_index (
-      txid blob primary key, height integer not null, position integer, fee text, burned text, coinbase integer);
+      txid blob primary key, height integer not null, position integer, fee text, burned text, coinbase integer, contract text);
     create index if not exists tx_index_height on tx_index(height);
     create table if not exists addr_tx (
       address text not null, txid blob not null, height integer not null, dir text not null, amount text not null);
@@ -120,6 +120,8 @@ function migrateDb(database) {
   } catch (e) { database.exec('rollback'); throw e; }
 }
 migrateDb(db);
+try { db.exec('alter table tx_index add column contract text'); } catch {}
+try { db.exec('create index if not exists tx_index_contract on tx_index(height) where contract is not null'); } catch {}
 
 const hexOf = (v) => (v == null ? null : (typeof v === 'string' ? v.toLowerCase() : Buffer.from(v).toString('hex')));
 const hashBuf = (hex) => Buffer.from(String(hex).toLowerCase(), 'hex');
@@ -202,7 +204,10 @@ const q = {
   delTxHeight: db.prepare('delete from tx_index where height = ?'),
   delAddrHeight: db.prepare('delete from addr_tx where height = ?'),
   delPayout: db.prepare('delete from miner_payouts where height = ?'),
-  putTx: db.prepare('insert or replace into tx_index (txid, height, position, fee, burned, coinbase) values (?, ?, ?, ?, ?, ?)'),
+  putTx: db.prepare('insert or replace into tx_index (txid, height, position, fee, burned, coinbase, contract) values (?, ?, ?, ?, ?, ?, ?)'),
+  contractTxs: db.prepare(`select lower(hex(t.txid)) txid, t.height, t.contract, t.fee, h.ts
+    from tx_index t left join headers h on h.height = t.height
+    where t.contract is not null order by t.height desc limit ?`),
   putAddr: db.prepare('insert into addr_tx (address, txid, height, dir, amount) values (?, ?, ?, ?, ?)'),
   putPayout: db.prepare('insert or replace into miner_payouts (height, miner, payout, amount) values (?, ?, ?, ?)'),
   addrTotals: db.prepare(`select
@@ -357,7 +362,8 @@ function indexBody(height, details) {
       if (!/^[0-9a-f]{64}$/.test(id)) return;
       const txid = hashBuf(id);
       const burned = t.burned_micronoid ?? t.growth_burned_micronoid ?? null;
-      q.putTx.run(txid, height, i, numCol(t.fee_micronoid), numCol(burned), t.coinbase ? 1 : 0);
+      const kind = t.contract === 'call' || t.contract === 'close' ? t.contract : null;
+      q.putTx.run(txid, height, i, numCol(t.fee_micronoid), numCol(burned), t.coinbase ? 1 : 0, kind);
       const inputs = t.inputs || [];
       for (const inp of inputs) {
         const owner = inp.owner || inp.address || inp.input_owner;
@@ -974,6 +980,29 @@ function usdBalance(points) {
   return out.length >= 2 ? out : [];
 }
 
+const CONTRACT_TEMPLATES = [
+  { name: 'Refundable payment', about: 'The payee can take the funds, or they return after an expiry height.' },
+  { name: 'Timelocked vault', about: 'Funds stay locked until a height, then the recipient can claim.' },
+  { name: 'Delegated allowance', about: 'A spender may pay out of the contract, up to a cap.' },
+  { name: 'Budget', about: 'A capped amount can be paid once each period.' },
+  { name: 'Recurring payment', about: 'A set amount goes out on a schedule when someone submits the call.' },
+  { name: 'Gradual release', about: 'Locked funds unlock a little at a time.' },
+];
+
+const RECEIPT_HEX = /^[0-9a-fA-F]+$/;
+async function verifyPostedReceipt(body) {
+  const hex = typeof body?.receipt === 'string' ? body.receipt.replace(/\s+/g, '') : '';
+  if (!hex || !RECEIPT_HEX.test(hex) || hex.length % 2) throw Object.assign(new Error('paste the receipt as hex'), { status: 400 });
+  if (hex.length > 2_221_248) throw Object.assign(new Error('receipt is larger than the node accepts'), { status: 400 });
+  if (body.kind === 'contract' || hex.length > 262144) return { kind: 'contract', result: await rpc('verifyObjectReceipt', [hex], 30_000) };
+  try {
+    return { kind: 'payment', result: await rpc('verifyReceipt', [hex], 20_000) };
+  } catch (e) {
+    if (!/receipt|format|parse|decode|invalid|object/i.test(e.message || '')) throw e;
+    return { kind: 'contract', result: await rpc('verifyObjectReceipt', [hex], 30_000) };
+  }
+}
+
 const routes = {
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
@@ -1017,15 +1046,24 @@ const routes = {
   },
 
   async receipts() {
-    return { available: false, how: 'parano1d-cli receipt TXID', verify: 'parano1d-cli verify', note: 'This explorer has no receipt RPC. Contract receipts stay verifiable with the CLI after the node prunes the block body.' };
+    return {
+      verify: ['verifyReceipt', 'verifyObjectReceipt'],
+      lookup: null,
+      note: 'Paste a receipt. verifyReceipt checks a payment, up to 128 KiB decoded. verifyObjectReceipt checks a contract receipt, up to 1,110,624 bytes decoded. walletExportReceipt only exports a payment this node’s own wallet saved, so it is not exposed. A pruned block body is not a receipt and is not rebuilt here.',
+    };
   },
 
   async contracts() {
+    let protocol = null;
+    try {
+      const p = await rpc('getContractProtocol');
+      if (p) protocol = { active: !!p.active_at_next_block, activation_height: p.activation_height ?? null, abi_version: p.abi_version ?? null };
+    } catch { /* the node build may not publish the contract protocol yet */ }
     return {
-      available: false,
-      abi: '16-instruction integer ABI',
-      templates: ['refundable payments', 'timelocked vaults', 'delegated allowance', 'budgets', 'recurring', 'gradual release'],
-      note: 'No contract RPC is published for this explorer. Templates are executed and verified on the node; this page does not simulate them.',
+      seen: q.contractTxs.all(80),
+      templates: CONTRACT_TEMPLATES,
+      protocol,
+      note: 'A stored body marks a contract transaction as a call or a close. It does not name the template.',
     };
   },
 
@@ -1363,6 +1401,10 @@ async function handle(req, res) {
     if (billRoute) {
       const out = await billRoute(acct, req.method === 'POST' ? parseJson(await readBody(req)) : null, decodeURIComponent(id), ip);
       return out == null ? send(404, { error: 'not found' }) : send(200, out, { 'cache-control': 'no-store' });
+    }
+    if (name === 'receipts' && req.method === 'POST') {
+      if (!acct && !ownPage) return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
+      return send(200, await verifyPostedReceipt(parseJson(await readBody(req, 2_400_000))), { 'cache-control': 'no-store' });
     }
     if (req.method !== 'GET') return send(405, { error: 'GET only' });
 
