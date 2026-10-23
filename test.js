@@ -531,6 +531,11 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Watchlist/);
   assert.match(homeHtml, /class="alertbtn"/);
   assert.match(homeHtml, /safe-area-inset-bottom/);
+  assert.match(homeHtml, /axisDoubleClickReset/);
+  assert.match(homeHtml, /touch-action:pan-y/);
+  assert.match(homeHtml, /vertTouchDrag: true/);
+  assert.match(homeHtml, /class="iauto on"/);
+  assert.match(homeHtml, /id="balauto"/);
   assert.doesNotMatch(homeHtml, /bottom:\s*56px/);
   assert.match(homeHtml, /data-star/);
   assert.match(homeHtml, /1W/);

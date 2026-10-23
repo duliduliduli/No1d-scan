@@ -139,7 +139,7 @@
   @media (max-width:800px) { .pair .sidecol { order:0 } }
   .rank { color:var(--muted); font:12px var(--mono); margin-right:8px }
   #tv { height:auto; min-height:0; width:100%; overflow:hidden }
-  .tokenchart { position:relative; width:100%; aspect-ratio:16/10; max-height:560px; min-height:260px; touch-action:none; overscroll-behavior:contain; user-select:none; background:var(--card) }
+  .tokenchart { position:relative; width:100%; aspect-ratio:16/10; max-height:560px; min-height:260px; touch-action:pan-y; overscroll-behavior:contain; user-select:none; background:var(--card) }
   .card:has(.tokenchart) { overflow:hidden }
   .tokenchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); white-space:nowrap; box-shadow:var(--glow); max-width:calc(100% - 8px) }
   .tokenchart .pxtip.on { display:block }
@@ -245,15 +245,35 @@
   .up { color:#3ddc97 } .down { color:#ff6b6b }
   .ichart .tip .o, .pxchart .pxtip .o { font-weight:400; color:var(--muted) }
   /* Square price chart: full card width on a phone, capped so a desktop card stays a square. */
-  .pxchart { position:relative; width:100%; aspect-ratio:1; max-height:680px; touch-action:none; overscroll-behavior:contain; user-select:none; background:var(--card) }
+  .pxchart { position:relative; width:100%; aspect-ratio:1; max-height:680px; touch-action:pan-y; overscroll-behavior:contain; user-select:none; background:var(--card) }
   .card:has(.pxchart) { overflow:hidden }
   .pxchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); white-space:nowrap; box-shadow:var(--glow) }
   .pxchart .pxtip.on { display:block }
   .balhead { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; margin:0 0 8px; max-width:100%; min-width:0 }
   .balhead .bal { margin:0; min-width:0 }
   .balhead .chg { font:600 13px/1.3 var(--mono); overflow-wrap:anywhere }
-  .balchart { position:relative; width:100%; max-width:100%; min-width:0; height:210px; margin-top:10px; touch-action:none; overscroll-behavior:contain; user-select:none; contain:inline-size; overflow:hidden }
+  .balchart { position:relative; width:100%; max-width:100%; min-width:0; height:210px; margin-top:10px; touch-action:pan-y; overscroll-behavior:contain; user-select:none; contain:inline-size; overflow:hidden }
   .card:has(.balchart) { overflow:hidden }
+  /* Plot scrolls the page. The right price scale captures the drag. A manual scale locks the plot so it can pan. */
+  .tokenchart .tv-lightweight-charts tr:first-child > td:nth-child(2),
+  .tokenchart .tv-lightweight-charts tr:first-child > td:nth-child(2) canvas,
+  .pxchart .tv-lightweight-charts tr:first-child > td:nth-child(2),
+  .pxchart .tv-lightweight-charts tr:first-child > td:nth-child(2) canvas,
+  .balchart .tv-lightweight-charts tr:first-child > td:nth-child(2),
+  .balchart .tv-lightweight-charts tr:first-child > td:nth-child(2) canvas { touch-action:pan-y }
+  .tokenchart.yscale .tv-lightweight-charts tr:first-child > td:nth-child(2),
+  .tokenchart.yscale .tv-lightweight-charts tr:first-child > td:nth-child(2) canvas,
+  .pxchart.yscale .tv-lightweight-charts tr:first-child > td:nth-child(2),
+  .pxchart.yscale .tv-lightweight-charts tr:first-child > td:nth-child(2) canvas,
+  .balchart.yscale .tv-lightweight-charts tr:first-child > td:nth-child(2),
+  .balchart.yscale .tv-lightweight-charts tr:first-child > td:nth-child(2) canvas { touch-action:none }
+  .tokenchart .tv-lightweight-charts tr:first-child > td:not(:nth-child(2)),
+  .tokenchart .tv-lightweight-charts tr:first-child > td:not(:nth-child(2)) canvas,
+  .pxchart .tv-lightweight-charts tr:first-child > td:not(:nth-child(2)),
+  .pxchart .tv-lightweight-charts tr:first-child > td:not(:nth-child(2)) canvas,
+  .balchart .tv-lightweight-charts tr:first-child > td:not(:nth-child(2)),
+  .balchart .tv-lightweight-charts tr:first-child > td:not(:nth-child(2)) canvas { touch-action:none; cursor:ns-resize }
+  .card:has(.tokenchart), .card:has(.pxchart), .card:has(.balchart) { clip-path:none }
   .balchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); box-shadow:var(--glow); max-width:min(220px, calc(100% - 8px)); white-space:normal; overflow-wrap:anywhere }
   .balchart .pxtip.on { display:block }
   button.fit { margin-left:auto }
@@ -534,7 +554,10 @@
   table.list .ok { color:var(--accent) }
   a.viewall, button.viewall { display:flex; width:100%; justify-content:center; margin-top:12px; background:transparent; border:1px solid color-mix(in srgb, var(--accent) 70%, transparent); color:var(--accent); letter-spacing:.16em }
   .ichart .plot { display:flex; gap:8px; min-width:0 }
-  .ichart .ylabs { flex:0 1 auto; max-width:30%; min-width:0; display:flex; flex-direction:column; justify-content:space-between; font:10px var(--mono); color:var(--muted) }
+  .ichart .ylabs { order:1; position:relative; flex:0 1 auto; max-width:34%; min-width:0; display:flex; flex-direction:column; justify-content:space-between; align-items:flex-end; padding-bottom:18px; font:10px var(--mono); color:var(--muted); touch-action:none; cursor:ns-resize }
+  .ichart .iauto { position:absolute; right:0; bottom:0; padding:1px 5px; font:700 9px/1.4 var(--mono); letter-spacing:.06em; text-transform:uppercase }
+  .ichart .iauto.on { background:var(--accent); color:var(--bg) }
+  .ichart.yscale, .ichart.yscale .plotin { touch-action:none }
   .ichart .ylabs span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right }
   .ichart .plotin { position:relative; flex:1; min-width:0 }
   .ichart .gridl { stroke:color-mix(in srgb, var(--accent) 28%, transparent); stroke-width:1; vector-effect:non-scaling-stroke }
@@ -785,8 +808,8 @@ function ichart(pts, fx, fy, h = 110) {
   const yOf = (v) => h - 6 - ((v - lo) / span) * (h - 12);
   const xy = pts.map((p, i) => `${((i / (pts.length - 1)) * 600).toFixed(1)},${yOf(p[1]).toFixed(1)}`).join(' ');
   const mid = (lo + hi) / 2;
-  return `<div class="ichart" data-pts="${esc(JSON.stringify(pts))}" data-fx="${fx}" data-fy="${fy}" data-lo="${lo}" data-hi="${hi}" data-h="${h}">
-    <div class="plot"><div class="ylabs" aria-hidden="true"><span>${esc(FMT[fy](hi))}</span><span>${esc(FMT[fy](mid))}</span><span>${esc(FMT[fy](lo))}</span></div>
+  return `<div class="ichart" data-pts="${esc(JSON.stringify(pts))}" data-fx="${fx}" data-fy="${fy}" data-lo="${lo}" data-hi="${hi}" data-vlo="${lo}" data-vhi="${hi}" data-h="${h}">
+    <div class="plot"><div class="ylabs"><span>${esc(FMT[fy](hi))}</span><span>${esc(FMT[fy](mid))}</span><span>${esc(FMT[fy](lo))}</span><button type="button" class="iauto on">Auto</button></div>
     <div class="plotin">
     <svg viewBox="0 0 600 ${h}" preserveAspectRatio="none" style="height:${h}px" aria-hidden="true">
       <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent)" stop-opacity=".38"/><stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/></linearGradient></defs>
@@ -796,14 +819,34 @@ function ichart(pts, fx, fy, h = 110) {
     </div></div>
     <div class="axis"><span>${esc(FMT[fx](pts[0][0]))}</span><span>${esc(FMT[fx](pts[Math.floor((pts.length - 1) / 2)][0]))}</span><span>${esc(FMT[fx](pts.at(-1)[0]))}</span></div></div>`;
 }
+let iDrag = null, iTap = null;
+function paintIchart(c) {
+  const pts = c._pts ??= JSON.parse(c.dataset.pts);
+  const lo = +c.dataset.vlo, hi = +c.dataset.vhi, h = +c.dataset.h || 110, span = hi - lo || 1;
+  const yOf = (v) => h - 6 - ((v - lo) / span) * (h - 12);
+  const xy = pts.map((p, i) => `${((i / (pts.length - 1)) * 600).toFixed(1)},${yOf(p[1]).toFixed(1)}`).join(' ');
+  c.querySelector('polyline.line')?.setAttribute('points', xy);
+  c.querySelector('polygon.area')?.setAttribute('points', `0,${h} ${xy} 600,${h}`);
+  const fy = FMT[c.dataset.fy], labs = c.querySelectorAll('.ylabs span');
+  if (fy && labs.length >= 3) { labs[0].textContent = fy(hi); labs[1].textContent = fy((lo + hi) / 2); labs[2].textContent = fy(lo); }
+}
+function resetIchart(c) {
+  if (!c) return;
+  c.dataset.vlo = c.dataset.lo;
+  c.dataset.vhi = c.dataset.hi;
+  c.classList.remove('yscale');
+  c.querySelector('.iauto')?.classList.add('on');
+  paintIchart(c);
+}
 function chartHover(e) {
+  if (iDrag) return;
   const c = e.target.closest?.('.ichart');
   for (const x of document.querySelectorAll('.ichart.hover')) if (x !== c) x.classList.remove('hover');
   if (!c) return;
   const r = c.querySelector('svg').getBoundingClientRect(), pts = (c._pts ??= JSON.parse(c.dataset.pts));
   const ohlc = c.dataset.ohlc && (c._ohlc ??= JSON.parse(c.dataset.ohlc)), f = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1);
   const i = ohlc ? Math.min(Math.floor(f * pts.length), pts.length - 1) : Math.round(f * (pts.length - 1));
-  const [x, y] = pts[i], lo = +c.dataset.lo, hi = +c.dataset.hi, h = +c.dataset.h;
+  const [x, y] = pts[i], lo = +(c.dataset.vlo ?? c.dataset.lo), hi = +(c.dataset.vhi ?? c.dataset.hi), h = +c.dataset.h;
   const px = ohlc ? ((i + 0.5) / pts.length) * r.width : (i / (pts.length - 1)) * r.width, py = h - 6 - ((y - lo) / (hi - lo || 1)) * (h - 12);
   c.querySelector('.xh').style.left = `${px}px`;
   const yh = c.querySelector('.yh');
@@ -818,6 +861,49 @@ function chartHover(e) {
 }
 addEventListener('pointermove', chartHover);
 addEventListener('pointerdown', chartHover);
+addEventListener('pointerdown', (e) => {
+  if (e.button) return;
+  if (e.target.closest?.('.iauto')) return;
+  const ylabs = e.target.closest?.('.ichart .ylabs');
+  const plot = !ylabs && e.target.closest?.('.ichart.yscale .plotin');
+  const hit = ylabs || plot;
+  if (!hit) return;
+  const c = hit.closest('.ichart');
+  iDrag = { c, y: e.clientY, lo: +c.dataset.vlo, hi: +c.dataset.vhi, pan: !!plot, id: e.pointerId, moved: false };
+  try { hit.setPointerCapture(e.pointerId); } catch {}
+}, true);
+addEventListener('pointermove', (e) => {
+  if (!iDrag || e.pointerId !== iDrag.id) return;
+  const dy = e.clientY - iDrag.y;
+  if (!iDrag.moved && Math.abs(dy) < 3) return;
+  iDrag.moved = true;
+  const c = iDrag.c, span = iDrag.hi - iDrag.lo || 1;
+  if (iDrag.pan) {
+    const h = c.querySelector('.plotin')?.clientHeight || (+c.dataset.h || 110);
+    const shift = (dy / h) * span;
+    c.dataset.vlo = iDrag.lo + shift;
+    c.dataset.vhi = iDrag.hi + shift;
+  } else {
+    const mid = (iDrag.lo + iDrag.hi) / 2, half = span / 2, f = Math.exp(dy / 160);
+    c.dataset.vlo = mid - half * f;
+    c.dataset.vhi = mid + half * f;
+    c.classList.add('yscale');
+    c.querySelector('.iauto')?.classList.remove('on');
+  }
+  paintIchart(c);
+  if (e.cancelable) e.preventDefault();
+}, true);
+addEventListener('pointerup', (e) => {
+  if (!iDrag || e.pointerId !== iDrag.id) return;
+  const c = iDrag.c, moved = iDrag.moved, pan = iDrag.pan;
+  iDrag = null;
+  if (moved || pan) { iTap = null; return; }
+  if (!e.target.closest?.('.ylabs')) return;
+  if (iTap && iTap.c === c && e.timeStamp - iTap.t < 400 && Math.hypot(e.clientX - iTap.x, e.clientY - iTap.y) < 30) { resetIchart(c); iTap = null; }
+  else iTap = { c, t: e.timeStamp, x: e.clientX, y: e.clientY };
+}, true);
+addEventListener('pointercancel', () => { iDrag = null; });
+addEventListener('click', (e) => { const b = e.target.closest?.('.iauto'); if (b) resetIchart(b.closest('.ichart')); });
 
 // Price/market-cap/volume chart from /api/price: picks the x format from the window, flags sparse data.
 function priceSeries(h, key, height = 170) {
@@ -863,10 +949,31 @@ function chartTheme() {
       rightPriceScale: { borderColor: line, scaleMargins: { top: 0.12, bottom: 0.08 } },
       timeScale: { borderColor: line, timeVisible: true, secondsVisible: false, rightOffset: 3 },
       crosshair: { mode: 0, vertLine: { color: muted, labelVisible: false, width: 1 }, horzLine: { color: muted, labelVisible: false, width: 1 } },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: { time: true, price: true }, axisDoubleClickReset: { time: true, price: true } },
       kineticScroll: { touch: true, mouse: false },
     },
+  };
+}
+// Manual price scale (axis drag) turns autoScale off. Double-tap resets it inside the library; this only tracks the button and the pan lock.
+function wirePriceScale(chart, box, syncUi) {
+  const sync = () => {
+    let manual = false;
+    try { manual = chart.priceScale('right').options().autoScale === false; } catch {}
+    box.classList.toggle('yscale', manual);
+    syncUi?.(manual);
+  };
+  const later = () => requestAnimationFrame(sync);
+  box.addEventListener('pointerdown', () => {
+    const up = () => { later(); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); };
+    addEventListener('pointerup', up);
+    addEventListener('pointercancel', up);
+  }, true);
+  box.addEventListener('dblclick', later);
+  box.addEventListener('touchend', later, { passive: true });
+  return {
+    reset() { try { chart.priceScale('right').applyOptions({ autoScale: true }); } catch {} sync(); },
+    sync,
   };
 }
 const BAL_SPANS = { '1d': 86400, '1w': 7 * 86400, '1m': 30 * 86400, all: 0 };
@@ -919,9 +1026,11 @@ function wireBal(tabName, points) {
   const box = tabName === 'adrange' ? $('addrchart') : $('balchart');
   if (!box) return;
   onTabs(tabName, (v) => { box.dataset.span = v; balChart?.range(v); });
-  mountBalChart(box, points);
+  const auto = $(tabName === 'adrange' ? 'addrauto' : 'balauto');
+  if (auto) auto.onclick = () => balChart?.axis?.reset();
+  mountBalChart(box, points, auto);
 }
-async function mountBalChart(box, points) {
+async function mountBalChart(box, points, auto) {
   unmountBalChart();
   if (!box || points.length < 2) return;
   const span0 = box.dataset.span || 'all';
@@ -979,20 +1088,28 @@ async function mountBalChart(box, points) {
     tip.style.left = `${Math.min(Math.max(param.point.x - tw / 2, 4), Math.max(box.clientWidth - tw - 4, 4))}px`;
     tip.style.top = `${Math.max(param.point.y - tip.offsetHeight - 10, 4)}px`;
   });
+  const axis = wirePriceScale(chart, box, (manual) => auto?.classList.toggle('on', !manual));
   balChart = {
-    chart, ro,
+    chart, ro, axis,
     set dead(v) { state.dead = v; },
-    range(v) { state.span = v; fitSpan(); paintBalHead(points, v); },
+    range(v) {
+      state.span = v;
+      try { chart.priceScale('right').applyOptions({ autoScale: true }); } catch {}
+      axis.sync();
+      fitSpan();
+      paintBalHead(points, v);
+    },
     applyTheme() {
       if (state.dead) return;
       const th = chartTheme();
       chart.applyOptions(th.options);
       series.applyOptions({ lineColor: th.accent, topColor: th.area });
+      axis.sync();
     },
   };
   if (box.dataset.span && box.dataset.span !== state.span) balChart.range(box.dataset.span);
 }
-const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line', 'seg')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h', 'seg')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button></div>
+const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line', 'seg')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h', 'seg')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button><button type="button" class="on" id="${name}auto">Auto</button></div>
   <div id="${name}c" style="margin-top:10px"><p class="muted">Loading chart…</p></div>`;
 // Pages of /api/price (3-minute samples) or /api/candles. Older pages use before= the oldest time we have.
 async function pxFetch(mode, spec, before, limit) {
@@ -1016,6 +1133,8 @@ function wirePriceBox(name) {
   const host = $(name + 'c');
   const fitBtn = $(name + 'fit');
   if (fitBtn) fitBtn.onclick = () => pxChart?.fit?.();
+  const autoBtn = $(name + 'auto');
+  if (autoBtn) autoBtn.onclick = () => pxChart?.axis?.reset();
   const pick = (v) => { spec = v; open(); };
   onTabs(name + 'm', (m) => {
     mode = m;
@@ -1189,10 +1308,17 @@ function wirePriceBox(name) {
       tip.style.left = `${x}px`;
       tip.style.top = `${Math.max(param.point.y - tip.offsetHeight - 10, 4)}px`;
     });
+    const axis = wirePriceScale(chart, box, (manual) => $(name + 'auto')?.classList.toggle('on', !manual));
     pxChart = {
-      chart, ro,
+      chart, ro, axis,
       set dead(v) { state.dead = v; },
-      fit() { if (!state.dead) { state.quiet++; try { chart.timeScale().fitContent(); } catch {} state.quiet--; } },
+      fit() {
+        if (state.dead) return;
+        state.quiet++;
+        try { chart.timeScale().fitContent(); chart.priceScale('right').applyOptions({ autoScale: true }); } catch {}
+        state.quiet--;
+        axis.sync();
+      },
       applyTheme() {
         if (state.dead) return;
         const th = chartTheme();
@@ -1201,6 +1327,7 @@ function wirePriceBox(name) {
           ? { upColor: th.up, downColor: th.down, wickUpColor: th.up, wickDownColor: th.down }
           : { lineColor: th.accent, topColor: th.area });
         paint(th);
+        axis.sync();
       },
     };
   }
@@ -2607,15 +2734,28 @@ async function openTokenChart(id, demo, tf, opts = {}) {
       if (changed) { if (view.sma) sma.setData(smaPoints()); writeNote(); }
     } catch {}
   }, 5000);
+  const paintScales = (manual) => {
+    document.querySelectorAll('[data-scale]').forEach((b) => {
+      const mode = b.dataset.scale === 'log' ? 1 : b.dataset.scale === 'pct' ? 2 : 0;
+      b.classList.toggle('on', mode === view.scale && (mode !== 0 || !manual));
+    });
+  };
+  const axis = wirePriceScale(chart, box, paintScales);
   tokenChart = {
-    chart, ro, poll,
+    chart, ro, poll, axis,
     set dead(v) { state.dead = v; },
-    fit() { userNav = false; fit(); },
+    fit() {
+      userNav = false;
+      try { chart.priceScale('right').applyOptions({ autoScale: true }); } catch {}
+      fit();
+      axis.sync();
+    },
     applyTheme() {
       if (state.dead) return;
       const th = chartTheme();
       chart.applyOptions(th.options);
       paint(th);
+      axis.sync();
     },
   };
   const typeBtn = $('charttype');
@@ -2624,8 +2764,8 @@ async function openTokenChart(id, demo, tf, opts = {}) {
   if (indBtn) indBtn.onclick = () => { view.sma = !view.sma; applyView(chartTheme()); sync(chartTheme()); };
   for (const b of document.querySelectorAll('[data-scale]')) b.onclick = () => {
     view.scale = b.dataset.scale === 'log' ? 1 : b.dataset.scale === 'pct' ? 2 : 0;
-    document.querySelectorAll('[data-scale]').forEach((x) => x.classList.toggle('on', x === b));
-    applyView(chartTheme());
+    try { chart.priceScale('right').applyOptions({ mode: view.scale, autoScale: true }); } catch {}
+    axis.sync();
   };
   paintClock();
 }
@@ -3442,7 +3582,7 @@ const pages = {
       </div>
       ${balPts.length > 1 ? `<div class="card"><h2>Balance over time</h2>
         <p class="balhead" id="balhead"></p>
-        ${tabs('balrange', BAL_RANGES, 'all', 'seg')}
+        <div class="row" style="gap:8px;align-items:center">${tabs('balrange', BAL_RANGES, 'all', 'seg')}<button type="button" class="on" id="balauto">Auto</button></div>
         <div id="balchart" class="balchart" aria-label="Account balance over time"></div>
         <p class="fine">${esc(balNote)}</p>
       </div>` : ''}
@@ -3780,7 +3920,7 @@ const pages = {
       </div>
       ${balPts.length > 1 ? `<div class="card"><h2>Balance over time</h2>
         <p class="balhead" id="balhead"></p>
-        <div class="tabs seg" data-tabs="adrange" id="adrange">${BAL_RANGES.map(([v, l]) => `<button type="button" data-v="${v}" class="${v === 'all' ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div class="row" style="gap:8px;align-items:center"><div class="tabs seg" data-tabs="adrange" id="adrange">${BAL_RANGES.map(([v, l]) => `<button type="button" data-v="${v}" class="${v === 'all' ? 'on' : ''}">${l}</button>`).join('')}</div><button type="button" class="on" id="addrauto">Auto</button></div>
         <div id="addrchart" class="balchart" aria-label="Account balance over time"></div>
         <p class="fine">${esc(balNote)}</p>
       </div>` : ''}
