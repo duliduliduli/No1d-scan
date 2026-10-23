@@ -830,6 +830,21 @@ test('indexer + api', async (t) => {
 
   // The indexer stores a snapshot once the node answers, and a reorg drops trades above the new tip.
   process.env.ASSET_PROBE_MS = '0';
+  // v2.1.0 nodes have no getAssetSnapshot; sync falls back to paged getNativeCatalog.
+  const seenKinds = [];
+  node.getNativeCatalog = ({ kind, limit, cursor }) => {
+    seenKinds.push(kind);
+    assert.ok(limit >= 1 && limit <= 64, 'node rejects limits outside 1..=64');
+    if (kind === 'markets' && !cursor) return { kind, height: 1, items: [], next: { after_key: 'k1' } };
+    if (kind === 'markets') return { kind, height: 1, items: [{ asset_id: 'ab'.repeat(32), whole_tokens: '100000', reserve_micronoid: '100000000' }], next: null };
+    return { kind, height: 1, items: [], next: null };
+  };
+  await tick();
+  assert.deepStrictEqual([...new Set(seenKinds)].sort(), ['collections', 'markets', 'nft_listings']);
+  const nat = db.prepare('select * from tokens where id = ?').get('ab'.repeat(32));
+  assert.ok(nat && nat.supply === '100000' && nat.ticker === 'ABABABAB', 'a native market is stored from the second catalogue page');
+  db.prepare('delete from tokens where id = ?').run('ab'.repeat(32));
+  delete node.getNativeCatalog;
   node.getAssetSnapshot = () => ({
     tokens: [{ id: 'live1', name: 'Live Coin', ticker: 'LIVE', supply: '1000', reserve_micronoid: '1000000', created_ts: 1700000000, graduated: false, price_micronoid: '1000', curve_target_micronoid: '20000000000', curve_raised_micronoid: '1000000000', holders: [{ address: 'o1acdefghjkmnpqr', balance: '400' }] }],
     trades: [{ txid: 'live1trade01', token_id: 'live1', ts: Math.floor(Date.now() / 1000) - 30, side: 'buy', token_amount: '10', noid_micronoid: '10000', price_micronoid: '1000', venue: 'curve', trader: 'o1acdefghjkmnpqr' }],
