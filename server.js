@@ -857,6 +857,39 @@ function candlePage(iv, before, limit) {
 }
 
 const payChains = (out) => out && typeof out === 'object' ? { ...out, usdc_chains: bill.usdcChains() } : out;
+function noidFloat(micro) {
+  const n = BigInt(micro);
+  const neg = n < 0n;
+  const a = neg ? -n : n;
+  return (neg ? -1 : 1) * (Number(a / 1000000n) + Number(a % 1000000n) / 1e6);
+}
+// Last point is the live balance. Earlier points undo stored hourly nets, so a partial archive does not start at zero.
+function balancePoints(hourly, endMicro) {
+  const rows = (hourly || []).flatMap((p) => {
+    try { return [{ t: Number(p.t), net: BigInt(p.net_micronoid) }]; } catch { return []; }
+  }).filter((p) => Number.isFinite(p.t)).sort((a, b) => a.t - b.t);
+  if (!rows.length) return [];
+  let end;
+  try { end = BigInt(endMicro); } catch { return []; }
+  const now = Math.floor(Date.now() / 1000);
+  let endT = Math.min(rows.at(-1).t + 3600, now);
+  if (endT <= rows[0].t) endT = rows[0].t + 60;
+  let bal = end;
+  const rev = [];
+  for (let i = rows.length - 1; i >= 0; i--) {
+    rev.push({ t: i === rows.length - 1 ? endT : rows[i].t + 3600, balance: noidFloat(bal) });
+    bal -= rows[i].net;
+  }
+  const prevT = rev.at(-1).t;
+  rev.push({ t: rows[0].t < prevT ? rows[0].t : prevT - 60, balance: noidFloat(bal) });
+  const out = [];
+  for (const p of rev.reverse()) {
+    if (out.length && p.t <= out.at(-1).t) p.t = out.at(-1).t + 60;
+    out.push(p);
+  }
+  return out.length >= 2 ? out : [];
+}
+
 const routes = {
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
@@ -957,17 +990,19 @@ const routes = {
     const totals = q.addrTotals.get(addr);
     const span = q.addrSpan.get(addr);
     const label = labelFor(addr);
+    const hourly = q.addrHourly.all(addr).map((r) => ({ t: r.t, net_micronoid: String(r.net) }));
     return {
       address: addr, balance_micronoid: balance.toString(), rank: q.richRank.get(addr)?.rank ?? null, slots, activity,
       label: label ? { entity: label.entity || null, note: label.note || null } : null,
       blocks_mined: q.minedCount.get(addr).n,
+      balance_points: balancePoints(hourly, balance),
       archive: {
         partial: true,
         note: 'Totals, the hourly net and payout destinations come only from block bodies this explorer stored. They are not a full wallet balance.',
         sent_micronoid: String(totals.sent), received_micronoid: String(totals.received), tx_count: totals.n,
         first_ts: span?.first_ts ?? null, last_ts: span?.last_ts ?? null,
         tip: q.headerTop.get()?.h ?? null,
-        hourly: q.addrHourly.all(addr).map((r) => ({ t: r.t, net_micronoid: String(r.net) })),
+        hourly,
         recent: q.addrRecent.all(addr),
         payouts: q.payoutsFor.all(addr).map((r) => ({ payout: r.payout, blocks: r.blocks, amount_micronoid: String(r.amount) })),
       },

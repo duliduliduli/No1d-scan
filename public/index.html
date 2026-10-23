@@ -249,6 +249,10 @@
   .card:has(.pxchart) { overflow:hidden }
   .pxchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); white-space:nowrap; box-shadow:var(--glow) }
   .pxchart .pxtip.on { display:block }
+  .balchart { position:relative; width:100%; max-width:100%; min-width:0; height:210px; margin-top:10px; touch-action:none; overscroll-behavior:contain; user-select:none; contain:inline-size; overflow:hidden }
+  .card:has(.balchart) { overflow:hidden }
+  .balchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); box-shadow:var(--glow); max-width:min(220px, calc(100% - 8px)); white-space:normal; overflow-wrap:anywhere }
+  .balchart .pxtip.on { display:block }
   button.fit { margin-left:auto }
   :root[data-theme="light"] .up { color:#0d8a54 } :root[data-theme="light"] .down { color:#c62828 }
   .tabs { display:flex; gap:6px; flex-wrap:wrap }
@@ -854,6 +858,105 @@ function chartTheme() {
       kineticScroll: { touch: true, mouse: false },
     },
   };
+}
+const BAL_SPANS = { '1d': 86400, '1w': 7 * 86400, '1m': 30 * 86400, all: 0 };
+const BAL_RANGES = [['1d', '1D'], ['1w', '1W'], ['1m', '1M'], ['all', 'ALL']];
+let balChart = null;
+function unmountBalChart() {
+  const cur = balChart;
+  balChart = null;
+  if (!cur) return;
+  cur.dead = true;
+  try { cur.ro?.disconnect(); } catch {}
+  try { cur.chart?.remove(); } catch {}
+}
+function balPoints(list) {
+  const out = [];
+  for (const p of list || []) {
+    const t = Number(p.t), balance = Number(p.balance);
+    if (!Number.isFinite(t) || !Number.isFinite(balance)) continue;
+    if (out.length && t <= out.at(-1).t) continue;
+    out.push({ t, balance });
+  }
+  return out.length >= 2 ? out : [];
+}
+function balLabel(v) {
+  const a = Math.abs(v);
+  const d = a >= 1000 ? 2 : a >= 1 ? 2 : 4;
+  return `${v.toLocaleString('en-US', { maximumFractionDigits: d })} NOID`;
+}
+function wireBal(tabName, points) {
+  const box = tabName === 'adrange' ? $('addrchart') : $('balchart');
+  if (!box) return;
+  onTabs(tabName, (v) => { box.dataset.span = v; balChart?.range(v); });
+  mountBalChart(box, points);
+}
+async function mountBalChart(box, points) {
+  unmountBalChart();
+  if (!box || points.length < 2) return;
+  box.textContent = '';
+  try { await loadLw(); } catch (e) {
+    if (box.isConnected) box.innerHTML = `<p class="msg err">Could not load the chart: ${esc(e.message)}</p>`;
+    return;
+  }
+  if (!box.isConnected) return;
+  const theme = chartTheme();
+  const chart = LightweightCharts.createChart(box, theme.options);
+  const series = chart.addAreaSeries({
+    lineColor: theme.accent, topColor: theme.area, bottomColor: 'rgba(0,0,0,0)', lineWidth: 2,
+    priceLineVisible: false, lastValueVisible: true,
+    priceFormat: { type: 'custom', minMove: 0.0001, formatter: (v) => balLabel(v).replace(/ NOID$/, '') },
+  });
+  const bars = points.map((p) => ({ time: p.t, value: p.balance }));
+  series.setData(bars);
+  const tip = document.createElement('div');
+  tip.className = 'pxtip';
+  box.append(tip);
+  const state = { dead: false, w: 0, h: 0, span: box.dataset.span || 'all' };
+  const fitSpan = () => {
+    if (state.dead) return;
+    const to = bars.at(-1).time;
+    try {
+      if (!BAL_SPANS[state.span]) chart.timeScale().fitContent();
+      else chart.timeScale().setVisibleRange({ from: to - BAL_SPANS[state.span], to });
+    } catch {}
+  };
+  const size = () => {
+    const w = box.clientWidth, h = box.clientHeight;
+    if (w > 10 && h > 10) chart.resize(w, h);
+  };
+  const ro = new ResizeObserver(() => {
+    if (state.dead) return;
+    const w = box.clientWidth, h = box.clientHeight;
+    if (!w || !h || (w === state.w && h === state.h)) return;
+    state.w = w; state.h = h;
+    size();
+    fitSpan();
+  });
+  ro.observe(box);
+  requestAnimationFrame(() => { size(); fitSpan(); });
+  chart.subscribeCrosshairMove((param) => {
+    const row = param.seriesData?.get(series);
+    const t = typeof param.time === 'number' ? param.time : null;
+    if (row?.value == null || t == null || !param.point || param.point.x < 0 || param.point.y < 0) { tip.classList.remove('on'); return; }
+    tip.innerHTML = `<b>${esc(balLabel(row.value))}</b><br>${esc(new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}`;
+    tip.classList.add('on');
+    const tw = tip.offsetWidth;
+    tip.style.left = `${Math.min(Math.max(param.point.x - tw / 2, 4), Math.max(box.clientWidth - tw - 4, 4))}px`;
+    tip.style.top = `${Math.max(param.point.y - tip.offsetHeight - 10, 4)}px`;
+  });
+  balChart = {
+    chart, ro,
+    set dead(v) { state.dead = v; },
+    range(v) { state.span = v; fitSpan(); },
+    applyTheme() {
+      if (state.dead) return;
+      const th = chartTheme();
+      chart.applyOptions(th.options);
+      series.applyOptions({ lineColor: th.accent, topColor: th.area });
+    },
+  };
+  if (box.dataset.span && box.dataset.span !== state.span) balChart.range(box.dataset.span);
 }
 const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line', 'seg')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h', 'seg')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button></div>
   <div id="${name}c" style="margin-top:10px"><p class="muted">Loading chart…</p></div>`;
@@ -3268,6 +3371,13 @@ const pages = {
     if (demo) qs.set('demo', '1');
     if (token) qs.set('token', token);
     const w = await api(`wallet/${encodeURIComponent(id)}?${qs}`);
+    let balPts = balPoints(w.balance_points);
+    let balNote = 'Sample running balance from generated transactions. Not on chain.';
+    if (!w.demo) {
+      const chain = await part(`address/${encodeURIComponent(id)}`);
+      balPts = balPoints(chain.balance_points);
+      balNote = 'Running balance from stored transactions. The last point is the live balance. Earlier points only include bodies stored here.';
+    }
     const pnl = w.pnl || {};
     const pnlUsd = pnl.pnl_usd == null ? '–' : money(pnl.pnl_usd, 2);
     const back = token
@@ -3296,8 +3406,14 @@ const pages = {
         </div>
         <p class="fine">PnL is NOID from sells, minus NOID spent on buys, plus the remaining tokens at the current price. It uses the newest indexed trades.</p>
       </div>
+      ${balPts.length > 1 ? `<div class="card"><h2>Balance over time</h2>
+        ${tabs('balrange', BAL_RANGES, 'all', 'seg')}
+        <div id="balchart" class="balchart" aria-label="Account balance over time"></div>
+        <p class="fine">${esc(balNote)}</p>
+      </div>` : ''}
       ${donut ? `<div class="card"><h2>Token holdings</h2>${donut}</div>` : ''}
       ${w.trades?.length ? `<div class="card"><h2>Trades <small>${token ? esc(token) : 'all indexed'}</small></h2>${tradeTable(w.trades, w.demo, token || null, true)}</div>` : ''}`;
+    if (balPts.length > 1) wireBal('balrange', balPts);
     const watchBtn = $('addrwatch');
     if (watchBtn) watchBtn.onclick = () => toggleAddrWatch(w.address, watchBtn);
   },
@@ -3545,9 +3661,11 @@ const pages = {
     const balN = noidNum(a.balance_micronoid);
     const usdLine = px != null && balN != null ? `≈ ${money(balN * px, 2)} USD` : '';
     const watching = addrWatched(a.address);
-    const hourly = (ar.hourly || []).map((p) => [p.t, Number(p.net_micronoid) / 1e6]).filter((p) => Number.isFinite(p[1]));
-    let run = 0;
-    const cum = hourly.map(([t, y]) => [t, (run += y)]);
+    const chainPts = balPoints(a.balance_points);
+    const balPts = chainPts.length > 1 ? chainPts : (demo && !w0._err ? balPoints(w0.balance_points) : []);
+    const balNote = chainPts.length > 1
+      ? 'Running balance from stored transactions. The last point is the live balance. Earlier points only include bodies stored here.'
+      : 'Sample running balance from generated transactions. Not on chain.';
     const seen = ar.first_ts || ar.last_ts ? `<div class="tiles">
         ${ar.first_ts ? `<div class="stat"><small>First seen</small><b>${esc(ymd(ar.first_ts))}</b></div>` : ''}
         ${ar.last_ts ? `<div class="stat"><small>Last active</small><b>${esc(ago(ar.last_ts))}</b></div>` : ''}
@@ -3625,10 +3743,10 @@ const pages = {
         </div>
         ${ar.note ? `<p class="fine">${esc(ar.note)}</p>` : ''}
       </div>
-      ${cum.length > 1 ? `<div class="card"><h2>Balance over time</h2>
-        <div class="tabs seg" data-tabs="adrange" id="adrange">${[['1d', '1D'], ['1w', '1W'], ['1m', '1M'], ['1y', '1Y'], ['all', 'ALL']].map(([v, l]) => `<button type="button" data-v="${v}" class="${v === 'all' ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <div id="addrchart"></div>
-        <p class="fine">Running net of stored block bodies. Not the live balance.</p>
+      ${balPts.length > 1 ? `<div class="card"><h2>Balance over time</h2>
+        <div class="tabs seg" data-tabs="adrange" id="adrange">${BAL_RANGES.map(([v, l]) => `<button type="button" data-v="${v}" class="${v === 'all' ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div id="addrchart" class="balchart" aria-label="Account balance over time"></div>
+        <p class="fine">${esc(balNote)}</p>
       </div>` : ''}
       ${donut ? `<div class="card"><h2>Token holdings</h2>${donut}</div>` : ''}
       ${shown.length ? `<div class="card"><h2>Transactions</h2>
@@ -3637,15 +3755,7 @@ const pages = {
         ${view}
       </div>` : ''}
       ${slots.length ? `<div class="card"><h2>Live slots</h2>${rows(slots, ['slot_index', 'value', 'creation_id'])}</div>` : ''}`;
-    const paintRange = (range) => {
-      const el = $('addrchart');
-      if (!el) return;
-      const end = cum.at(-1)?.[0] || 0;
-      const span = { '1d': 86400, '1w': 7 * 86400, '1m': 30 * 86400, '1y': 365 * 86400, all: Infinity }[range] ?? Infinity;
-      const pts = span === Infinity ? cum : cum.filter((p) => p[0] >= end - span);
-      el.innerHTML = pts.length > 1 ? ichart(pts, span >= 86400 * 30 || span === Infinity ? 'day' : 'dayhour', 'num', 168) : '<p class="muted">Not enough archived hours in this range.</p>';
-    };
-    if (cum.length > 1) { paintRange('all'); onTabs('adrange', paintRange); }
+    if (balPts.length > 1) wireBal('adrange', balPts);
     onTabs('txdir', (v) => {
       const rows = $('addrtab')?.tBodies?.[0]?.rows;
       for (const tr of rows || []) tr.hidden = v !== 'all' && tr.dataset.dir !== v;
@@ -3789,7 +3899,7 @@ function feePartsView(t) {
 async function render() {
   const [, type, id] = location.pathname.split('/');
   feed?.close(); feed = null; clearInterval(ticker); clearInterval(exploreTimer); clearInterval(tokenTimer); clearInterval(usdcTimer); exploreTimer = null; tokenTimer = null; usdcTimer = null;
-  unmountPriceChart(); unmountTokenChart(); unmountGlobe();
+  unmountPriceChart(); unmountBalChart(); unmountTokenChart(); unmountGlobe();
   const onEx = type === 'explore' || type === 'token' || type === 'collection';
   for (const a of document.querySelectorAll('#menu nav a, a.explore')) {
     const href = a.getAttribute('href');
@@ -3827,6 +3937,7 @@ const setTheme = (t) => {
   $('theme').textContent = t === 'light' ? '☾  Dark mode' : '☀  Light mode';
   if (globe) globeColors();
   pxChart?.applyTheme?.();
+  balChart?.applyTheme?.();
   tokenChart?.applyTheme?.();
 };
 setTheme((() => { try { return localStorage.getItem('theme'); } catch {} })() || 'dark');

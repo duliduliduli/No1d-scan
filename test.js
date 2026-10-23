@@ -590,6 +590,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Balance over time/);
   assert.match(homeHtml, /aria-label="Watch"/);
   assert.match(homeHtml, /id="addrchart"/);
+  assert.match(homeHtml, /id="balchart"/);
+  assert.match(homeHtml, /aria-label="Account balance over time"/);
+  assert.match(homeHtml, /balrange/);
+  assert.doesNotMatch(homeHtml, /Not the live balance/);
   assert.match(homeHtml, /arcDashAnimateTime/);
   assert.match(homeHtml, /1Y/);
   assert.doesNotMatch(homeHtml, /mined more than half/);
@@ -693,6 +697,16 @@ test('indexer + api', async (t) => {
   assert.strictEqual(wal.pnl.buys + wal.pnl.sells, wal.pnl.txns);
   assert.strictEqual(wal.activity.txns, wal.pnl.txns);
   assert.ok(wal.pnl.txns >= wal.trades.length);
+  const pts = wal.balance_points;
+  assert.ok(Array.isArray(pts) && pts.length >= 24);
+  assert.ok(pts.every((p, i) => Number.isFinite(p.t) && Number.isFinite(p.balance) && p.balance >= 0 && (i === 0 || p.t > pts[i - 1].t)));
+  assert.ok(pts[0].t < pts.at(-1).t - 30 * 86400);
+  assert.ok(pts.filter((p) => p.t >= pts.at(-1).t - 86400).length >= 2);
+  assert.ok(pts.some((p) => p.balance !== pts[0].balance));
+  const [, walSame] = await get('wallet/o1acdefghjkmnpqr?demo=1');
+  assert.deepStrictEqual(walSame.balance_points.map((p) => p.balance), pts.map((p) => p.balance));
+  const [, walOther] = await get('wallet/o1qqqqqqqqqqqq?demo=1');
+  assert.notDeepStrictEqual(walOther.balance_points.map((p) => p.balance), pts.map((p) => p.balance));
   assert.strictEqual((await get('wallet/not-an-address?demo=1'))[0], 400);
   assert.strictEqual((await get('token/gcat'))[0], 404);
   const [, screen] = await get('tokens/gcat?demo=1');
@@ -1054,6 +1068,7 @@ test('indexer + api', async (t) => {
   assert.strictEqual(liveWal.demo, false);
   assert.ok(liveWal.holdings.some((h) => h.token_id === 'live1' && h.balance === '400'));
   assert.ok(liveWal.trades.length >= 1 && liveWal.pnl.txns >= 1);
+  assert.ok(liveWal.balance_points == null);
 
   // USDC: a chain is off until its address is set. An exact base-unit amount marks the profile pending and does not add credits.
   const { solanaCredits, mints, report } = require('./usdc.js');
@@ -1268,6 +1283,14 @@ test('indexer + api', async (t) => {
   assert.strictEqual(paid.archive.partial, true);
   assert.ok(BigInt(paid.archive.received_micronoid) >= 5000000n);
   assert.ok(paid.archive.hourly.length >= 1);
+  assert.ok(paid.balance_points.length >= 2);
+  assert.ok(paid.balance_points.every((p, i) => Number.isFinite(p.t) && Number.isFinite(p.balance) && (i === 0 || p.t > paid.balance_points[i - 1].t)));
+  const paidMicro = BigInt(paid.balance_micronoid);
+  const asNoid = (n) => Number(n / 1000000n) + Number(n % 1000000n) / 1e6;
+  const nets = paid.archive.hourly.reduce((s, p) => s + BigInt(p.net_micronoid), 0n);
+  assert.ok(Math.abs(paid.balance_points.at(-1).balance - asNoid(paidMicro)) < 1e-6);
+  assert.ok(Math.abs(paid.balance_points[0].balance - asNoid(paidMicro - nets)) < 1e-4);
+  assert.ok(paid.balance_points[0].balance < paid.balance_points.at(-1).balance);
 
   const cold = fs.mkdtempSync(path.join(os.tmpdir(), 'noid-cold-'));
   process.env.COLD_DIR = cold;

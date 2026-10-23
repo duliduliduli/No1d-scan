@@ -762,6 +762,33 @@ module.exports = function assets(db, rpc, priceNow) {
     traders.sort((a, b) => (BigInt(b.volume_micronoid) > BigInt(a.volume_micronoid) ? 1 : BigInt(b.volume_micronoid) < BigInt(a.volume_micronoid) ? -1 : 0));
     return { demo, token_id: id, label: 'Indexed trades', traders: traders.slice(0, 20) };
   }
+  // Deterministic sample txs for this address, folded into a running NOID balance. Never written, never mixed into trades.
+  function demoBalance(address, now) {
+    let s = 2166136261;
+    for (let i = 0; i < address.length; i++) s = Math.imul(s ^ address.charCodeAt(i), 16777619) >>> 0;
+    const rnd = () => ((s = Math.imul(1664525, s) + 1013904223 >>> 0) / 4294967296);
+    const start = now - 96 * 86400;
+    const txs = [{ t: start, delta: 800 + rnd() * 2200 }];
+    let bal = txs[0].delta;
+    const pushTx = (t) => {
+      const out = rnd() < 0.46;
+      const mag = out ? 15 + rnd() * 220 : 20 + rnd() * 260;
+      let delta = out ? -mag : mag;
+      if (bal + delta < 8) delta = mag;
+      bal += delta;
+      txs.push({ t, delta });
+    };
+    for (let i = 1; i <= 64; i++) pushTx(start + Math.floor((now - 86400 - start) * i / 64));
+    for (let i = 1; i <= 8; i++) pushTx(now - 86400 + Math.floor(86300 * i / 8));
+    let run = 0;
+    const pts = [];
+    for (const tx of txs) {
+      run = Math.round((run + tx.delta) * 10000) / 10000;
+      const prev = pts.at(-1);
+      pts.push({ t: prev && tx.t <= prev.t ? prev.t + 60 : tx.t, balance: run });
+    }
+    return pts;
+  }
   function walletView(address, params) {
     if (!ADDR.test(address || '')) throw bad('expected an address');
     const demo = isDemo(params);
@@ -798,6 +825,7 @@ module.exports = function assets(db, rpc, priceNow) {
       }),
       trades: focused.slice(0, 80).map(publicTrade),
       pnl, activity: { txns: pnl.txns, buys: pnl.buys, sells: pnl.sells, first_ts: pnl.first_ts, last_ts: pnl.last_ts },
+      ...(demo ? { balance_points: demoBalance(address, now) } : {}),
     };
   }
   function holderView(id, params) {
