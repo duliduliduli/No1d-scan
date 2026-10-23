@@ -599,7 +599,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Connected nodes/);
   assert.match(homeHtml, /id="gnode"/);
   assert.match(homeHtml, /Peers of this explorer's node only · approximate city/);
-  assert.doesNotMatch(homeHtml, /Top countries/);
+  assert.doesNotMatch(homeHtml, /Top countries|paintTopCountries/);
   assert.match(homeHtml, /aria-label="Zoom in"/);
   assert.match(homeHtml, /YOUR NODE/);
   assert.match(homeHtml, /id="pxspark"/);

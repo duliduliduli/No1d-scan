@@ -3018,7 +3018,7 @@ const pages = {
     const loadMiners = () => showMiners(`miners?window=${minerWin}&at=${tip}`, (v) => { minerWin = v; loadMiners(); });
     onTabs('cwin', (v) => { chartWin = v; loadCharts().catch((e) => { const el = $('charts'); if (el) el.innerHTML = `<p class="msg err">Could not load this window: ${esc(e.message)}</p>`; }); });
     onTabs('mwin', (v) => { minerWin = v; loadMiners(); });
-    paintTopCountries(net);
+    paintNodeList();
     if (net0._err) { const g = $('globe'); if (g) g.innerHTML = `<div class="glmsg">${esc(net0._err)}</div>`; }
     else mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
