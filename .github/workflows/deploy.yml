@@ -32,4 +32,4 @@ jobs:
           mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
           SSH="ssh -i $HOME/.ssh/deploy -o StrictHostKeyChecking=accept-new"
           rsync -az --delete --exclude .git --exclude 'noid.db*' -e "$SSH" ./ "deploy@$HOST:/opt/noid-scan/"
-          $SSH "deploy@$HOST" 'sudo systemctl restart noid-scan && sleep 3 && systemctl is-active noid-scan && curl -fsS -o /dev/null http://127.0.0.1:8080/ && echo "deployed OK"'
+          $SSH "deploy@$HOST" 'sudo systemctl restart noid-scan && systemctl is-active noid-scan && ok=0; for i in $(seq 1 30); do if curl -fsS -o /dev/null http://127.0.0.1:8080/; then ok=1; break; fi; sleep 1; done; test "$ok" = 1 && echo "deployed OK"'
