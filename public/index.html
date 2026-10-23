@@ -199,7 +199,10 @@
   #promote label { display:block; margin:8px 0 0; color:var(--muted); font:12px var(--mono) }
   #promote input:not([type=radio]), #promote textarea { width:100%; box-sizing:border-box; display:block; min-width:0; margin-top:4px }
   #promote fieldset { border:1px solid var(--line); margin:8px 0 0; padding:8px; min-width:0 }
-  #promote .opt { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; color:var(--fg) }
+  #promote .opt { display:grid; grid-template-columns:auto minmax(0,1fr); gap:2px 10px; align-items:center; color:var(--fg); padding:8px; border:1px solid color-mix(in srgb, var(--accent) 18%, transparent); border-radius:8px; cursor:pointer }
+  #promote .opt input[type=radio] { width:18px; height:18px; min-width:18px; margin:0; padding:0; box-shadow:none; background:none; accent-color:var(--accent); grid-row:span 2 }
+  #promote .opt:has(input:checked) { border-color:var(--accent); box-shadow:0 0 10px color-mix(in srgb, var(--accent) 25%, transparent) }
+  #promote .opt .muted { grid-column:2; min-width:0 }
   #promote .opt input { width:auto; display:inline }
   .pmhits { display:flex; flex-direction:column; gap:4px; min-width:0 }
   .pmhit { display:grid; grid-template-columns:auto auto minmax(0,1fr) auto; gap:8px; align-items:center; text-align:left; min-width:0; width:100% }
