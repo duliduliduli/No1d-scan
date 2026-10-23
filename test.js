@@ -580,6 +580,8 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /data-boost=/);
   assert.match(homeHtml, /id="promotion"/);
   assert.match(homeHtml, /aria-label="Promoted"/);
+  assert.match(homeHtml, /@keyframes promocrwl/);
+  assert.match(homeHtml, /prefers-reduced-motion: reduce/);
   assert.match(homeHtml, /Get Enhanced/);
   assert.match(homeHtml, /id="sortpop"/);
   assert.match(homeHtml, /id="listbar"/);
