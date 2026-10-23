@@ -29,7 +29,7 @@ const png = images.solidPng(30, 10, [1, 2, 3]).toString('base64');
 
 test('boost with extras: hidden until paid and approved, then banner and links show', async () => {
   const { boosts, profiles, bill, acct } = setup({
-    good: { merkle_valid: true, canonical: true, confirmed: true, authenticated_summary: { txid: 'aa'.repeat(32), claimed_height: 900, outputs: [{ owner: PAY, amount_micronoid: 10_000_000_000 }] } },
+    'aa01': { merkle_valid: true, canonical: true, confirmed: true, authenticated_summary: { txid: 'aa'.repeat(32), claimed_height: 900, outputs: [{ owner: PAY, amount_micronoid: 10_000_000_000 }] } },
   });
   const made = boosts.create(acct, { kind: 'token', asset_id: 'tok1', pack: '1d' }, profiles.extras({ website: 'https://tok.example', twitter: 'https://x.com/tok', banner: png }));
   assert.strictEqual(made.status, 'unpaid');
@@ -40,9 +40,9 @@ test('boost with extras: hidden until paid and approved, then banner and links s
   assert.strictEqual(quote.kind, 'boost');
   assert.ok(Number(quote.amount_noid) >= 200 && Number(quote.amount_noid) < 200.01, quote.amount_noid);
   await assert.rejects(bill.routes['POST order-receipt'](acct, { order: quote.id, receipt: 'beef' }), /did not verify/);
-  const paid = await bill.routes['POST order-receipt'](acct, { order: quote.id, receipt: 'good' });
+  const paid = await bill.routes['POST order-receipt'](acct, { order: quote.id, receipt: 'aa01' });
   assert.strictEqual(paid.status, 'paid');
-  assert.strictEqual(boosts.adminList()[0].website, 'https://tok.example');
+  assert.strictEqual(boosts.adminList()[0].website, 'https://tok.example/');
   assert.strictEqual(profiles.decorate({ token: { id: 'tok1' } }).token.enhanced, null, 'paid but not approved stays hidden');
   boosts.review(made.id, 'approve');
   const shown = profiles.decorate({ token: { id: 'tok1' } }).token.enhanced;
@@ -54,18 +54,18 @@ test('boost with extras: hidden until paid and approved, then banner and links s
 
 test('receipt: underpaid, unconfirmed, replayed, and other account are refused', async () => {
   const sum = (amt, h) => ({ merkle_valid: true, canonical: true, confirmed: true, authenticated_summary: { txid: 'bb'.repeat(32), claimed_height: h, outputs: [{ owner: PAY, amount_micronoid: amt }, { owner: 'o1other', amount_micronoid: 9e12 }] } });
-  const { boosts, bill, acct, setTip } = setup({ low: sum(1, 900), fresh: sum(10e9, 995), ok: sum(10e9, 900) });
+  const { boosts, bill, acct, setTip } = setup({ 'bb01': sum(1, 900), 'bb02': sum(10e9, 995), 'bb03': sum(10e9, 900) });
   const b = boosts.create(acct, { kind: 'token', asset_id: 'tok1', pack: '6h' });
   const q = await bill.routes['POST boost-pay'](acct, { id: b.id, method: 'noid' });
-  await assert.rejects(bill.routes['POST order-receipt'](acct, { order: q.id, receipt: 'low' }), /needs/);
-  assert.strictEqual((await bill.routes['POST order-receipt'](acct, { order: q.id, receipt: 'fresh' })).status, 'confirming');
-  assert.strictEqual(await bill.routes['POST order-receipt']({ id: 'acct2' }, { order: q.id, receipt: 'ok' }), null);
-  assert.strictEqual((await bill.routes['POST order-receipt'](acct, { order: q.id, receipt: 'ok' })).status, 'paid');
+  await assert.rejects(bill.routes['POST order-receipt'](acct, { order: q.id, receipt: 'bb01' }), /needs/);
+  assert.strictEqual((await bill.routes['POST order-receipt'](acct, { order: q.id, receipt: 'bb02' })).status, 'confirming');
+  assert.strictEqual(await bill.routes['POST order-receipt']({ id: 'acct2' }, { order: q.id, receipt: 'bb03' }), null);
+  assert.strictEqual((await bill.routes['POST order-receipt'](acct, { order: q.id, receipt: 'bb03' })).status, 'paid');
   boosts.review(b.id, 'reject');
   const b2 = boosts.create(acct, { kind: 'token', asset_id: 'tok1', pack: '6h' });
   const q2 = await bill.routes['POST boost-pay'](acct, { id: b2.id, method: 'noid' });
   setTip(2000);
-  await assert.rejects(bill.routes['POST order-receipt'](acct, { order: q2.id, receipt: 'ok' }), /already paid another order/);
+  await assert.rejects(bill.routes['POST order-receipt'](acct, { order: q2.id, receipt: 'bb03' }), /already paid another order/);
 });
 
 test('stripe webhook marks a boost paid only for the exact amount', () => {
@@ -98,7 +98,7 @@ test('native trade intent: gated, mocked before activation, never signs', async 
   assert.strictEqual(mock.request.gross_input, '1500000');
   assert.strictEqual(calls.length, 0, 'demo never calls the node');
   await assert.rejects(it.prepare(P()), /279,370/);
-  assert.deepStrictEqual(calls[0], ['prepareNativeIntent', ['o124ken009f8887g9yu7nd2tlhhxxv0t6y9hwdf472ptynyq0nm30ql04u3a', { action: 'trade', asset_id: 'ab'.repeat(32), buy: true, gross_input: '1500000', slippage_bps: 100 }]]);
+  assert.deepStrictEqual(calls[0], ['prepareNativeIntent', { owner: 'o124ken009f8887g9yu7nd2tlhhxxv0t6y9hwdf472ptynyq0nm30ql04u3a', request: { action: 'trade', asset_id: 'ab'.repeat(32), buy: true, gross_input: '1500000', slippage_bps: 100 } }]);
   mode = 'live';
   const live = await it.prepare(P({ side: 'sell', amount: '7' }));
   assert.strictEqual(live.unsigned, 'abcd');

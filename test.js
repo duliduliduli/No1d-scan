@@ -627,7 +627,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /color-mix\(in srgb, var\(--card\) 97%, transparent\)/);
   assert.match(homeHtml, /id="rcpthex"/);
   assert.match(homeHtml, /verifyReceipt/);
-  assert.match(homeHtml, /aria-label="\$\{esc\(kind\)\}"/);
+  assert.match(homeHtml, /aria-label="Paid promotion"/);
   const tokenCardSrc = homeHtml.slice(homeHtml.indexOf('function tokenCards'), homeHtml.indexOf('function nftTable'));
   assert.match(tokenCardSrc, /listBolt\(t\)/);
   assert.doesNotMatch(tokenCardSrc, /paidMarks|>Enhanced</);
@@ -1228,7 +1228,7 @@ test('indexer + api', async (t) => {
     assert.strictEqual(madeBoost.status, 'unpaid');
     const [, colBoost] = await post('boost', { asset_id: 'col1', kind: 'collection', pack: '6h' }, K);
     assert.strictEqual(colBoost.kind, 'collection');
-    assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /USDC/);
+    assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /Card payments are not available/);
     assert.strictEqual((await get('boosts?kind=token&window=poly1'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 128);
     process.env.USDC_POLYGON_CONFIRMATIONS = '5';
     assert.strictEqual((await get('boosts?kind=token&window=poly2'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 5);

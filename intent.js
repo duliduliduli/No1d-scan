@@ -41,7 +41,7 @@ module.exports = function intents(rpc, tipNow = () => null) {
     return req;
   }
 
-  const submitHint = '{"jsonrpc":"2.0","id":1,"method":"paranoid_submitTxIntent","params":["<signed intent hex>"]}';
+  const submitHint = '{"jsonrpc":"2.0","id":1,"method":"paranoid_submitTxIntent","params":{"hex":"<signed intent hex>"}}';
 
   async function prepare(params) {
     if (!enabled()) throw bad('trading is off', 403);
@@ -58,7 +58,7 @@ module.exports = function intents(rpc, tipNow = () => null) {
     }
     let out;
     try {
-      out = await rpc('prepareNativeIntent', [sender, req], 30_000);
+      out = await rpc('prepareNativeIntent', { owner: sender, request: req }, 30_000);
     } catch (e) {
       if (notActive(e)) throw bad(`Native token trading activates at block ${activation().toLocaleString('en-US')}. The node refuses intents until then.`, 409);
       throw e;
@@ -79,7 +79,7 @@ module.exports = function intents(rpc, tipNow = () => null) {
     const hex = typeof body?.signed === 'string' ? body.signed.replace(/\s+/g, '') : '';
     if (!hex || !/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 || hex.length > 262144) throw bad('paste the signed intent as hex');
     try {
-      return { submitted: true, result: await rpc('submitTxIntent', [hex], 30_000) };
+      return { submitted: true, result: await rpc('submitTxIntent', { hex }, 30_000) };
     } catch (e) {
       if (notActive(e)) throw bad(`Native token trading activates at block ${activation().toLocaleString('en-US')}.`, 409);
       throw bad(e.message, 400);
