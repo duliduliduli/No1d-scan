@@ -22,7 +22,8 @@ const HOLD_MS = 7 * 86400_000; // after expiry its last digits stay reserved thi
 const PRICE_MAX_AGE_MS = Number(process.env.PRICE_MAX_AGE_MS || 15 * 60_000);
 
 // livePrice() -> { usd, at } (at = when the price was fetched) or null; tipNow() -> current chain height.
-module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () => null) {
+module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () => null, profiles = null, boosts = null) {
+  const usdcPay = require('./usdc.js')(db, profiles, boosts);
   // USD_PER_NOID pins the price. Otherwise new quotes use the live market price, and pause when it is older than
   // PRICE_MAX_AGE_MS. Orders already quoted keep their price and are still settled while the feed is down.
   const priceNow = () => {
@@ -56,6 +57,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     create table if not exists usage (account text not null, day text not null, requests integer not null default 0, chats integer not null default 0, primary key (account, day));
     create table if not exists noid_topups (id text primary key, account text not null, amount integer not null, credits integer not null, created integer not null, paid_ref text unique);
     create table if not exists free_chat (who text not null, day text not null, n integer not null, primary key (who, day));
+    create table if not exists token_stars (account text not null, token_id text not null, created integer not null, primary key (account, token_id));
+    create index if not exists token_stars_acct on token_stars(account, created desc, token_id);
   `);
   // The last 4 digits (μNOID "dust") identify an order, so a buyer may send more than quoted and still match;
   // extra is credited at the same rate. Dust is unique among open orders.
@@ -64,7 +67,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
   try { db.exec('drop index if exists noid_topups_open; create unique index if not exists noid_topups_dust on noid_topups(dust) where paid_ref is null'); } catch {}
   // Expired orders are kept as records (expired_at). Their dust is cleared HOLD_MS later so the digits can be reused;
   // amount keeps the full quote. height = chain tip when quoted.
-  for (const col of ['expired_at integer', 'height integer']) try { db.exec(`alter table noid_topups add column ${col}`); } catch {}
+  for (const col of ['expired_at integer', 'height integer', 'purpose text', 'subject text']) try { db.exec(`alter table noid_topups add column ${col}`); } catch {}
   // Every output ever seen on PAY_ADDRESS, with when and at which tip it first appeared. An output can only pay an
   // order quoted before it appeared, and only once it has CONFIRMATIONS blocks on top. On a fresh table, outputs
   // already sitting on the address are recorded as 'baseline' and never pay anything.
@@ -90,7 +93,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     openTopups: db.prepare('select count(*) n from noid_topups where paid_ref is null and dust is not null'),
     expireTopups: db.prepare('update noid_topups set expired_at = ? where paid_ref is null and expired_at is null and created < ?'),
     releaseDust: db.prepare('update noid_topups set dust = null where paid_ref is null and expired_at < ?'),
-    byDust: db.prepare('select id, account, amount, credits, created, expired_at from noid_topups where dust = ? and paid_ref is null'),
+    byDust: db.prepare('select id, account, amount, credits, created, expired_at, purpose, subject from noid_topups where dust = ? and paid_ref is null'),
     claimTopup: db.prepare('update noid_topups set paid_ref = ? where id = ? and paid_ref is null'),
     seen: db.prepare('select ref, value, first_seen, height, status, topup from noid_seen where ref = ?'),
     addSeen: db.prepare('insert into noid_seen (ref, value, first_seen, height, status) values (?, ?, ?, ?, ?)'),
@@ -98,6 +101,10 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     seenFor: db.prepare("select height from noid_seen where topup = ? and status = 'confirming'"),
     freeUsed: db.prepare('select n from free_chat where who = ? and day = ?'),
     freeUse: db.prepare('insert into free_chat (who, day, n) values (?, ?, 1) on conflict (who, day) do update set n = n + 1'),
+    starList: db.prepare('select token_id from token_stars where account = ? order by created desc, token_id'),
+    starAdd: db.prepare('insert into token_stars (account, token_id, created) values (?, ?, ?) on conflict (account, token_id) do nothing'),
+    starDel: db.prepare('delete from token_stars where account = ? and token_id = ?'),
+    starCount: db.prepare('select count(*) n from token_stars where account = ?'),
   };
 
   const tx = (fn) => { db.exec('begin'); try { const r = fn(); db.exec('commit'); return r; } catch (e) { db.exec('rollback'); throw e; } };
@@ -171,6 +178,19 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       const t = q.byDust.get(value % 10000);
       if (!t || t.created > s.first_seen) continue;
       if (tip - s.height < CONFIRMATIONS) { q.setSeen.run('confirming', t.id, ref); continue; }
+      if (t.purpose === 'profile') {
+        try {
+          tx(() => {
+            if (q.claimTopup.run(ref, t.id).changes !== 1) throw new Error('order already paid');
+            if (!profiles?.markPaid(t.subject, ref, t.account)) throw new Error('profile was not waiting for payment');
+            q.setSeen.run('credited', t.id, ref);
+          });
+        } catch (e) {
+          q.setSeen.run('review', t.id, ref);
+          console.error(`noid payment ${ref} for order ${t.id} needs review: ${e.message}`);
+        }
+        continue;
+      }
       const late = t.expired_at != null && s.first_seen > t.expired_at;
       const credits = Math.max(1, Math.round((t.credits * value) / t.amount));
       try {
@@ -222,6 +242,11 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     if (!ok) throw bad('bad signature', 400);
     const evt = JSON.parse(raw);
     const s = evt.data?.object;
+    if (s?.metadata?.kind === 'profile' && ['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s.payment_status === 'paid') {
+      const usd = profiles ? profiles.priceUsd() : 0;
+      if (s.currency === 'usd' && Number(s.amount_total) === usd * 100) profiles.markPaid(s.metadata.profile_id, `stripe:${s.id}`, s.client_reference_id);
+      return { received: true };
+    }
     // Credits come from what Stripe says was paid, never from anything the buyer could have touched.
     const credits = s?.currency === 'usd' ? Math.round((Number(s.amount_total) / 100) * CREDITS_PER_USD) : 0;
     if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s?.payment_status === 'paid' && credits > 0 && q.byId.get(s.client_reference_id)) {
@@ -232,7 +257,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
 
   const pricing = () => ({
     credits_per_usd: CREDITS_PER_USD, packs_usd: PACKS_USD, chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY,
-    requests_per_credit: REQUESTS_PER_CREDIT, support: process.env.SUPPORT_EMAIL || null,
+    requests_per_credit: REQUESTS_PER_CREDIT, enhanced_profile_usd: profiles ? profiles.priceUsd() : 100, enhanced_profile_usdc: profiles ? profiles.priceUsdc() : 100, usdc_chains: usdcPay.chains(), support: process.env.SUPPORT_EMAIL || null,
     card: !!STRIPE && cardActive, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: noid().live, confirmations: CONFIRMATIONS },
     noid_paused: process.env.PAY_ADDRESS && !noid() ? priceNow().paused : null,
   });
@@ -252,11 +277,87 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       q.insertAccount.run(id, hashKey(key), Date.now());
       return { key, id, note: 'Save this key now. It is your login and is shown only once.' };
     },
+    'GET stars': (acct) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      return { ids: q.starList.all(acct.id).map((r) => r.token_id) };
+    },
+    'POST stars': (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const okId = (id) => typeof id === 'string' && /^[A-Za-z0-9:_-]{1,80}$/.test(id);
+      const add = (id) => { if (q.starCount.get(acct.id).n >= 200) return; q.starAdd.run(acct.id, id, Date.now()); };
+      if (Array.isArray(body?.ids)) {
+        for (const id of [...new Set(body.ids.filter(okId))].slice(0, 200)) add(id);
+      } else {
+        if (!okId(body?.id)) throw bad('expected a token id');
+        if (body.on === false) q.starDel.run(acct.id, body.id);
+        else add(body.id);
+      }
+      return { ids: q.starList.all(acct.id).map((r) => r.token_id) };
+    },
     'GET me': (acct) => {
       if (!acct) throw bad('missing or unknown API key', 401);
       return { ...acct, tier: acct.credits > 0 ? 'paid' : 'free', rate_limit_per_min: acct.credits > 0 ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
     },
     'GET pricing': () => pricing(),
+    'POST profile-pay': async (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const row = profiles?.ownedUnpaid(acct.id, body?.id);
+      if (!row) return null;
+      const usd = profiles.priceUsd();
+      if (body.method === 'usdc') return usdcPay.quote(acct, row.id, null, body.chain);
+      if (body.method === 'card') {
+        if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
+        const form = new URLSearchParams({
+          mode: 'payment',
+          'line_items[0][quantity]': '1',
+          'line_items[0][price_data][currency]': 'usd',
+          'line_items[0][price_data][unit_amount]': String(usd * 100),
+          'line_items[0][price_data][product_data][name]': `Enhanced profile for ${row.token_id}`,
+          client_reference_id: acct.id,
+          'metadata[kind]': 'profile',
+          'metadata[profile_id]': row.id,
+          success_url: `${SITE}/${body.page === 'collection' ? 'collection' : 'token'}/${encodeURIComponent(row.token_id)}?enhance=paid`,
+          cancel_url: `${SITE}/${body.page === 'collection' ? 'collection' : 'token'}/${encodeURIComponent(row.token_id)}`,
+        });
+        const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+          method: 'POST', body: form, signal: AbortSignal.timeout(15_000),
+          headers: { authorization: `Bearer ${STRIPE.key}`, 'content-type': 'application/x-www-form-urlencoded' },
+        });
+        const s = await r.json();
+        if (!r.ok) throw bad(`card payment unavailable: ${s.error?.message || r.status}`, 502);
+        return { url: s.url, usd, profile_id: row.id };
+      }
+      const NOID = noid();
+      if (body.method !== 'noid') throw bad('method must be usdc, card, or noid');
+      if (!NOID) throw bad(process.env.PAY_ADDRESS ? `NOID payments are paused: ${priceNow().paused}. Try again in a few minutes.` : 'NOID payments are not enabled right now', 503);
+      if (q.openTopups.get().n >= 1000) throw bad('too many open payments, try again later', 503);
+      const base = Math.round((usd / NOID.usdPerNoid) * 1e6);
+      for (let i = 0; i < 5; i++) {
+        const id = randomBytes(6).toString('hex');
+        const amount = base + randomInt(1, 10_000);
+        try {
+          db.prepare('insert into noid_topups (id, account, amount, credits, created, dust, purpose, subject) values (?, ?, ?, 0, ?, ? % 10000, ?, ?)').run(id, acct.id, amount, Date.now(), amount, 'profile', row.id);
+        } catch { continue; }
+        db.prepare('update noid_topups set height = ? where id = ?').run(tipNow(), id);
+        return { ...routes['GET topup'](acct, null, id), profile_id: row.id, usd, kind: 'profile' };
+      }
+      throw bad('could not allocate a payment amount, try again', 503);
+    },
+    'POST boost': (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      if (!boosts) throw bad('promoted slots are off', 503);
+      return boosts.create(acct, body);
+    },
+    'POST boost-pay': (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const row = boosts?.ownedUnpaid(acct.id, body?.id);
+      if (!row) return null;
+      if (body?.method && body.method !== 'usdc') throw bad('promoted slots are paid in USDC');
+      return usdcPay.quote(acct, row.id, row.usdc, body.chain);
+    },
+    'GET boost': (acct, _, id) => boosts ? boosts.view(acct, id) : null,
+    'GET profile': (acct, _, id) => profiles ? profiles.view(acct, id) : null,
+    'GET usdc-order': (acct, _, id) => usdcPay.view(acct, id),
     'POST topup': async (acct, body) => {
       if (!acct) throw bad('missing or unknown API key', 401);
       const usd = Number(body.usd);
@@ -296,5 +397,5 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
   };
 
-  return { account, countRequest, chargeChat, settleNoid, stripeWebhook, routes, pricing };
+  return { account, countRequest, chargeChat, settleNoid, stripeWebhook, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
 };
