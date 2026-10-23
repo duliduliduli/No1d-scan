@@ -1380,6 +1380,8 @@ test('migrates a text-hash archive and backups round-trip', () => {
   assert.strictEqual(Buffer.from(row.hash).toString('hex'), 'ab'.repeat(32));
   assert.strictEqual(zstdDecompressSync(row.blob).toString(), details);
   assert.strictEqual(row.txs, 1);
+  // A JS number bound into a text column is stored as "5.0", which BigInt rejects.
+  assert.strictEqual(row.reward, '5');
   assert.strictEqual(migrated.prepare(`select type from pragma_table_info('blocks') where name = 'hash'`).get().type.toUpperCase(), 'BLOB');
   assert.strictEqual(Buffer.from(migrated.prepare('select hash from headers where height = 80').get().hash).toString('hex'), 'ab'.repeat(32));
   migrated.close();
@@ -1394,4 +1396,15 @@ test('migrates a text-hash archive and backups round-trip', () => {
   const snap = new DatabaseSync(path.join(backups, out[0]), { readOnly: true });
   assert.strictEqual(snap.prepare('select txs from blocks where height = 80').get().txs, 1);
   snap.close();
+});
+
+test('a μNOID string with a trailing .0 still renders', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
+  const src = html.match(/function microInt\(v\) \{[\s\S]*?\n\}/)[0] + '\n' + html.match(/function noid\(v\) \{[\s\S]*?\n\}/)[0];
+  const noid = new Function(`${src}; return noid;`)();
+  assert.strictEqual(noid('14400000.0'), '14.4 NOID');
+  assert.strictEqual(noid('14406500.0'), '14.4065 NOID');
+  assert.strictEqual(noid('16000000'), '16 NOID');
+  assert.strictEqual(noid(16000000), '16 NOID');
+  assert.doesNotThrow(() => noid('not-a-number'));
 });

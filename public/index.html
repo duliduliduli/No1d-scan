@@ -662,10 +662,18 @@ const errp = (x) => `<p class="msg err">${esc(x?._err || 'unavailable')}</p>`;
 const n0 = (x) => Number(x ?? 0).toLocaleString();
 const usd = (credits, per) => `$${(credits / per).toFixed(2)}`;
 
-// μNOID integer (number or decimal string) -> "1.234567 NOID", without float rounding.
+// μNOID integer (number or digit string) -> "1.234567 NOID", without float rounding.
+// A number bound into a SQLite text column comes back as "14400000.0". BigInt rejects that.
+function microInt(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? BigInt(v) : null;
+  const m = /^([+-]?\d+)(?:\.0+)?$/.exec(String(v).trim());
+  return m ? BigInt(m[1]) : null;
+}
 function noid(v) {
   if (v == null || v === '') return '–';
-  const n = BigInt(v), neg = n < 0n, a = neg ? -n : n;
+  const n = microInt(v);
+  if (n == null) return String(v);
+  const neg = n < 0n, a = neg ? -n : n;
   const frac = String(a % 1000000n).padStart(6, '0').replace(/0+$/, '');
   return `${neg ? '-' : ''}${(a / 1000000n).toLocaleString('en-US')}${frac ? '.' + frac : ''} NOID`;
 }
@@ -736,10 +744,10 @@ const ymd = (t) => {
 };
 function noidNum(v) {
   if (v == null || v === '') return null;
-  try {
-    const n = BigInt(v), neg = n < 0n, a = neg ? -n : n;
-    return (neg ? -1 : 1) * (Number(a / 1000000n) + Number(a % 1000000n) / 1e6);
-  } catch { return null; }
+  const n = microInt(v);
+  if (n == null) return null;
+  const neg = n < 0n, a = neg ? -n : n;
+  return (neg ? -1 : 1) * (Number(a / 1000000n) + Number(a % 1000000n) / 1e6);
 }
 const DONUT_COLORS = ['#a8f5e9', '#3ddc97', '#7dcaa8', '#f7b733', '#5ee0c5', '#c8fff4'];
 function donutLegend(parts) {
@@ -1672,7 +1680,9 @@ FMT.tokpx = (v) => `${(Number(v) / 1e6).toLocaleString(undefined, { maximumSigni
 const ageShort = (s) => s == null ? '–' : s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
 function fmtNoid(v) {
   if (v == null || v === '') return '–';
-  const n = BigInt(v), neg = n < 0n, a = neg ? -n : n, whole = a / 1000000n;
+  const n = microInt(v);
+  if (n == null) return String(v);
+  const neg = n < 0n, a = neg ? -n : n, whole = a / 1000000n;
   const frac = String(a % 1000000n).padStart(6, '0').slice(0, whole === 0n ? 4 : 2).replace(/0+$/, '');
   return `${neg ? '-' : ''}${whole.toLocaleString('en-US')}${frac ? '.' + frac : ''} NOID`;
 }
