@@ -83,7 +83,7 @@ test('indexer + api', async (t) => {
   process.env.LABELS_FILE = labelFile;
   // Candle and watchlist checks add requests on top of the indexer suite.
   process.env.RATE_LIMIT = '1000';
-  const { server, tick, db, compressJson, packStats, issuance, pollUsdc } = require('./server.js');
+  const { server, tick, db, compressJson, packStats, issuance, pollUsdc, nearestUsd } = require('./server.js');
   await new Promise((r) => server.listen(0, r));
   const get = async (p, opt = {}) => {
     const headers = opt.bare ? opt.headers : { 'sec-fetch-site': 'same-origin', ...opt.headers };
@@ -593,6 +593,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="balchart"/);
   assert.match(homeHtml, /aria-label="Account balance over time"/);
   assert.match(homeHtml, /balrange/);
+  assert.match(homeHtml, /id="balhead"/);
+  assert.match(homeHtml, /usd_points/);
+  assert.match(homeHtml, /usdText\(row\.value\)/);
+  assert.match(homeHtml, /balLabel\(noidAt\.get\(t\)\)/);
   assert.doesNotMatch(homeHtml, /Not the live balance/);
   assert.match(homeHtml, /arcDashAnimateTime/);
   assert.match(homeHtml, /1Y/);
@@ -707,6 +711,18 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual(walSame.balance_points.map((p) => p.balance), pts.map((p) => p.balance));
   const [, walOther] = await get('wallet/o1qqqqqqqqqqqq?demo=1');
   assert.notDeepStrictEqual(walOther.balance_points.map((p) => p.balance), pts.map((p) => p.balance));
+  assert.strictEqual(nearestUsd([{ t: 100, usd: 1 }, { t: 200, usd: 2 }], 140), 1);
+  assert.strictEqual(nearestUsd([{ t: 100, usd: 1 }, { t: 200, usd: 2 }], 160), 2);
+  assert.strictEqual(nearestUsd([{ t: 100, usd: 1 }, { t: 200, usd: 2 }], 150), 1);
+  assert.strictEqual(nearestUsd([{ t: 100, usd: 1 }, { t: 200, usd: 2 }], 50), 1);
+  assert.strictEqual(nearestUsd([{ t: 100, usd: 1 }, { t: 200, usd: 2 }], 900), 2);
+  assert.strictEqual(nearestUsd([], 1), null);
+  const usd = wal.usd_points;
+  assert.ok(Array.isArray(usd) && usd.length >= pts.length);
+  assert.ok(usd.every((p, i) => Number.isFinite(p.usd) && p.balance >= 0 && (i === 0 || p.t > usd[i - 1].t)));
+  assert.ok(Math.abs(usd[0].usd / usd[0].balance - 0.3) < 1e-8, 'a point before every sample uses the earliest price');
+  assert.ok(Math.abs(usd.at(-1).usd / usd.at(-1).balance - 0.6) < 1e-8, 'the latest point uses the current NOID price');
+  assert.ok(usd.some((p, i) => i && p.balance === usd[i - 1].balance && p.usd !== usd[i - 1].usd), 'the same NOID balance is revalued when the price moves');
   assert.strictEqual((await get('wallet/not-an-address?demo=1'))[0], 400);
   assert.strictEqual((await get('token/gcat'))[0], 404);
   const [, screen] = await get('tokens/gcat?demo=1');
@@ -1069,6 +1085,7 @@ test('indexer + api', async (t) => {
   assert.ok(liveWal.holdings.some((h) => h.token_id === 'live1' && h.balance === '400'));
   assert.ok(liveWal.trades.length >= 1 && liveWal.pnl.txns >= 1);
   assert.ok(liveWal.balance_points == null);
+  assert.ok(liveWal.usd_points == null);
 
   // USDC: a chain is off until its address is set. An exact base-unit amount marks the profile pending and does not add credits.
   const { solanaCredits, mints, report } = require('./usdc.js');
@@ -1291,6 +1308,10 @@ test('indexer + api', async (t) => {
   assert.ok(Math.abs(paid.balance_points.at(-1).balance - asNoid(paidMicro)) < 1e-6);
   assert.ok(Math.abs(paid.balance_points[0].balance - asNoid(paidMicro - nets)) < 1e-4);
   assert.ok(paid.balance_points[0].balance < paid.balance_points.at(-1).balance);
+  assert.ok(paid.usd_points.length >= paid.balance_points.length);
+  assert.strictEqual(paid.usd_points.at(-1).balance, paid.balance_points.at(-1).balance);
+  assert.ok(Math.abs(paid.usd_points.at(-1).usd - paid.usd_points.at(-1).balance * 0.6) < 1e-8);
+  assert.ok(Math.abs(paid.usd_points[0].usd - paid.usd_points[0].balance * 0.3) < 1e-4);
 
   const cold = fs.mkdtempSync(path.join(os.tmpdir(), 'noid-cold-'));
   process.env.COLD_DIR = cold;

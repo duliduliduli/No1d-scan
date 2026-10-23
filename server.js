@@ -890,6 +890,90 @@ function balancePoints(hourly, endMicro) {
   return out.length >= 2 ? out : [];
 }
 
+// Closer sample wins. A tie keeps the earlier one. Prices must be sorted by t.
+function nearestUsd(prices, t) {
+  const n = prices.length;
+  if (!n) return null;
+  if (t <= prices[0].t) return prices[0].usd;
+  if (t >= prices[n - 1].t) return prices[n - 1].usd;
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (prices[mid].t <= t) lo = mid;
+    else hi = mid;
+  }
+  return (t - prices[lo].t) <= (prices[hi].t - t) ? prices[lo].usd : prices[hi].usd;
+}
+
+// Ticks, plus the hourly and daily closes already used by /api/price and /api/candles. A pinned USD_PER_NOID
+// is only used when nothing else has been stored.
+function pricePath(from, to) {
+  const byT = new Map();
+  const put = (t, usd) => {
+    const ts = Number(t), px = Number(usd);
+    if (Number.isFinite(ts) && px > 0) byT.set(ts, px);
+  };
+  for (const p of price.daily) put(p.t, p.usd);
+  for (const p of price.hourly) put(p.t, p.usd);
+  const first = q.firstTick.get()?.t;
+  if (first != null) {
+    const since = Math.max(from, first) - 86400;
+    for (const r of q.tickRange.all(Math.max(0, since))) {
+      if (r.ts > to + 3600) break;
+      put(r.ts, r.usd);
+    }
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (price.now?.usd > 0) put(now, price.now.usd);
+  if (!byT.size) {
+    const pin = Number(process.env.USD_PER_NOID);
+    if (pin > 0) put(from, pin);
+  }
+  return [...byT].map(([t, usd]) => ({ t, usd })).sort((a, b) => a.t - b.t);
+}
+
+// Running NOID balance × the NOID/USD price at that time. Price samples between transactions carry the
+// last balance forward, including up to now, so a quiet day still shows the USD move.
+// shortcut: the line keeps 5-minute prices for a day, hourly for a week, and daily before that. Value
+// each balance point against the full sample set; draw every tick only if a range needs them.
+function usdBalance(points) {
+  const rows = [];
+  for (const p of points || []) {
+    const t = Number(p.t), balance = Number(p.balance);
+    if (!Number.isFinite(t) || !Number.isFinite(balance)) continue;
+    if (rows.length && t <= rows.at(-1).t) continue;
+    rows.push({ t, balance });
+  }
+  if (rows.length < 2) return [];
+  const now = Math.floor(Date.now() / 1000);
+  const from = rows[0].t;
+  const to = Math.max(rows.at(-1).t, now);
+  const prices = pricePath(from, to);
+  if (!prices.length) return [];
+  const want = new Set(rows.map((p) => p.t));
+  if (now >= rows.at(-1).t) want.add(now);
+  let lastKept = -Infinity;
+  for (const p of prices) {
+    if (p.t < from || p.t > to) continue;
+    const age = now - p.t;
+    const gap = age <= 86400 ? 300 : age <= 7 * 86400 ? 3600 : 86400;
+    if (p.t - lastKept >= gap) { want.add(p.t); lastKept = p.t; }
+  }
+  let i = 0;
+  const out = [];
+  for (const t of [...want].sort((a, b) => a - b)) {
+    if (t < from || t > to) continue;
+    while (i + 1 < rows.length && rows[i + 1].t <= t) i++;
+    if (rows[i].t > t) continue;
+    const px = nearestUsd(prices, t);
+    if (!(px > 0)) continue;
+    const point = { t, balance: rows[i].balance, usd: rows[i].balance * px };
+    if (out.length && out.at(-1).t === t) out[out.length - 1] = point;
+    else out.push(point);
+  }
+  return out.length >= 2 ? out : [];
+}
+
 const routes = {
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
@@ -991,11 +1075,13 @@ const routes = {
     const span = q.addrSpan.get(addr);
     const label = labelFor(addr);
     const hourly = q.addrHourly.all(addr).map((r) => ({ t: r.t, net_micronoid: String(r.net) }));
+    const balance_points = balancePoints(hourly, balance);
     return {
       address: addr, balance_micronoid: balance.toString(), rank: q.richRank.get(addr)?.rank ?? null, slots, activity,
       label: label ? { entity: label.entity || null, note: label.note || null } : null,
       blocks_mined: q.minedCount.get(addr).n,
-      balance_points: balancePoints(hourly, balance),
+      balance_points,
+      usd_points: usdBalance(balance_points),
       archive: {
         partial: true,
         note: 'Totals, the hourly net and payout destinations come only from block bodies this explorer stored. They are not a full wallet balance.',
@@ -1133,7 +1219,11 @@ const routes = {
   // Routes must return a promise: the handler shares in-flight calls with .finally.
   tokens: async (...a) => payChains(profiles.decorate(await assets.tokens(...a))),
   token: async (...a) => payChains(profiles.decorate(await assets.token(...a))),
-  wallet: async (id, params) => assets.wallet(id, params),
+  wallet: async (id, params) => {
+    const w = await assets.wallet(id, params);
+    if (Array.isArray(w?.balance_points)) w.usd_points = usdBalance(w.balance_points);
+    return w;
+  },
   collections: async (...a) => payChains(profiles.decorate(await assets.collections(...a))),
   collection: async (...a) => payChains(profiles.decorate(await assets.collection(...a))),
   boosts: async (_, params) => {
@@ -1383,4 +1473,4 @@ if (require.main === module) {
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance };
+module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance, nearestUsd, usdBalance };
