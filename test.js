@@ -582,6 +582,11 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /aria-label="Promoted"/);
   assert.match(homeHtml, /@keyframes promocrwl/);
   assert.match(homeHtml, /class="metapill"/);
+  assert.match(homeHtml, /id="topclist"/);
+  assert.match(homeHtml, /aria-label="Zoom in"/);
+  assert.match(homeHtml, /YOUR NODE/);
+  assert.match(homeHtml, /id="pxspark"/);
+  assert.match(homeHtml, /Countries of peers connected to this explorer's node/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
   assert.match(homeHtml, /Get Enhanced/);
   assert.match(homeHtml, /id="sortpop"/);

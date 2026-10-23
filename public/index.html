@@ -412,6 +412,91 @@
     .barrow #exq { width:100%; margin:0 0 8px; flex:none }
     .excount { display:none }
   }
+  /* Stark HUD chrome. Mint and gold stay; panels are glass with a cut corner and a hairline glow. */
+  body {
+    background-color:var(--bg);
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--accent) 9%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 9%, transparent) 1px, transparent 1px);
+    background-size:32px 32px, 32px 32px;
+    background-attachment:fixed;
+  }
+  :root[data-theme="light"] body {
+    background-color:var(--bg);
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent) 1px, transparent 1px);
+    background-size:32px 32px, 32px 32px;
+  }
+  header { border-bottom:1px solid color-mix(in srgb, var(--accent) 45%, transparent); box-shadow:0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent) }
+  .card, .tile, .winbox, .item, .menu nav, .popover, .checkout, .demo-banner, section.promo {
+    background:color-mix(in srgb, var(--card) 76%, transparent);
+    border:1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    border-radius:0;
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent), 0 0 18px color-mix(in srgb, var(--accent) 14%, transparent);
+    clip-path:polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  }
+  #excard, .card:has(.more) { clip-path:none }
+  section.promo {
+    background:color-mix(in srgb, var(--gold) 12%, color-mix(in srgb, var(--card) 82%, transparent));
+    border-color:color-mix(in srgb, var(--gold) 72%, transparent);
+    box-shadow:0 0 16px color-mix(in srgb, var(--gold) 18%, transparent);
+  }
+  h2, .stat small, .tile small, th, button.sort, .chip, .livebar, .filters summary, .fgrid label,
+  .winnums small, .kvl small, .delta small, .dock a, .dock button, .pairnav button, .tabs button, .mtabs button, .tfs button {
+    font-family:var(--mono); letter-spacing:.14em; text-transform:uppercase;
+  }
+  .stat b, .tile b, .big, td, .mcard .subpx, .price-head .big { letter-spacing:0; text-transform:none; font-family:system-ui, sans-serif }
+  .price-head .big { color:var(--accent); text-shadow:0 0 14px color-mix(in srgb, var(--accent) 45%, transparent) }
+  .livebar { letter-spacing:.08em }
+  th, td { border-bottom:1px solid color-mix(in srgb, var(--accent) 28%, transparent) }
+  .tabs button, .mtabs button, .tfs button, .pairnav button {
+    background:transparent; color:var(--muted); border:0; border-radius:0; border-bottom:1px solid transparent; box-shadow:none;
+  }
+  .tabs button.on, .mtabs button.on, .tfs button.on, .pairnav button.on {
+    background:transparent; color:var(--accent); border-bottom:1px solid var(--accent);
+    box-shadow:0 0 12px color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  button, input, select, textarea, .banner, .menu nav, .more div, .item, a.explore, .popover, .dock, .pairnav { border-radius:0 }
+  #search input, .card input, .card select, .card textarea {
+    border-color:color-mix(in srgb, var(--accent) 45%, var(--line));
+    background:color-mix(in srgb, var(--bg) 62%, transparent);
+    box-shadow:0 0 12px color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .dock, .pairnav {
+    background:color-mix(in srgb, var(--bg) 86%, transparent);
+    border-top:1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    box-shadow:0 -8px 18px color-mix(in srgb, var(--accent) 8%, transparent);
+    backdrop-filter:blur(8px);
+  }
+  .listbar {
+    background:color-mix(in srgb, var(--bg) 88%, transparent);
+    border-bottom:1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    backdrop-filter:blur(8px);
+  }
+  svg.spark polyline { stroke:var(--accent); filter:drop-shadow(0 0 3px var(--accent)) }
+  svg.spark.down polyline { stroke:#ff6b6b; filter:drop-shadow(0 0 3px #ff6b6b) }
+  .pxspark { margin-left:auto; min-width:140px } .pxspark svg.spark { width:160px; height:48px }
+  .hudstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(104px, 1fr)); gap:8px; margin:0 0 12px }
+  .hudstats .chip { pointer-events:auto }
+  .globe { overflow:hidden }
+  .hudring { position:absolute; left:50%; top:44%; width:min(78%, 540px); aspect-ratio:1; transform:translate(-50%, -50%); pointer-events:none; z-index:2 }
+  .hudring line, .hudring circle, .hudring ellipse { fill:none; stroke:color-mix(in srgb, var(--accent) 62%, transparent); stroke-width:.7 }
+  .hudring text { fill:color-mix(in srgb, var(--accent) 88%, white); font:7px var(--mono); text-anchor:middle; dominant-baseline:middle }
+  .glead, .gcalls { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; overflow:hidden }
+  .glead line { stroke:color-mix(in srgb, var(--accent) 85%, transparent); stroke-width:1 }
+  .gcall { position:absolute; font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--accent); white-space:nowrap; text-shadow:0 0 8px color-mix(in srgb, var(--accent) 55%, transparent) }
+  .gcall.home { color:var(--fg); letter-spacing:.16em }
+  .gltools { display:none; position:absolute; right:10px; top:46%; transform:translateY(-50%); z-index:4; flex-direction:column; gap:6px }
+  .globe.ready .gltools { display:flex }
+  .gltools button { width:32px; height:32px; padding:0; line-height:1; font-size:14px }
+  .gltools button[aria-pressed="true"] { color:var(--accent); box-shadow:0 0 10px color-mix(in srgb, var(--accent) 45%, transparent) }
+  .globe .legend { z-index:3; background:color-mix(in srgb, var(--bg) 70%, transparent) }
+  @media (prefers-reduced-motion: reduce) {
+    .dot, .ichart svg, tr.new td, .flash, .skel { animation:none }
+    .ichart svg { clip-path:none }
+    .bar .fill, .globe .event { transition:none }
+  }
 </style>
 </head>
 <body>
@@ -770,6 +855,11 @@ function wirePriceBox(name) {
       state.quiet++;
       series.setData(state.bars.map((b) => toLw(b, th)));
       state.quiet--;
+      const spark = $('pxspark');
+      if (spark) {
+        const ys = state.bars.map((b) => b.value ?? b.close).filter((v) => v != null);
+        spark.innerHTML = ys.length >= 2 ? sparkSvg(ys) : '';
+      }
     };
     const writeNote = () => {
       const kind = mode === 'candles' ? 'candles' : 'points';
@@ -910,6 +1000,7 @@ function priceHead(p, supplyMicro) {
         <b id="pxch" class="${ch >= 0 ? 'up' : 'down'}">${ch >= 0 ? '▲' : '▼'} ${esc(Math.abs(ch).toFixed(2))}% <small class="muted">24h</small></b></div>
       <div class="stat"><small>24h volume</small><b id="pxvol">${esc(money(p.volume_24h_usd, 0))}</b></div>
       <div class="stat" title="Price × circulating supply from this node"><small>Market cap</small><b id="pxcap">${esc(money(cap, 0))}</b></div>
+      <div class="pxspark" id="pxspark" aria-hidden="true"></div>
     </div>`;
 }
 
@@ -947,8 +1038,8 @@ function centroid(f) {
   const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
   return { lat: (Math.min(...ys) + Math.max(...ys)) / 2, lng: (Math.min(...xs) + Math.max(...xs)) / 2 };
 }
-const G = { peers: new Map(), seen: new Set(), home: null, arcs: [], bursts: [] };
-let arcRAF = 0, arcNext = 0, arcN = 0;
+const G = { peers: new Map(), seen: new Set(), home: null, arcs: [], bursts: [], spin: false };
+let arcRAF = 0, arcNext = 0, arcN = 0, callRAF = 0, callKey = '';
 const motionReduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const globeMobile = () => matchMedia('(max-width: 640px)').matches;
 const arcCap = () => (globeMobile() ? 6 : 12); // concurrent arcs; phones stay at the low end
@@ -957,13 +1048,19 @@ function globeColors() {
   globe.atmosphereColor(acc).globeMaterial().color.set(cssv('--card'));
   globe.hexPolygonColor(({ properties: p }) => G.peers.has(p.cc) ? acc : G.seen.has(p.cc) ? alpha(acc, 0.45) : alpha(acc, 0.13))
     .pointColor(() => acc).ringColor((r) => (t) => alpha(r.burst ? gold : acc, (1 - t) * (r.burst ? 1 : 0.7)))
-    .arcColor((a) => (a?.burst ? [alpha(gold, 0.9), gold] : [alpha(gold, 0.55), gold]));
+    .arcColor((a) => (a?.burst ? [alpha(gold, 0.9), gold] : [alpha(acc, 0.55), acc]));
+}
+function holdArcs() {
+  if (!G.home) return [];
+  return arcSpots().map((s) => ({ from: s, to: G.home, hold: true, burst: false, gap: 0, born: 0, life: 1e15 }));
 }
 function globeLayers() {
   const pts = [...G.peers].map(([cc, count]) => ({ ...spot(cc), cc, count })).filter((p) => p.lat != null);
-  globe.pointsData(pts)
-    .ringsData([...(G.home ? [{ ...G.home, home: true }] : []), ...pts, ...G.bursts])
-    .arcsData(G.arcs);
+  const homePt = G.home ? [{ ...G.home, home: true, count: 0, cc: '' }] : [];
+  globe.pointsData([...homePt, ...pts])
+    .pointRadius((d) => d.home ? 0.85 : 0.42)
+    .ringsData([...(G.home ? [{ ...G.home, home: true }] : []), ...pts, ...G.bursts]);
+  syncArcs();
   globeColors();
 }
 async function mountGlobe(net) {
@@ -977,26 +1074,28 @@ async function mountGlobe(net) {
   }
   if (!el.isConnected) return;
   const peerLabel = (cc, name) => `<b>${esc(name)}</b><br>${G.peers.get(cc) ? `${G.peers.get(cc)} peer${G.peers.get(cc) > 1 ? 's' : ''} connected now` : G.seen.has(cc) ? 'peer seen in the last 24 h' : 'no peers seen'}`;
-  globe = Globe({ animateIn: true })(el)
+  globe = Globe({ animateIn: !motionReduce() })(el)
     .width(el.clientWidth).height(el.clientHeight).backgroundColor('rgba(0,0,0,0)')
     .showAtmosphere(true).atmosphereAltitude(0.2)
     .hexPolygonsData(countries).hexPolygonResolution(3).hexPolygonMargin(0.32)
     .hexPolygonLabel(({ properties: p }) => peerLabel(p.cc, p.ADMIN))
-    .pointLat('lat').pointLng('lng').pointRadius(0.55).pointAltitude((d) => 0.015 + Math.min(d.count, 12) * 0.012)
-    .pointLabel((d) => peerLabel(d.cc, countries.find((f) => f.properties.cc === d.cc)?.properties.ADMIN || d.cc))
-    .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 4 : 2.5)).ringPropagationSpeed((r) => (r.burst ? 6 : 2)).ringRepeatPeriod((r) => (r.burst ? 9e9 : r.home ? 1200 : 1800))
+    .pointLat('lat').pointLng('lng').pointAltitude((d) => d.home ? 0.02 : 0.015 + Math.min(d.count || 0, 12) * 0.012)
+    .pointLabel((d) => d.home ? '<b>YOUR NODE</b><br>this explorer’s node, country level' : peerLabel(d.cc, countries.find((f) => f.properties.cc === d.cc)?.properties.ADMIN || d.cc))
+    .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 4 : 2.5)).ringPropagationSpeed((r) => (motionReduce() ? 0 : r.burst ? 6 : 2)).ringRepeatPeriod((r) => (r.burst ? 9e9 : r.home ? 1200 : 1800))
     .arcStartLat((a) => a.from.lat).arcStartLng((a) => a.from.lng).arcEndLat((a) => a.to.lat).arcEndLng((a) => a.to.lng)
-    .arcDashLength(0.4).arcDashGap(0.8).arcDashInitialGap((a) => a.gap).arcDashAnimateTime(1300)
-    .arcStroke(globeMobile() ? 0.6 : 0.85).arcAltitudeAutoScale(0.4).arcsTransitionDuration(0);
+    .arcDashLength(1).arcDashGap(0).arcDashAnimateTime(0)
+    .arcStroke(globeMobile() ? 0.28 : 0.4).arcAltitudeAutoScale(0.35).arcsTransitionDuration(0);
   globe.hexPolygonUseDots?.(true);
   const ctl = globe.controls();
-  Object.assign(ctl, { autoRotate: !motionReduce(), autoRotateSpeed: 0.55, enableDamping: true });
+  G.spin = !motionReduce();
+  Object.assign(ctl, { autoRotate: G.spin, autoRotateSpeed: 0.35, enableDamping: true });
   let idle; ctl.addEventListener('start', () => { ctl.autoRotate = false; clearTimeout(idle); });
-  ctl.addEventListener('end', () => { idle = setTimeout(() => { if (!motionReduce()) ctl.autoRotate = true; }, 6000); });
+  ctl.addEventListener('end', () => { idle = setTimeout(() => { ctl.autoRotate = G.spin && !motionReduce(); }, 6000); });
   globeResize = new ResizeObserver(() => globe?.width(el.clientWidth).height(el.clientHeight));
   globeResize.observe(el);
   setNetwork(net);
   if (G.home) globe.pointOfView({ ...G.home, altitude: 2.3 }, motionReduce() ? 0 : 1200);
+  wireGlobeTools();
   globeTimer = setInterval(() => api('network').then(setNetwork).catch(() => {}), 60_000);
   cancelAnimationFrame(arcRAF);
   arcNext = 0;
@@ -1008,8 +1107,89 @@ function setNetwork(net) {
   G.seen = new Set(net.countries_24h);
   G.home = spot(net.node_country) ?? G.home;
   setNum('gcc', G.peers.size || G.seen.size);
+  paintTopCountries(net);
   if (globe) globeLayers();
 }
+// shortcut: callouts show the six largest peer countries on the near side of the globe. The list under it has the same six, plus a count of the rest.
+function paintTopCountries(net) {
+  const el = $('topclist');
+  if (!el) return;
+  const rows = net?.peers || [...G.peers].map(([country, count]) => ({ country, count }));
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  if (!rows.length || !total) { el.innerHTML = '<p class="muted">No connected peer countries right now.</p>'; return; }
+  const shown = rows.slice(0, 6);
+  const rest = rows.length - shown.length;
+  el.innerHTML = shown.map((r) => {
+    const pct = Math.round(100 * r.count / total);
+    return `<div class="bar"><span class="name">${esc(r.country)}</span><span class="val">${n0(r.count)} peer${r.count === 1 ? '' : 's'} · ${pct}%</span><span class="track"><span class="fill" data-w="${pct}"></span></span></div>`;
+  }).join('') + (rest ? `<p class="muted">+ ${rest} more</p>` : '');
+  growBars();
+}
+function placeCalls() {
+  const host = $('gcalls'), lead = $('glead');
+  if (!host || !lead || !globe) return;
+  const w = host.clientWidth, h = host.clientHeight;
+  if (!w || !h) return;
+  const pov = globe.pointOfView();
+  const face = (lat, lng) => {
+    const p1 = pov.lat * Math.PI / 180, p2 = lat * Math.PI / 180, dl = (lng - pov.lng) * Math.PI / 180;
+    return Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl) > 0.08;
+  };
+  const items = [];
+  if (G.home && face(G.home.lat, G.home.lng)) items.push({ ...G.home, label: 'YOUR NODE', home: true });
+  for (const [cc, count] of [...G.peers.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)) {
+    const s = spot(cc);
+    if (s && face(s.lat, s.lng)) items.push({ ...s, label: `${cc} · ${count}`, home: false });
+  }
+  const key = items.map((it) => it.label).join('|');
+  if (key !== callKey) {
+    callKey = key;
+    host.innerHTML = items.map((it, i) => `<div class="gcall${it.home ? ' home' : ''}" data-i="${i}">${esc(it.label)}</div>`).join('');
+  }
+  const cx = w / 2, cy = h / 2, lines = [];
+  items.forEach((it, i) => {
+    const el = host.querySelector(`[data-i="${i}"]`);
+    let p;
+    try { p = globe.getScreenCoords(it.lat, it.lng, 0.02); } catch { p = null; }
+    const ok = p && p.x > -40 && p.y > -40 && p.x < w + 40 && p.y < h + 40;
+    if (el) el.hidden = !ok;
+    if (!ok) return;
+    const dx = p.x - cx, dy = p.y - cy, len = Math.hypot(dx, dy) || 1, dist = it.home ? 16 : 36;
+    const lx = Math.min(w - 78, Math.max(4, p.x + (dx / len) * dist));
+    const ly = Math.min(h - 18, Math.max(4, p.y + (dy / len) * dist - 8));
+    el.style.left = `${lx}px`; el.style.top = `${ly}px`;
+    lines.push(`<line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${(lx + 8).toFixed(1)}" y2="${(ly + 5).toFixed(1)}"/>`);
+  });
+  lead.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  lead.innerHTML = lines.join('');
+}
+function callTick() {
+  callRAF = requestAnimationFrame(callTick);
+  if (!document.hidden) placeCalls();
+}
+function wireGlobeTools() {
+  const ctl = globe.controls();
+  const zoom = (f) => {
+    const pov = globe.pointOfView();
+    globe.pointOfView({ ...pov, altitude: Math.min(4.2, Math.max(0.55, pov.altitude * f)) }, motionReduce() ? 0 : 280);
+  };
+  const zin = $('glzoomin'), zout = $('glzoomout'), rot = $('glrot'), rec = $('glrec');
+  if (zin) zin.onclick = () => zoom(0.8);
+  if (zout) zout.onclick = () => zoom(1.25);
+  if (rot) {
+    rot.setAttribute('aria-pressed', G.spin ? 'true' : 'false');
+    rot.onclick = () => {
+      G.spin = !G.spin;
+      ctl.autoRotate = G.spin && !motionReduce();
+      rot.setAttribute('aria-pressed', G.spin ? 'true' : 'false');
+    };
+  }
+  if (rec) rec.onclick = () => { if (G.home) globe.pointOfView({ lat: G.home.lat, lng: G.home.lng, altitude: 2.2 }, motionReduce() ? 0 : 700); };
+  elReady();
+  cancelAnimationFrame(callRAF);
+  callRAF = requestAnimationFrame(callTick);
+}
+function elReady() { document.querySelector('.globe')?.classList.add('ready'); }
 // Peer countries that are not the node's own country: an arc needs two different points.
 function arcSpots() {
   if (!G.home) return [];
@@ -1034,7 +1214,7 @@ function pushArc(kind) {
   });
   return true;
 }
-function syncArcs() { if (globe) globe.arcsData(G.arcs); }
+function syncArcs() { if (globe) globe.arcsData([...holdArcs(), ...(motionReduce() ? [] : G.arcs)]); }
 // Steady traffic: fill to several arcs quickly, then one new arc every 150–300ms, never above the cap.
 function arcTick(now) {
   arcRAF = requestAnimationFrame(arcTick);
@@ -1045,13 +1225,7 @@ function arcTick(now) {
   }
   const before = G.arcs.length;
   G.arcs = G.arcs.filter((a) => now - a.born < a.life);
-  let dirty = G.arcs.length !== before;
-  // Keep spawning at the cap: pushArc drops the oldest, so the globe never goes empty between blocks.
-  if (arcSpots().length && now >= arcNext) {
-    dirty = pushArc('steady') || dirty;
-    arcNext = now + (G.arcs.length < Math.min(6, arcCap()) ? 70 : 150 + Math.random() * 150);
-  }
-  if (dirty) syncArcs();
+  if (G.arcs.length !== before) syncArcs();
 }
 function globeFlash(n) {
   if (!globe || !G.home || motionReduce()) return;
@@ -1074,9 +1248,23 @@ function globeTx(n) { globeFlash(Math.min(globeMobile() ? 2 : 4, Math.max(1, n))
 function unmountGlobe() {
   clearInterval(globeTimer); globeTimer = null;
   cancelAnimationFrame(arcRAF); arcRAF = 0;
+  cancelAnimationFrame(callRAF); callRAF = 0; callKey = '';
   globeResize?.disconnect(); globeResize = null;
   globe?._destructor?.(); globe = null;
   G.arcs = []; G.bursts = [];
+}
+function hudRing() {
+  const ticks = [];
+  for (let d = 0; d < 360; d += 15) {
+    const a = (d - 90) * Math.PI / 180, r1 = d % 45 === 0 ? 88 : 92, r2 = 97;
+    const xy = (r) => `${(100 + r * Math.cos(a)).toFixed(1)},${(100 + r * Math.sin(a)).toFixed(1)}`;
+    ticks.push(`<line x1="${xy(r1).split(',')[0]}" y1="${xy(r1).split(',')[1]}" x2="${xy(r2).split(',')[0]}" y2="${xy(r2).split(',')[1]}"/>`);
+  }
+  const labels = [0, 45, 90, 135, 180, 225, 270, 315].map((d) => {
+    const a = (d - 90) * Math.PI / 180, r = 80;
+    return `<text x="${(100 + r * Math.cos(a)).toFixed(1)}" y="${(100 + r * Math.sin(a)).toFixed(1)}">${d}°</text>`;
+  }).join('');
+  return `<svg class="hudring" viewBox="0 0 200 200" aria-hidden="true">${ticks.join('')}<circle cx="100" cy="100" r="70"/><ellipse cx="100" cy="100" rx="70" ry="24"/><ellipse cx="100" cy="100" rx="24" ry="70"/><line x1="100" y1="30" x2="100" y2="170"/><line x1="30" y1="100" x2="170" y2="100"/>${labels}</svg>`;
 }
 
 // Wallet / DEX adapter. Live swaps stay hidden until the server reports the node
@@ -1329,7 +1517,7 @@ function tokenCards(list, page, pageSize) {
       ${showRank ? `<span class="rank">${(page - 1) * pageSize + i + 1}</span>` : ''}${logoHtml(t)}
       <span class="who"><span class="l1"><b>${esc(t.ticker)}</b> <span class="muted">${sprout()}${esc(ageShort(t.age_s))}</span> ${bolt(t.id)} ${starBtn(t.id, t.name)}</span>
         <span class="l2">${esc(t.name)} ${paidMarks(t)}</span></span>
-      <span class="px"><b class="subpx">${esc(t.price_usd == null ? '–' : subUsd(t.price_usd))}</b>
+      <span class="px">${sparkSvg(t.spark)}<b class="subpx">${esc(t.price_usd == null ? '–' : subUsd(t.price_usd))}</b>
         <span class="chgpair"><span>1H ${chgHtml(t.change?.['1h'])}</span><span>24H ${chgHtml(t.change?.['24h'])}</span></span>
         <span class="chipsline"><span class="pill">Liq ${esc(compactNoid(t.liquidity_micronoid))}</span><span class="pill">Vol ${esc(compactNoid(t.volume_micronoid))}</span><span class="pill">MCap ${esc(compactNoid(t.mcap_micronoid))}</span></span></span></a>`).join('')}</div>`;
 }
@@ -2257,16 +2445,24 @@ const pages = {
     const txsCard = (t) => t ? `<h2>Recent transactions <small class="muted">bodies kept from block ${esc(t.retained_from_height)}</small></h2>${rows(t.transactions, TX_COLS)}` : '';
     app.innerHTML = `
       <div class="livebar"><span class="dot" id="dot"></span><span id="livemsg">LIVE · updates every 2 s</span></div>
-      <div class="card globe"><div id="globe"><div class="glmsg">Loading network globe…</div></div>
-        <div class="over">
+      <div class="hudstats">
           <div class="chip">Block<b id="gh">${s ? n0(s.chain.height) : '–'}</b></div>
           <div class="chip">Last block<b id="gago">${b ? esc(ago(b.blocks[0]?.timestamp)) : '–'}</b></div>
           <div class="chip">NOID<b id="gpx">${esc(s?.price ? usd4(s.price.usd) : '–')}</b></div>
           <div class="chip">Peers<b id="gpeers">${s ? n0(s.peers) : '–'}</b></div>
           <div class="chip">Countries<b id="gcc">${net ? n0(net.peers.length) : '–'}</b></div>
+      </div>
+      <div class="card globe">${hudRing()}<div id="globe"><div class="glmsg">Loading network globe…</div></div>
+        <svg class="glead" id="glead" aria-hidden="true"></svg><div class="gcalls" id="gcalls"></div>
+        <div class="gltools">
+          <button type="button" id="glzoomin" aria-label="Zoom in">+</button>
+          <button type="button" id="glzoomout" aria-label="Zoom out">−</button>
+          <button type="button" id="glrot" aria-label="Rotate" aria-pressed="false">↻</button>
+          <button type="button" id="glrec" aria-label="Recenter">◎</button>
         </div>
         <div class="event" id="gevent"></div>
         <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
+      <div class="card" id="topc"><h2>Top countries</h2><div class="bars" id="topclist"><p class="muted">Loading peer countries…</p></div></div>
       ${exploreCard(demo)}
       ${promoHtml}
       ${strip}
@@ -2309,6 +2505,7 @@ const pages = {
     const loadMiners = () => showMiners(`miners?window=${minerWin}&at=${tip}`, (v) => { minerWin = v; loadMiners(); });
     onTabs('cwin', (v) => { chartWin = v; loadCharts().catch((e) => { const el = $('charts'); if (el) el.innerHTML = `<p class="msg err">Could not load this window: ${esc(e.message)}</p>`; }); });
     onTabs('mwin', (v) => { minerWin = v; loadMiners(); });
+    paintTopCountries(net);
     if (net0._err) { const g = $('globe'); if (g) g.innerHTML = `<div class="glmsg">${esc(net0._err)}</div>`; }
     else mountGlobe(net).catch((e) => { $('globe') && ($('globe').innerHTML = `<div class="glmsg">Globe unavailable: ${esc(e.message)}</div>`); });
 
