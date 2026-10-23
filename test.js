@@ -1386,8 +1386,9 @@ test('migrates a text-hash archive and backups round-trip', () => {
 
   const { spawnSync } = require('node:child_process');
   const backups = path.join(dir, 'backups');
-  const run = spawnSync(process.execPath, ['scripts/backup.js'], { cwd: '/workspace', env: { ...process.env, DB_PATH: file, BACKUP_DIR: backups } });
-  assert.strictEqual(run.status, 0, run.stderr.toString());
+  // A missing cwd (this used to be the agent path /workspace) returns status null and no stderr.
+  const run = spawnSync(process.execPath, ['scripts/backup.js'], { cwd: __dirname, env: { ...process.env, DB_PATH: file, BACKUP_DIR: backups } });
+  assert.strictEqual(run.status, 0, run.stderr?.toString() || run.error?.message || 'backup failed');
   const out = fs.readdirSync(backups).filter((f) => f.endsWith('.db'));
   assert.strictEqual(out.length, 1);
   const snap = new DatabaseSync(path.join(backups, out[0]), { readOnly: true });
