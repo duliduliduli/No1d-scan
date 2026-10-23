@@ -544,6 +544,18 @@
   .glead line { stroke:color-mix(in srgb, var(--accent) 85%, transparent); stroke-width:1 }
   .gcall { position:absolute; visibility:hidden; max-width:calc(100% - 56px); overflow:hidden; text-overflow:ellipsis; font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--accent); white-space:nowrap; text-shadow:0 0 8px color-mix(in srgb, var(--accent) 55%, transparent) }
   .gcall.home { color:var(--fg); letter-spacing:.16em }
+  .gnlist { max-height:320px; overflow-y:auto; overflow-x:hidden; display:grid; gap:6px; overscroll-behavior:contain }
+  .gnrow { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 10px; width:100%; min-width:0; text-align:left; padding:8px 10px; border:1px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius:8px; background:color-mix(in srgb, var(--accent) 4%, transparent); color:var(--fg); font:inherit; cursor:pointer }
+  .gnrow.on, .gnrow:hover { border-color:var(--accent); box-shadow:0 0 12px color-mix(in srgb, var(--accent) 30%, transparent) }
+  .gnplace { font-weight:600; min-width:0 } .gndir { font:600 10px/1.6 var(--mono); color:var(--accent); letter-spacing:.1em }
+  .gnsub, .gnsince { font-size:12px; color:var(--muted); min-width:0 } .gnsince { text-align:right }
+  .ell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0 }
+  .gnode { position:absolute; left:10px; bottom:34px; z-index:5; width:min(320px, calc(100% - 66px)); padding:10px 12px; border:1px solid var(--accent); border-radius:10px; background:color-mix(in srgb, var(--card) 92%, transparent); box-shadow:0 0 18px color-mix(in srgb, var(--accent) 35%, transparent); backdrop-filter:blur(4px) }
+  .gnode h3 { margin:0 22px 6px 0; font:600 13px/1.3 var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--accent) }
+  .gnode .gngrid { display:grid; grid-template-columns:1fr 1fr; gap:6px 10px } .gnode .gngrid > div { min-width:0; display:grid }
+  .gnode small { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em } .gnode b { font-size:12px; font-weight:600 }
+  .gnode p { margin:8px 0 0; font-size:11px } .gnode .gnx { position:absolute; top:4px; right:6px; background:none; border:0; color:var(--accent); font-size:20px; cursor:pointer; padding:2px 6px }
+  @media (max-width:640px) { .gnode { left:6px; right:52px; width:auto; bottom:30px } }
   .gltools { display:none; position:absolute; right:6px; top:46%; transform:translateY(-50%); z-index:4; flex-direction:column; gap:6px; max-width:40px }
   .globe.ready .gltools { display:flex }
   .gltools button { width:32px; height:32px; min-width:0; padding:0; line-height:1; font-size:14px }
@@ -1402,7 +1414,7 @@ function markNew(tableId, oldTip) {
   for (const tr of document.querySelectorAll(`#${tableId} tr`)) if (Number(tr.cells[0]?.textContent) > oldTip) tr.classList.add('new');
 }
 
-// ---- globe: countries of peers connected to this explorer's node (never exact locations, never miner locations)
+// ---- globe: each peer connected to this explorer's node, at its approximate city (masked IPs, never miner locations)
 const GLOBE_JS = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js';
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/example/datasets/ne_110m_admin_0_countries.geojson';
 const ISO_FIX = { France: 'FR', Norway: 'NO' }; // Natural Earth leaves these as -99
@@ -1421,7 +1433,9 @@ function centroid(f) {
   const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
   return { lat: (Math.min(...ys) + Math.max(...ys)) / 2, lng: (Math.min(...xs) + Math.max(...xs)) / 2 };
 }
-const G = { peers: new Map(), seen: new Set(), home: null, arcs: [], bursts: [], spin: false };
+const G = { peers: new Map(), seen: new Set(), nodes: [], sel: null, home: null, arcs: [], bursts: [], spin: false };
+const nodeSpot = (n) => (n.lat != null ? { lat: n.lat, lng: n.lon } : spot(n.cc));
+const nodePlace = (n) => [n.city, n.country].filter(Boolean).join(', ') || 'Unknown location';
 let arcRAF = 0, arcNext = 0, arcN = 0, callRAF = 0, callKey = '';
 const motionReduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const globeMobile = () => matchMedia('(max-width: 640px)').matches;
@@ -1430,7 +1444,7 @@ function globeColors() {
   const acc = cssv('--accent'), gold = cssv('--gold');
   globe.atmosphereColor(acc).globeMaterial().color.set(cssv('--card'));
   globe.hexPolygonColor(({ properties: p }) => G.peers.has(p.cc) ? acc : G.seen.has(p.cc) ? alpha(acc, 0.45) : alpha(acc, 0.13))
-    .pointColor(() => acc).ringColor((r) => (t) => alpha(r.burst ? gold : acc, (1 - t) * (r.burst ? 1 : 0.7)))
+    .pointColor((d) => (d.sel ? gold : acc)).ringColor((r) => (t) => alpha(r.burst ? gold : acc, (1 - t) * (r.burst ? 1 : 0.7)))
     .arcColor((a) => (a?.burst ? [alpha(gold, 0.95), gold] : a?.pulse ? [alpha(acc, 0.05), acc] : [alpha(acc, 0.35), alpha(acc, 0.55)]));
 }
 function holdArcs() {
@@ -1443,10 +1457,10 @@ function pulseArcs() {
   return arcSpots().map((s, i) => ({ from: s, to: G.home, pulse: true, burst: false, gap: (i * 0.21) % 1, born: 0, life: 1e15 }));
 }
 function globeLayers() {
-  const pts = [...G.peers].map(([cc, count]) => ({ ...spot(cc), cc, count })).filter((p) => p.lat != null);
+  const pts = G.nodes.map((n) => ({ ...nodeSpot(n), node: n, sel: n.id === G.sel })).filter((p) => p.lat != null);
   const homePt = G.home ? [{ ...G.home, home: true, count: 0, cc: '' }] : [];
   globe.pointsData([...homePt, ...pts])
-    .pointRadius((d) => d.home ? 0.85 : 0.42)
+    .pointRadius((d) => d.home ? 0.85 : d.sel ? 0.7 : 0.38)
     .ringsData([...(G.home ? [{ ...G.home, home: true }] : []), ...pts, ...G.bursts]);
   syncArcs();
   globeColors();
@@ -1467,8 +1481,10 @@ async function mountGlobe(net) {
     .showAtmosphere(true).atmosphereAltitude(0.2)
     .hexPolygonsData(countries).hexPolygonResolution(3).hexPolygonMargin(0.32)
     .hexPolygonLabel(({ properties: p }) => peerLabel(p.cc, p.ADMIN))
-    .pointLat('lat').pointLng('lng').pointAltitude((d) => d.home ? 0.02 : 0.015 + Math.min(d.count || 0, 12) * 0.012)
-    .pointLabel((d) => d.home ? '<b>YOUR NODE</b><br>this explorer’s node, country level' : peerLabel(d.cc, countries.find((f) => f.properties.cc === d.cc)?.properties.ADMIN || d.cc))
+    .pointLat('lat').pointLng('lng').pointAltitude((d) => d.home ? 0.02 : d.sel ? 0.06 : 0.025)
+    .pointLabel((d) => d.home ? `<b>YOUR NODE</b><br>${esc(G.homeName || 'this explorer’s node')}` : `<b>${esc(nodePlace(d.node))}</b><br>${esc(d.node.direction)} · ${esc(d.node.provider || d.node.ip)}`)
+    .onPointClick((d) => (d.home ? globe.pointOfView({ ...G.home, altitude: 1.6 }, motionReduce() ? 0 : 600) : selectNode(d.node.id, true)))
+    .pointsMerge(false)
     .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 3.4 : 2.4)).ringPropagationSpeed((r) => (motionReduce() ? 0 : r.burst ? 6 : 1.15)).ringRepeatPeriod((r) => (r.burst ? 9e9 : 1700))
     .arcStartLat((a) => a.from.lat).arcStartLng((a) => a.from.lng).arcEndLat((a) => a.to.lat).arcEndLng((a) => a.to.lng)
     .arcDashLength((a) => (a.pulse ? 0.16 : 1)).arcDashGap((a) => (a.pulse ? 0.84 : 0))
@@ -1494,25 +1510,55 @@ function setNetwork(net) {
   if (!net) return;
   G.peers = new Map(net.peers.map((p) => [p.country, p.count]));
   G.seen = new Set(net.countries_24h);
-  G.home = spot(net.node_country) ?? G.home;
+  G.nodes = net.nodes || [];
+  if (G.sel && !G.nodes.some((n) => n.id === G.sel)) closeNode();
+  G.homeName = net.node ? [net.node.city, net.node.country].filter(Boolean).join(', ') : '';
+  G.home = (net.node?.lat != null ? { lat: net.node.lat, lng: net.node.lon } : spot(net.node_country)) ?? G.home;
   setNum('gcc', G.peers.size || G.seen.size);
-  paintTopCountries(net);
+  paintNodeList();
+  if (G.sel) paintNodeCard();
   if (globe) globeLayers();
 }
-// shortcut: callouts show the six largest peer countries on the near side of the globe. The list under it has the same six, plus a count of the rest.
-function paintTopCountries(net) {
+// Scrollable list of every connected peer; tapping one focuses the globe on it and opens its HUD card.
+function paintNodeList() {
   const el = $('topclist');
   if (!el) return;
-  const rows = net?.peers || [...G.peers].map(([country, count]) => ({ country, count }));
-  const total = rows.reduce((s, r) => s + r.count, 0);
-  if (!rows.length || !total) { el.innerHTML = '<p class="muted">No connected peer countries right now.</p>'; return; }
-  const shown = rows.slice(0, 6);
-  const rest = rows.length - shown.length;
-  el.innerHTML = shown.map((r) => {
-    const pct = Math.round(100 * r.count / total);
-    return `<div class="bar"><span class="name">${esc(r.country)}</span><span class="val">${n0(r.count)} peer${r.count === 1 ? '' : 's'} · ${pct}%</span><span class="track"><span class="fill" data-w="${pct}"></span></span></div>`;
-  }).join('') + (rest ? `<p class="muted">+ ${rest} more</p>` : '');
-  growBars();
+  if (!G.nodes.length) { el.innerHTML = '<p class="muted">No connected peers right now.</p>'; return; }
+  el.innerHTML = G.nodes.map((n) => `<button type="button" class="gnrow${n.id === G.sel ? ' on' : ''}" data-node="${esc(n.id)}" aria-pressed="${n.id === G.sel}">
+    <span class="gnplace ell">${esc(nodePlace(n))}</span><span class="gndir">${n.direction === 'inbound' ? '↘ IN' : '↗ OUT'}</span>
+    <span class="gnsub ell">${esc(n.provider || 'Unknown provider')}${n.asn ? ` · ${esc(n.asn)}` : ''}</span><span class="gnsince">${esc(ago(Math.floor(n.since / 1000)))}</span></button>`).join('');
+  el.onclick = (e) => { const b = e.target.closest('[data-node]'); if (b) selectNode(b.dataset.node, true); };
+}
+function paintNodeCard() {
+  const card = $('gnode');
+  const n = G.nodes.find((x) => x.id === G.sel);
+  if (!card || !n) return;
+  const row = (k, v) => `<div><small>${k}</small><b class="ell">${esc(v ?? '–')}</b></div>`;
+  card.innerHTML = `<button type="button" class="gnx" aria-label="Close">×</button>
+    <h3 class="ell">${esc(nodePlace(n))}</h3>
+    <div class="gngrid">${row('Region', n.region)}${row('Direction', n.direction === 'inbound' ? 'Inbound (they dialed us)' : 'Outbound (we dialed them)')}
+    ${row('Provider', n.provider)}${row('ASN', n.asn)}${row('Address', n.ip)}${row('Connected', n.since ? `${ago(Math.floor(n.since / 1000))} (first seen)` : null)}</div>
+    <p class="muted">Version, height and ping aren't shown: the node has no read-only peer-info RPC. Approximate location from a GeoIP lookup.</p>`;
+  card.hidden = false;
+  card.querySelector('.gnx').onclick = closeNode;
+}
+function selectNode(id, focus) {
+  G.sel = id;
+  const n = G.nodes.find((x) => x.id === id);
+  paintNodeList(); paintNodeCard();
+  $('topclist')?.querySelector(`[data-node="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' });
+  if (globe) {
+    globeLayers();
+    const s = n && nodeSpot(n);
+    if (focus && s) { G.spin = false; globe.controls().autoRotate = false; $('glrot')?.setAttribute('aria-pressed', 'false'); globe.pointOfView({ ...s, altitude: 1.4 }, motionReduce() ? 0 : 700); }
+  }
+  if (focus && globeMobile()) document.querySelector('.globe')?.scrollIntoView({ block: 'nearest', behavior: motionReduce() ? 'auto' : 'smooth' });
+}
+function closeNode() {
+  G.sel = null;
+  const card = $('gnode'); if (card) card.hidden = true;
+  paintNodeList();
+  if (globe) globeLayers();
 }
 function placeCalls() {
   const host = $('gcalls'), lead = $('glead');
@@ -1526,9 +1572,11 @@ function placeCalls() {
   };
   const items = [];
   if (G.home && face(G.home.lat, G.home.lng)) items.push({ ...G.home, label: 'YOUR NODE', home: true });
-  for (const [cc, count] of [...G.peers.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)) {
-    const s = spot(cc);
-    if (s && face(s.lat, s.lng)) items.push({ ...s, label: `${cc} · ${count}`, home: false });
+  const near = G.nodes.filter((n) => n.id === G.sel).concat(G.nodes.filter((n) => n.id !== G.sel));
+  for (const n of near) {
+    if (items.length >= 7) break;
+    const s = nodeSpot(n);
+    if (s && face(s.lat, s.lng)) items.push({ ...s, label: n.city || n.cc || 'peer', home: false });
   }
   const key = items.map((it) => it.label).join('|');
   if (key !== callKey) {
@@ -1603,12 +1651,12 @@ function wireGlobeTools() {
   callRAF = requestAnimationFrame(callTick);
 }
 function elReady() { document.querySelector('.globe')?.classList.add('ready'); }
-// Peer countries that are not the node's own country: an arc needs two different points.
+// Every located peer that is not at the node's own spot: an arc needs two different points.
 function arcSpots() {
   if (!G.home) return [];
   const out = [];
-  for (const cc of G.peers.keys()) {
-    const s = spot(cc);
+  for (const n of G.nodes) {
+    const s = nodeSpot(n);
     if (s && (Math.abs(s.lat - G.home.lat) > 0.4 || Math.abs(s.lng - G.home.lng) > 0.4)) out.push(s);
   }
   return out;
@@ -2925,8 +2973,9 @@ const pages = {
           <button type="button" id="glrec" aria-label="Recenter">◎</button>
         </div>
         <div class="event" id="gevent"></div>
-        <div class="legend">Countries of peers connected to this explorer's node · one vantage point, country level only · not miner or user locations</div></div>
-      <div class="card" id="topc"><h2>Top countries</h2><div class="bars" id="topclist"><p class="muted">Loading peer countries…</p></div></div>
+        <div class="gnode" id="gnode" hidden role="dialog" aria-label="Peer node details"></div>
+        <div class="legend">Peers of this explorer's node only · approximate city from GeoIP, addresses masked · not miners or users</div></div>
+      <div class="card" id="topc"><h2>Connected nodes <small class="muted">tap to focus</small></h2><div class="gnlist" id="topclist"><p class="muted">Loading peers…</p></div></div>
       ${exploreCard(demo)}
       ${promoHtml}
       ${strip}

@@ -596,6 +596,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /@keyframes promocrwl/);
   assert.match(homeHtml, /class="metapill"/);
   assert.match(homeHtml, /id="topclist"/);
+  assert.match(homeHtml, /Connected nodes/);
+  assert.match(homeHtml, /id="gnode"/);
+  assert.match(homeHtml, /Peers of this explorer's node only · approximate city/);
+  assert.doesNotMatch(homeHtml, /Top countries/);
   assert.match(homeHtml, /aria-label="Zoom in"/);
   assert.match(homeHtml, /YOUR NODE/);
   assert.match(homeHtml, /id="pxspark"/);
@@ -613,7 +617,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /arcDashAnimateTime/);
   assert.match(homeHtml, /1Y/);
   assert.doesNotMatch(homeHtml, /mined more than half/);
-  assert.match(homeHtml, /Countries of peers connected to this explorer's node/);
+  assert.doesNotMatch(homeHtml, /Countries of peers connected to this explorer's node/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
   assert.match(homeHtml, /Promote ⚡/);
   assert.match(homeHtml, /id="sortpop"/);
@@ -643,7 +647,7 @@ test('indexer + api', async (t) => {
   assert.strictEqual(big.result[0].creation_id, '9223372036854775807');
 
   // Peer map: only established connections on the P2P port with public IPs count.
-  const { peerIps } = require('./server.js');
+  const { peerIps, peerConns, maskIp } = require('./server.js');
   const procNet = [
     '  sl  local_address rem_address   st',
     '   0: 0100007F:2580 0100007F:9C40 01', // loopback: private
@@ -654,6 +658,9 @@ test('indexer + api', async (t) => {
     '   5: 00000000000000000000000000000000:2580 0000000000000000FFFF00000A0B0C0D:C351 01', // v4-mapped v6
   ].join('\n');
   assert.deepStrictEqual(peerIps(procNet).sort(), ['1.1.1.1', '13.12.11.10', '8.8.8.8']);
+  assert.ok(peerConns(procNet).every((c) => typeof c.inbound === 'boolean'));
+  assert.strictEqual(maskIp('203.0.113.9'), '203.•.•.•');
+  assert.strictEqual(maskIp('2001:0db8:0000:0000:0000:0000:0000:0001'), '2001:•••');
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);

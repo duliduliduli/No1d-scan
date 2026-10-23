@@ -4,6 +4,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { zstdCompressSync, zstdDecompressSync } = require('node:zlib');
 
@@ -639,13 +640,17 @@ async function pollPriceHistory() {
   if (h.status === 'rejected' && d.status === 'rejected') throw h.reason;
 }
 
-// Network map: countries of peers connected to our node right now. The node has no peer-list RPC, so we read
-// established TCP connections on the P2P port from /proc/net (world-readable). Only country codes and counts
-// leave the server; peer IPs stay in this process's memory.
+// Network map: every peer connected to our node right now, placed at its approximate city. The node has no
+// peer-list RPC, so we read established TCP connections on the P2P port from /proc/net (world-readable) and look
+// each IP up once (ip-api.com batch, cached in memory). Full IPs never leave this process: the API sends a salted
+// id, a masked address (first octet / first group only), city-level location, ASN/provider, direction and
+// when we first saw the connection. Country counts stay for older clients.
 const P2P_PORT = Number(process.env.P2P_PORT || 9600);
-const geo = new Map(); // ip -> ISO country code
+const geo = new Map(); // ip -> { cc, country, region, city, lat, lon, asn, provider } | null
+const firstSeen = new Map(); // ip -> ms we first saw the connection (cleared when it drops)
 const seen = new Map(); // country -> last time a peer was there (for the 24 h view)
-const network = { node_country: null, peers: [], countries_24h: [], updated: null };
+const SALT = crypto.randomBytes(16);
+const network = { node_country: null, node: null, peers: [], nodes: [], countries_24h: [], updated: null };
 function hexIp(h) {
   const b = Buffer.from(h, 'hex');
   for (let i = 0; i < b.length; i += 4) b.subarray(i, i + 4).reverse(); // /proc/net stores 32-bit words little-endian
@@ -655,36 +660,69 @@ function hexIp(h) {
 }
 const isPublic = (ip) => !/^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip)
   && !/^(0000:){7}000[01]$|^f[cde]/.test(ip);
-// Lines of /proc/net/tcp{,6} -> public remote IPs of ESTABLISHED connections on the P2P port (either side).
-function peerIps(text) {
-  const ips = new Set();
+// Lines of /proc/net/tcp{,6} -> [{ ip, inbound }] for public ESTABLISHED connections on the P2P port (either side).
+function peerConns(text) {
+  const out = new Map();
   for (const line of text.split('\n')) {
     const [, local, remote, st] = line.trim().split(/\s+/);
     if (st !== '01' || !remote?.includes(':')) continue;
     const [rh, rp] = remote.split(':');
-    if (parseInt(local.split(':')[1], 16) !== P2P_PORT && parseInt(rp, 16) !== P2P_PORT) continue;
+    const inbound = parseInt(local.split(':')[1], 16) === P2P_PORT;
+    if (!inbound && parseInt(rp, 16) !== P2P_PORT) continue;
     const ip = hexIp(rh);
-    if (isPublic(ip)) ips.add(ip);
+    if (isPublic(ip) && !out.has(ip)) out.set(ip, { ip, inbound });
   }
-  return [...ips];
+  return [...out.values()];
 }
-const countryOf = async (ip = '') => {
-  const r = await fetch(`https://api.country.is/${ip}`, { signal: AbortSignal.timeout(8_000) });
-  return r.ok ? (await r.json()).country : null;
-};
+const peerIps = (text) => peerConns(text).map((c) => c.ip);
+const maskIp = (ip) => (ip.includes('.') ? `${ip.split('.')[0]}.•.•.•` : `${ip.split(':')[0]}:•••`);
+const nodeId = (ip) => crypto.createHmac('sha256', SALT).update(ip).digest('hex').slice(0, 10);
+const GEO_FIELDS = 'status,country,countryCode,regionName,city,lat,lon,isp,org,as,query';
+const geoRow = (r) => (r?.status === 'success' ? {
+  cc: r.countryCode, country: r.country, region: r.regionName || null, city: r.city || null,
+  lat: Math.round(r.lat * 100) / 100, lon: Math.round(r.lon * 100) / 100, // ~1 km: city level, not a street
+  asn: (r.as || '').split(' ')[0] || null, provider: r.org || r.isp || null,
+} : null);
+async function geoLookup(ips) {
+  const todo = ips.filter((ip) => !geo.has(ip)).slice(0, 100);
+  if (!todo.length) return;
+  const r = await fetch(`http://ip-api.com/batch?fields=${GEO_FIELDS}`, { method: 'POST', body: JSON.stringify(todo), signal: AbortSignal.timeout(10_000) });
+  if (!r.ok) return;
+  for (const row of await r.json()) geo.set(row.query, geoRow(row));
+}
+async function selfGeo() {
+  const r = await fetch(`http://ip-api.com/json/?fields=${GEO_FIELDS}`, { signal: AbortSignal.timeout(8_000) });
+  return r.ok ? geoRow(await r.json()) : null;
+}
 async function pollNetwork() {
-  network.node_country ??= await countryOf().catch(() => null);
-  const text = ['/proc/net/tcp', '/proc/net/tcp6'].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
-  const counts = {};
-  for (const ip of peerIps(text)) {
-    if (!geo.has(ip)) geo.set(ip, await countryOf(ip).catch(() => null));
-    const c = geo.get(ip);
-    if (c) { counts[c] = (counts[c] || 0) + 1; seen.set(c, Date.now()); }
+  if (!network.node) {
+    const me = await selfGeo().catch(() => null);
+    if (me) network.node = { city: me.city, region: me.region, country: me.country, cc: me.cc, lat: me.lat, lon: me.lon };
+    network.node_country = me?.cc ?? network.node_country;
   }
-  for (const [c, t] of seen) if (t < Date.now() - 86400_000) seen.delete(c);
+  const text = ['/proc/net/tcp', '/proc/net/tcp6'].map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
+  const conns = peerConns(text);
+  await geoLookup(conns.map((c) => c.ip)).catch(() => {});
+  const now = Date.now();
+  const live = new Set(conns.map((c) => c.ip));
+  for (const ip of firstSeen.keys()) if (!live.has(ip)) firstSeen.delete(ip);
+  const counts = {};
+  const nodes = [];
+  for (const { ip, inbound } of conns) {
+    if (!firstSeen.has(ip)) firstSeen.set(ip, now);
+    const g = geo.get(ip);
+    if (g?.cc) { counts[g.cc] = (counts[g.cc] || 0) + 1; seen.set(g.cc, now); }
+    nodes.push({
+      id: nodeId(ip), ip: maskIp(ip), direction: inbound ? 'inbound' : 'outbound', since: firstSeen.get(ip),
+      city: g?.city ?? null, region: g?.region ?? null, country: g?.country ?? null, cc: g?.cc ?? null,
+      lat: g?.lat ?? null, lon: g?.lon ?? null, asn: g?.asn ?? null, provider: g?.provider ?? null,
+    });
+  }
+  for (const [c, t] of seen) if (t < now - 86400_000) seen.delete(c);
+  network.nodes = nodes.sort((a, b) => (a.country || '~').localeCompare(b.country || '~') || (a.city || '').localeCompare(b.city || '') || a.since - b.since);
   network.peers = Object.entries(counts).map(([country, count]) => ({ country, count })).sort((a, b) => b.count - a.count);
   network.countries_24h = [...seen.keys()];
-  network.updated = Date.now();
+  network.updated = now;
 }
 
 // Live State sweep: every funded slot via batched getSlot (~2 min for 2^24 slots on the node), aggregated by owner.
@@ -1529,4 +1567,4 @@ if (require.main === module) {
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance, nearestUsd, usdBalance };
+module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, peerConns, maskIp, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance, nearestUsd, usdBalance };
