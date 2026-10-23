@@ -178,11 +178,11 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       const t = q.byDust.get(value % 10000);
       if (!t || t.created > s.first_seen) continue;
       if (tip - s.height < CONFIRMATIONS) { q.setSeen.run('confirming', t.id, ref); continue; }
-      if (t.purpose === 'profile') {
+      if (t.purpose === 'profile' || t.purpose === 'boost') {
         try {
           tx(() => {
             if (q.claimTopup.run(ref, t.id).changes !== 1) throw new Error('order already paid');
-            if (!profiles?.markPaid(t.subject, ref, t.account)) throw new Error('profile was not waiting for payment');
+            if (!orderMarkPaid(t.purpose, t.subject, ref, t.account)) throw new Error(`${t.purpose} was not waiting for payment`);
             q.setSeen.run('credited', t.id, ref);
           });
         } catch (e) {
@@ -247,12 +247,96 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (s.currency === 'usd' && Number(s.amount_total) === usd * 100) profiles.markPaid(s.metadata.profile_id, `stripe:${s.id}`, s.client_reference_id);
       return { received: true };
     }
+    if (s?.metadata?.kind === 'boost' && ['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s.payment_status === 'paid') {
+      const row = boosts?.ownedUnpaid(s.client_reference_id, s.metadata.boost_id);
+      if (row && s.currency === 'usd' && Number(s.amount_total) === row.usdc * 100) boosts.markPaid(row.id, `stripe:${s.id}`, s.client_reference_id);
+      return { received: true };
+    }
     // Credits come from what Stripe says was paid, never from anything the buyer could have touched.
     const credits = s?.currency === 'usd' ? Math.round((Number(s.amount_total) / 100) * CREDITS_PER_USD) : 0;
     if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s?.payment_status === 'paid' && credits > 0 && q.byId.get(s.client_reference_id)) {
       credit(s.client_reference_id, credits, `Card top-up ($${(s.amount_total / 100).toFixed(2)})`, `stripe:${s.id}`);
     }
     return { received: true };
+  }
+
+  const orderMarkPaid = (purpose, subject, ref, account) => (purpose === 'boost' ? boosts?.markPaid(subject, ref, account) : profiles?.markPaid(subject, ref, account));
+
+  // Card checkout for a Promote order (profile or boost). Same Stripe account and key as credits; nothing in the
+  // Stripe dashboard changes. The signed webhook marks the order paid; it still waits for admin approval.
+  async function orderCheckout(acct, { kind, id, usd, name, back }) {
+    if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
+    const form = new URLSearchParams({
+      mode: 'payment',
+      'line_items[0][quantity]': '1',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][unit_amount]': String(usd * 100),
+      'line_items[0][price_data][product_data][name]': name,
+      client_reference_id: acct.id,
+      'metadata[kind]': kind,
+      [`metadata[${kind}_id]`]: id,
+      success_url: `${SITE}${back}${back.includes('?') ? '&' : '?'}${kind === 'boost' ? 'promote' : 'enhance'}=paid`,
+      cancel_url: `${SITE}${back}`,
+    });
+    const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+      method: 'POST', body: form, signal: AbortSignal.timeout(15_000),
+      headers: { authorization: `Bearer ${STRIPE.key}`, 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const sess = await r.json();
+    if (!r.ok) throw bad(`card payment unavailable: ${sess.error?.message || r.status}`, 502);
+    return { url: sess.url, usd, [`${kind}_id`]: id };
+  }
+
+  // NOID quote for a Promote order: a unique amount (last 4 digits) on PAY_ADDRESS, settled by the chain watcher
+  // or at once by a pasted payment receipt (POST order-receipt).
+  function noidOrder(acct, usd, purpose, subject) {
+    const NOID = noid();
+    if (!NOID) throw bad(process.env.PAY_ADDRESS ? `NOID payments are paused: ${priceNow().paused}. Try again in a few minutes.` : 'NOID payments are not enabled right now', 503);
+    if (q.openTopups.get().n >= 1000) throw bad('too many open payments, try again later', 503);
+    const base = Math.round((usd / NOID.usdPerNoid) * 1e6);
+    for (let i = 0; i < 5; i++) {
+      const id = randomBytes(6).toString('hex');
+      const amount = base + randomInt(1, 10_000);
+      try {
+        db.prepare('insert into noid_topups (id, account, amount, credits, created, dust, purpose, subject) values (?, ?, ?, 0, ?, ? % 10000, ?, ?)').run(id, acct.id, amount, Date.now(), amount, purpose, subject);
+      } catch { continue; }
+      db.prepare('update noid_topups set height = ? where id = ?').run(tipNow(), id);
+      return { ...routes['GET topup'](acct, null, id), [`${purpose}_id`]: subject, usd, kind: purpose, method: 'noid' };
+    }
+    throw bad('could not allocate a payment amount, try again', 503);
+  }
+
+  // A pasted payment receipt (paranoid_verifyReceipt) settles a NOID order without waiting for the watcher.
+  // The receipt must be valid on the canonical chain, CONFIRMATIONS deep, and pay PAY_ADDRESS at least the quote.
+  // The receipt's txid becomes the order's paid_ref (unique), so one payment can never pay two orders.
+  async function orderReceipt(acct, body) {
+    if (!acct) throw bad('missing or unknown API key', 401);
+    const t = q.topup.get(String(body?.order || ''));
+    const meta = t && db.prepare('select purpose, subject from noid_topups where id = ?').get(t.id);
+    if (!t || t.account !== acct.id || !['profile', 'boost'].includes(meta?.purpose)) return null;
+    if (t.paid_ref) return { status: 'paid', order: t.id, kind: meta.purpose };
+    const hex = typeof body?.receipt === 'string' ? body.receipt.replace(/\s+/g, '') : '';
+    if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 || hex.length > 262144) throw bad('paste the payment receipt as hex');
+    const r = await rpc('verifyReceipt', [hex], 20_000);
+    const sum = r?.authenticated_summary;
+    if (!r || !r.merkle_valid || !r.canonical || !r.confirmed || !sum?.txid) throw bad(`receipt did not verify${r?.error ? `: ${r.error}` : ''}`);
+    const paid = (sum.outputs || []).filter((o) => o.owner === process.env.PAY_ADDRESS).reduce((a, o) => a + Number(o.amount_micronoid || 0), 0);
+    if (paid < t.amount) throw bad(`receipt pays ${(paid / 1e6).toFixed(6)} NOID to the site address; the order needs ${(t.amount / 1e6).toFixed(6)}`);
+    const tip = tipNow();
+    const h = Number(sum.claimed_height);
+    if (!Number.isFinite(h) || tip == null || tip - h < CONFIRMATIONS) {
+      return { status: 'confirming', order: t.id, confirmations: { have: Math.max(0, (tip ?? h) - h), need: CONFIRMATIONS } };
+    }
+    const ref = `noid:rcpt:${sum.txid}`;
+    try {
+      tx(() => {
+        if (q.claimTopup.run(ref, t.id).changes !== 1) throw new Error('order already paid');
+        if (!orderMarkPaid(meta.purpose, meta.subject, ref, t.account)) throw new Error(`${meta.purpose} was not waiting for payment`);
+      });
+    } catch (e) {
+      throw bad(String(e.message).includes('UNIQUE') ? 'that receipt already paid another order' : e.message, 409);
+    }
+    return { status: 'paid', order: t.id, kind: meta.purpose, txid: sum.txid, note: 'Paid. It stays hidden until an admin approves it.' };
   }
 
   const pricing = () => ({
@@ -305,6 +389,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (!row) return null;
       const usd = profiles.priceUsd();
       if (body.method === 'usdc') return usdcPay.quote(acct, row.id, null, body.chain);
+      if (body.method === 'card' && body.page === 'promote') return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/promote' });
+      if (body.method === 'noid' && body.page === 'promote') return noidOrder(acct, usd, 'profile', row.id);
       if (body.method === 'card') {
         if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
         const form = new URLSearchParams({
@@ -352,9 +438,12 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (!acct) throw bad('missing or unknown API key', 401);
       const row = boosts?.ownedUnpaid(acct.id, body?.id);
       if (!row) return null;
-      if (body?.method && body.method !== 'usdc') throw bad('promoted slots are paid in USDC');
+      if (body?.method === 'card') return orderCheckout(acct, { kind: 'boost', id: row.id, usd: row.usdc, name: `Promoted slot (${row.pack}) for ${row.asset_id}`, back: typeof body.back === 'string' && /^\/[A-Za-z0-9/_:%?=&.-]{0,200}$/.test(body.back) ? body.back : '/promote' });
+      if (body?.method === 'noid') return noidOrder(acct, row.usdc, 'boost', row.id);
+      if (body?.method && body.method !== 'usdc') throw bad('method must be usdc, card, or noid');
       return usdcPay.quote(acct, row.id, row.usdc, body.chain);
     },
+    'POST order-receipt': (acct, body) => orderReceipt(acct, body),
     'GET boost': (acct, _, id) => boosts ? boosts.view(acct, id) : null,
     'GET profile': (acct, _, id) => profiles ? profiles.view(acct, id) : null,
     'GET usdc-order': (acct, _, id) => usdcPay.view(acct, id),
@@ -362,6 +451,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (!acct) throw bad('missing or unknown API key', 401);
       const usd = Number(body.usd);
       if (!PACKS_USD.includes(usd)) throw bad(`amount must be one of ${PACKS_USD.join(', ')} USD`);
+      if (body.method === 'card' && body.page === 'promote') return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/promote' });
+      if (body.method === 'noid' && body.page === 'promote') return noidOrder(acct, usd, 'profile', row.id);
       if (body.method === 'card') {
         if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
         return stripeCheckout(acct, usd);

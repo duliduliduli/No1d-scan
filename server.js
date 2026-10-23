@@ -751,6 +751,9 @@ const boosts = require('./boosts.js')(db, (kind, id, demo) => {
   const t = assets.token(id, params)?.token;
   return t ? { id: t.id, name: t.name, ticker: t.ticker, kind: 'token', price_micronoid: t.price_micronoid, price_usd: t.price_usd, change: t.change ? { '24h': t.change['24h'] } : null } : null;
 });
+profiles.setFallback({ extras: (id) => boosts.extrasFor(id), banner: (id) => boosts.banner(id), adminBanner: (id) => boosts.adminBanner(id) });
+const intents = require('./intent.js')(rpc, () => indexer.tip);
+const withIntent = (out) => { if (out?.swap) out.swap = { ...out.swap, intent: intents.info() }; return out; };
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip, profiles, boosts);
 
 // One quick_check at startup (DB_QUICK_CHECK=0 skips it). Logs either way; never rewrites the file.
@@ -1256,7 +1259,7 @@ const routes = {
 
   // Routes must return a promise: the handler shares in-flight calls with .finally.
   tokens: async (...a) => payChains(profiles.decorate(await assets.tokens(...a))),
-  token: async (...a) => payChains(profiles.decorate(await assets.token(...a))),
+  token: async (...a) => withIntent(payChains(profiles.decorate(await assets.token(...a)))),
   wallet: async (id, params) => {
     const w = await assets.wallet(id, params);
     if (Array.isArray(w?.balance_points)) w.usd_points = usdBalance(w.balance_points);
@@ -1271,7 +1274,7 @@ const routes = {
     page.usdc_chains = bill.usdcChains();
     return page;
   },
-  swap: async (...a) => assets.swap(...a),
+  swap: async (id, params, ...rest) => (id === 'intent' ? intents.prepare(params) : assets.swap(id, params, ...rest)),
 
   async search(_, params) {
     const s = (params.get('q') || '').trim().toLowerCase();
@@ -1296,7 +1299,7 @@ setInterval(() => hits.clear(), 60_000).unref();
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
 const cache = new Map();
 const inflight = new Map();
-const PARAMS = ['before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids', 'asset',
+const PARAMS = ['min_out', 'before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids', 'asset',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
   'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
@@ -1376,6 +1379,17 @@ async function handle(req, res) {
       res.writeHead(200, { 'content-type': img.type, 'cache-control': 'private, max-age=60', 'x-content-type-options': 'nosniff', 'access-control-allow-origin': '*' });
       return res.end(img.bytes);
     }
+    // Promote page: one order for an Enhanced profile or a promoted slot (with optional banner, website and X).
+    // Anyone with an API key can buy for any token. Every order waits for admin approval before it shows.
+    if (name === 'promote' && req.method === 'POST') {
+      if (!acct) return send(401, { error: 'missing or unknown API key' });
+      const body = parseJson(await readBody(req, 3_000_000));
+      if (body.product === 'enhanced') return send(200, { product: 'enhanced', ...profiles.create(acct, body) }, { 'cache-control': 'no-store' });
+      if (body.product !== 'boost') return send(400, { error: 'product must be enhanced or boost' });
+      const made = boosts.create(acct, { kind: 'token', asset_id: body.token_id, pack: body.pack }, profiles.extras(body));
+      return send(200, { product: 'boost', ...made }, { 'cache-control': 'no-store' });
+    }
+    if (name === 'swap-submit' && req.method === 'POST') return send(200, await intents.submit(parseJson(await readBody(req, 300_000))), { 'cache-control': 'no-store' });
     if (name === 'profile' && req.method === 'POST') {
       if (!acct) return send(401, { error: 'missing or unknown API key' });
       return send(200, profiles.create(acct, parseJson(await readBody(req, 3_000_000))), { 'cache-control': 'no-store' });

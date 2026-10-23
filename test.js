@@ -546,8 +546,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Before you sign/);
   assert.match(homeHtml, /never holds your wallet/);
   assert.match(homeHtml, /off until v2\.1/);
-  assert.match(homeHtml, /pill enh/);
-  assert.match(homeHtml, /Enhanced Token Info/);
+  assert.match(homeHtml, /aria-label="Paid promotion">⚡/);
+  assert.doesNotMatch(homeHtml, /pill enh|>Enhanced<|Duli Media/);
+  assert.match(homeHtml, /async promote\(\)/);
+  assert.match(homeHtml, /href="\/promote" data-link/);
   assert.match(homeHtml, /data-enh="usdc"/);
   assert.match(homeHtml, /id="book"/);
   assert.match(homeHtml, /Derived from pool reserves/);
@@ -586,7 +588,7 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /Recommended/);
   assert.doesNotMatch(homeHtml, /featured pick/i);
   assert.doesNotMatch(homeHtml, /\bendorsed\b/i);
-  assert.match(homeHtml, />Promoted</);
+  assert.match(homeHtml, /Promoted/);
   assert.match(homeHtml, /Paid promotion\. Not a recommendation or endorsement by NOID Scan\./);
   assert.match(homeHtml, /data-boost=/);
   assert.match(homeHtml, /id="promotion"/);
@@ -613,7 +615,7 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /mined more than half/);
   assert.match(homeHtml, /Countries of peers connected to this explorer's node/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
-  assert.match(homeHtml, /Get Enhanced/);
+  assert.match(homeHtml, /Promote ⚡/);
   assert.match(homeHtml, /id="sortpop"/);
   assert.match(homeHtml, /id="listbar"/);
   assert.match(homeHtml, /aria-label="USDC chain"/);

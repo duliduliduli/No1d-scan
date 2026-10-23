@@ -195,6 +195,19 @@
   .metapill .arr { font-size:9px; line-height:1 }
   .promorow .pcard .pill.promo { margin:0 0 2px }
   .paidnote, .paidnote a { text-transform:none; letter-spacing:0; font:12px/1.4 var(--mono); color:var(--muted) }
+  #promote form { display:flex; flex-direction:column; gap:6px; min-width:0 }
+  #promote label { display:block; margin:8px 0 0; color:var(--muted); font:12px var(--mono) }
+  #promote input:not([type=radio]), #promote textarea { width:100%; box-sizing:border-box; display:block; min-width:0; margin-top:4px }
+  #promote fieldset { border:1px solid var(--line); margin:8px 0 0; padding:8px; min-width:0 }
+  #promote .opt { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; color:var(--fg) }
+  #promote .opt input { width:auto; display:inline }
+  .pmhits { display:flex; flex-direction:column; gap:4px; min-width:0 }
+  .pmhit { display:grid; grid-template-columns:auto auto minmax(0,1fr) auto; gap:8px; align-items:center; text-align:left; min-width:0; width:100% }
+  .pmpay { display:flex; gap:8px; flex-wrap:wrap } .pmpay button { flex:1 1 140px }
+  .ell { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom }
+  pre.ell { display:block; white-space:pre; overflow-x:auto }
+  #swintent input { width:100%; box-sizing:border-box; margin-top:6px }
+  #swintentout .kvl span { min-width:0; overflow:hidden; text-overflow:ellipsis }
   .banner { display:block; width:100%; aspect-ratio:3/1; max-height:220px; object-fit:cover; border:1px solid var(--line); border-radius:4px; margin:0 0 12px }
   .enhdesc, .enhlinks { margin:8px 0 0; font:13px/1.45 var(--mono) }
   .enhlinks a { margin-right:8px }
@@ -606,6 +619,7 @@
     <button id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="menunav">☰</button>
     <nav id="menunav">
       <a href="/explore" data-link>Explore tokens</a>
+      <a href="/promote" data-link>Promote <span aria-hidden="true">⚡</span></a>
       <a href="/" data-link>Overview &amp; live stats</a>
       <a href="/blocks/latest" data-link>All blocks</a>
       <a href="/mempool" data-link>Mempool &amp; fees</a>
@@ -1815,15 +1829,16 @@ function starBtn(id, name) {
 }
 let promoIds = new Set();
 const PAID = 'Paid promotion. Not a recommendation or endorsement by NOID Scan.';
-const enhBadge = (t) => t?.enhanced ? `<span class="pill enh" title="${esc(PAID)}">Enhanced</span>` : '';
-const promoBadge = () => `<span class="pill promo" title="${esc(PAID)}">Promoted</span>`;
-const paidMarks = (t) => [enhBadge(t), promoIds.has(t?.id) ? promoBadge() : ''].filter(Boolean).join(' ');
+// Paid placements carry one lightning bolt and nothing else; the disclosure is in the tooltip and /terms.
+const boltMark = () => `<span class="bolt" title="${esc(PAID)}" aria-label="Paid promotion">⚡</span>`;
+const enhBadge = (t) => t?.enhanced ? boltMark() : '';
+const promoBadge = () => boltMark();
+const paidMarks = (t) => (t?.enhanced || promoIds.has(t?.id) ? boltMark() : '');
 // shortcut: the screener row uses one bolt. The 1 is a live boost until the API sends a count.
 const listBolt = (t) => {
   const promo = promoIds.has(t?.id), enh = !!t?.enhanced;
   if (!promo && !enh) return '';
-  const kind = [promo && 'Promoted', enh && 'Enhanced'].filter(Boolean).join(' · ');
-  return `<span class="bolt" title="${esc(kind)}. ${esc(PAID)}" aria-label="${esc(kind)}">⚡${promo ? ' 1' : ''}</span>`;
+  return `<span class="bolt" title="${esc(PAID)}" aria-label="Paid promotion">⚡</span>`;
 };
 const httpsLink = (url, label) => url && /^https:\/\//.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : '';
 const sprout = () => '<svg class="sprout" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14V7M8 7C8 4 5 3 3 4c2 2 3 3 5 3zm0 0c0-3 3-5 5-3-2 2-3 3-5 3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
@@ -2027,7 +2042,7 @@ function promoSection(promo, plain) {
       : demoHref('/token/' + encodeURIComponent(b.asset_id));
     const sub = a.ticker ? esc(a.ticker) : (a.floor_micronoid != null ? `${esc(fmtNoid(a.floor_micronoid))} floor` : '');
     const name = `<b>${esc(a.name || b.asset_id)}</b>${sub ? `<small>${sub}</small>` : ''}`;
-    if (!plain) return `<a class="pcard" href="${href}" data-link>${promoBadge()}${name} ${enhBadge(a)}<span class="muted">until ${esc(when(b.until))}</span></a>`;
+    if (!plain) return `<a class="pcard" href="${href}" data-link>${promoBadge()}${name} <span class="muted">until ${esc(when(b.until))}</span></a>`;
     const ticker = a.ticker || a.name || b.asset_id;
     const px = a.price_usd != null ? subUsd(a.price_usd) : (a.floor_usd != null ? subUsd(a.floor_usd) : null);
     const ch = a.change?.['24h'];
@@ -2036,7 +2051,7 @@ function promoSection(promo, plain) {
   }).join('');
   const crawl = 'PROMOTED  '.repeat(24);
   if (plain) return `<section class="promo" aria-label="Promoted"><div class="promohead crawl"><div class="crawltrack"><span>${crawl}</span><span>${crawl}</span></div></div><div class="promobar">${cards}</div></section>`;
-  return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted <small>paid slots</small></h2><a class="getenh" href="/terms#promotion" data-link>Get Enhanced</a></div><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
+  return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted <small>paid slots</small></h2><a class="getenh" href="/promote" data-link>Promote ⚡</a></div><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
 }
 async function loadPromo(tab, demo, gen) {
   const box = $('promobox');
@@ -2295,6 +2310,11 @@ async function mountSwap(d, id) {
       <p class="fee" id="swfee">Fee ${esc(feePct)}% of the NOID side. The total below is what you pay or receive before you sign.</p>
       <div class="kvl" id="swquote" aria-live="polite"><small>Quote</small><span class="muted">Updating…</span></div>
       <button type="button" id="swsign" disabled style="margin-top:12px;width:100%">${d.demo ? 'Demo · cannot submit' : 'Sign in wallet'}</button>
+      ${d.swap?.intent?.enabled ? `<div class="intent" id="swintent">
+        <p class="fine">Native trade intent (Parano1d v2.1). ${d.swap.intent.active ? 'Live on chain.' : `Activates at block ${esc(n0(d.swap.intent.activation_height))}${d.swap.intent.blocks_left != null ? ` · ${esc(n0(d.swap.intent.blocks_left))} blocks to go` : ''}. Until then demo pages return a mock and the node refuses real intents.`}</p>
+        <input id="swsender" placeholder="Your o1… address" aria-label="Your wallet address" autocomplete="off" spellcheck="false">
+        <button type="button" id="swbuild" style="margin-top:8px;width:100%">Build unsigned intent</button>
+        <div id="swintentout" aria-live="polite"></div></div>` : ''}
       <div class="risk" role="note"><b>Before you sign</b><ul>
         <li>You can lose the full amount. A token price can go to zero.</li>
         <li>The fee and the total above are the amounts you are agreeing to. This site cannot reverse a trade.</li>
@@ -2386,6 +2406,34 @@ async function mountSwap(d, id) {
       $('swquote').insertAdjacentHTML('beforeend', `<small>Submitted</small><span>${esc(res?.txid || 'signed in your wallet')}</span>`);
     } catch (e) { $('swquote').insertAdjacentHTML('beforeend', `<small>Wallet</small><span class="down">${esc(e.message)}</span>`); $('swsign').disabled = false; }
   };
+  if ($('swbuild')) {
+    if (WalletDex.ready()) WalletDex.account().then((a) => { if ($('swsender') && !$('swsender').value) $('swsender').value = a; }).catch(() => {});
+    $('swbuild').onclick = async () => {
+      const out = $('swintentout');
+      const sender = $('swsender').value.trim();
+      const amount = $('swamt').value.trim();
+      const slip = slipValue();
+      if (!/^o1[02-9ac-hj-np-z]{6,120}$/.test(sender)) { out.innerHTML = '<p class="msg err">Enter your o1… address. The intent is built for it, unsigned.</p>'; return; }
+      if (!slip) { out.innerHTML = '<p class="msg err">Fix the slippage first.</p>'; return; }
+      $('swbuild').disabled = true;
+      try {
+        const it = await api(`swap/intent?token=${encodeURIComponent(id)}&side=${side}&amount=${encodeURIComponent(amount)}&slippage=${encodeURIComponent(slip)}&sender=${encodeURIComponent(sender)}${d.demo ? '&demo=1' : ''}`);
+        const hex = it.unsigned || '';
+        out.innerHTML = `<div class="kvl"><small>Intent</small><span class="mono ell" title="${esc(hex)}">${esc(short(hex, 10, 8))} ${hex ? copyBtn(hex) : ''}</span>
+          <small>Sender</small><span class="mono ell">${esc(short(sender))}</span>
+          <small>Action</small><span>${it.request.buy ? 'Buy' : 'Sell'} · ${esc(it.request.buy ? fmtNoid(it.request.gross_input) : `${Number(it.request.gross_input).toLocaleString()} ${d.token.ticker}`)} · ${esc(String(it.request.slippage_bps / 100))}% max slippage</span>
+          <small>Status</small><span>${it.mock ? '<span class="warn">Mock · cannot be signed</span>' : 'Unsigned · sign in your wallet'}</span></div>
+          <p class="fine">${esc(it.note)}</p>
+          ${!it.mock && WalletDex.ready() ? '<button type="button" id="swintentsign" style="width:100%">Sign &amp; submit in wallet</button>' : ''}
+          <details class="fine"><summary>Submit a signed intent yourself</summary><p>Send the signed hex to a Parano1d node:</p><pre class="mono ell">${esc(it.submit_rpc)}</pre></details>`;
+        if ($('swintentsign')) $('swintentsign').onclick = async () => {
+          try { const res = await WalletDex.signAndSubmit(hex, { intent: it.request }); out.insertAdjacentHTML('beforeend', `<p class="msg">Submitted ${esc(short(res?.txid || ''))}</p>`); }
+          catch (e) { out.insertAdjacentHTML('beforeend', `<p class="msg err">${esc(e.message)}</p>`); }
+        };
+      } catch (e) { out.innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
+      $('swbuild').disabled = false;
+    };
+  }
   refresh();
 }
 function fileB64(file) {
@@ -2406,7 +2454,7 @@ function enhanceCard(d, demo) {
   const note = demo
     ? '<p class="fine">Sample page. Payment is not taken.</p>'
     : '<p class="fine">Log in with the API key from API &amp; Credits. USDC is watched on chain. Card and NOID also work. The profile stays hidden until an admin approves it.</p>';
-  return `<div class="card" id="enhform"><h2>Enhanced Token Info <small>${usdc} USDC</small></h2>
+  return `<div class="card" id="enhform"><h2>Promoted listing <span aria-hidden="true">⚡</span> <small>${usdc} USD</small></h2>
     <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
     <p>A banner, an icon, a short description, and https links for a website and X. Unpaid profiles show none of these.</p>
     ${note}
@@ -3328,7 +3376,7 @@ const pages = {
     ]);
     const t = d.token;
     const livePromo = (promo.boosts || [])[0];
-    const tradeOn = !!(d.demo || d.swap?.live);
+    const tradeOn = !!(d.demo || d.swap?.live || d.swap?.intent?.enabled);
     const e = t.enhanced;
     const links = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join(' · ') : '';
     const linkBtns = e ? [httpsLink(e.website, 'Website'), httpsLink(e.twitter, 'X')].filter(Boolean).join('') : '';
@@ -3368,7 +3416,7 @@ const pages = {
         </div>
       </div>
       <div class="split pair"><div>
-        <div class="card paircard"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${enhBadge(t)} ${livePromo ? promoBadge() : ''} ${launchHtml(t)}</h2>
+        <div class="card paircard"><div class="who">${logoHtml(t)}<div><h2 style="margin:0;border:0;background:none;padding:0">${esc(t.name)} <small>${esc(t.ticker)}</small> ${t.enhanced || livePromo ? boltMark() : ''} ${launchHtml(t)}</h2>
           ${e?.description ? `<p class="enhdesc">${esc(e.description)}</p>` : ''}
           ${links ? `<p class="enhlinks">${links}</p>` : ''}
           <b class="big" style="color:var(--fg)">${esc(fmtNoid(t.price_micronoid))}</b> <span class="muted">${esc(t.price_usd == null ? '' : usd4(t.price_usd))}</span>
@@ -3399,7 +3447,7 @@ const pages = {
       </div><div class="sidecol">
         ${tradeOn ? '<div id="swappane"></div>' : tradeLocked(d.swap)}
         ${boostCard('token', t.id, promo, demo)}
-        ${e ? '' : enhanceCard(d, demo)}
+        ${e && e.source !== 'promote' ? '' : enhanceCard(d, demo)}
         ${warns}
         <div class="card"><h2>Stats</h2><div class="kvl">
           <small>Price</small><span>${esc(fmtNoid(t.price_micronoid))}${t.price_usd == null ? '' : ` <span class="muted">${esc(usd4(t.price_usd))}</span>`}</span>
@@ -4055,6 +4103,121 @@ const pages = {
     const proto = data.protocol ? `<p class="fine">${data.protocol.active ? 'Calls are active on the next block.' : 'Calls are not active on the next block.'}${data.protocol.activation_height != null ? ` Activation height ${n0(data.protocol.activation_height)}.` : ''}${data.protocol.abi_version != null ? ` ABI ${esc(data.protocol.abi_version)}.` : ''}</p>` : '';
     app.innerHTML = `<div class="card"><h2>Contracts</h2><p class="muted">${esc(note)}</p>${proto}</div>${lists}<div class="tpls">${cards}</div>`;
   },
+  async promote() {
+    const params = new URLSearchParams(location.search);
+    const demo = params.get('demo') === '1';
+    const dq = demo ? '&demo=1' : '';
+    const [pricing, promo] = await Promise.all([
+      api('pricing').catch(() => ({})),
+      api('boosts?kind=token' + dq).catch(() => ({ packs: [] })),
+    ]);
+    const usd = Number(pricing.enhanced_profile_usdc || 100);
+    const packs = promo.packs || [];
+    const back = params.get('promote') === 'paid' || params.get('enhance') === 'paid'
+      ? '<p class="msg">If the card payment completed, your order is in review. Nothing shows until it is approved.</p>' : '';
+    app.innerHTML = `${back}<div class="card" id="promote"><h2>Promote <span aria-hidden="true">⚡</span> <small>native tokens</small></h2>
+      <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
+      <p class="fine">Anyone can promote any token. Every order is reviewed before it goes live. A paid order unlocks a banner, a website and an X link on the token page; tokens without one show no banner at all.</p>
+      <form id="promoform" autocomplete="off">
+        <label>Token <span class="muted">ticker, name or id</span><input name="q" id="pmq" placeholder="Search tokens" spellcheck="false"></label>
+        <div id="pmhits" class="pmhits"></div>
+        <p id="pmpick" class="pmpick muted">No token picked.</p>
+        <fieldset class="pmprod"><legend>Product</legend>
+          <label class="opt"><input type="radio" name="product" value="enhanced" checked> <b>Promoted listing</b> <span class="muted">${usd} USD · one-time · icon, description, banner, links</span></label>
+          ${packs.map((p) => `<label class="opt"><input type="radio" name="product" value="boost:${esc(p.id)}"> <b>Boost ${esc(p.label)}</b> <span class="muted">${p.usdc} USD · promoted slot · optional banner and links</span></label>`).join('')}
+        </fieldset>
+        <div id="pmenh">
+          <label>Description<textarea name="description" maxlength="200" placeholder="Up to 200 characters"></textarea></label>
+          <label>Icon <span class="muted">PNG, JPG or WebP · 512×512 max · 256 KB</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp"></label>
+        </div>
+        <label>Banner <span class="muted">PNG, JPG or WebP · 1500×500 max · under 1 MB</span><input name="banner" type="file" accept="image/png,image/jpeg,image/webp"></label>
+        <label>Website<input name="website" inputmode="url" placeholder="https://example.com"></label>
+        <label>X<input name="twitter" inputmode="url" placeholder="https://x.com/name"></label>
+        <p class="fee" id="pmtotal"></p>
+        <div class="row pmpay"><button type="button" data-pay="noid">Pay with NOID</button><button type="button" data-pay="card"${pricing.card ? '' : ' disabled title="Card payments are not active yet"'}>Pay by card</button></div>
+        <p class="fine">${demo ? 'Sample page. Payment is not taken.' : myKey() ? 'Logged in with your API key.' : 'Log in on <a href="/account" data-link>API &amp; Credits</a> first; your key ties the order to you.'}</p>
+        <div id="pmmsg" aria-live="polite"></div>
+      </form></div>`;
+    const form = $('promoform');
+    let pick = null;
+    const productNow = () => form.querySelector('input[name="product"]:checked')?.value || 'enhanced';
+    const paint = () => {
+      const p = productNow();
+      $('pmenh').hidden = p !== 'enhanced';
+      const price = p === 'enhanced' ? usd : (packs.find((x) => 'boost:' + x.id === p)?.usdc ?? 0);
+      const noidPx = pricing.noid?.usd_per_noid;
+      $('pmtotal').textContent = `Total ${price} USD${noidPx ? ` · about ${(price / noidPx).toLocaleString(undefined, { maximumFractionDigits: 2 })} NOID` : ''}. Shown only after approval.`;
+    };
+    form.addEventListener('change', paint);
+    paint();
+    const hits = $('pmhits');
+    const search = async () => {
+      const qv = $('pmq').value.trim();
+      if (!qv) { hits.innerHTML = ''; return; }
+      try {
+        const r = await api(`tokens?q=${encodeURIComponent(qv)}&limit=8${dq}`);
+        hits.innerHTML = (r.tokens || []).slice(0, 8).map((t) => `<button type="button" class="pmhit" data-id="${esc(t.id)}" data-name="${esc(t.name)}" data-ticker="${esc(t.ticker)}">${logoHtml(t)}<b>${esc(t.ticker)}</b><span class="ell">${esc(t.name)}</span><span class="mono ell muted">${esc(short(t.id))}</span></button>`).join('')
+          || '<p class="muted">No token matches.</p>';
+      } catch (e) { hits.innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
+    };
+    $('pmq').addEventListener('input', () => { clearTimeout($('pmq')._t); $('pmq')._t = setTimeout(search, 250); });
+    hits.onclick = (e) => {
+      const b = e.target.closest('.pmhit');
+      if (!b) return;
+      pick = { id: b.dataset.id, name: b.dataset.name, ticker: b.dataset.ticker };
+      $('pmpick').innerHTML = `Picked <b>${esc(pick.ticker)}</b> <span class="ell">${esc(pick.name)}</span> <span class="mono ell muted">${esc(short(pick.id))}</span>`;
+      hits.innerHTML = '';
+    };
+    if (params.get('token')) { $('pmq').value = params.get('token'); search(); }
+    form.addEventListener('click', async (e) => {
+      const b = e.target.closest('button[data-pay]');
+      if (!b) return;
+      const msg = $('pmmsg');
+      if (demo) { msg.innerHTML = '<p class="msg">Sample page. Payment is not taken.</p>'; return; }
+      if (!myKey()) { msg.innerHTML = '<p class="msg err">Log in with the API key from API &amp; Credits, then pay.</p>'; return; }
+      if (!pick) { msg.innerHTML = '<p class="msg err">Pick a token first.</p>'; return; }
+      const p = productNow();
+      const icon = form.icon.files[0], banner = form.banner.files[0];
+      if (p === 'enhanced' && (!String(form.description.value).trim() || !icon || !banner)) { msg.innerHTML = '<p class="msg err">A promoted listing needs a description, an icon and a banner.</p>'; return; }
+      if ((icon && icon.size > 256_000) || (banner && banner.size > 1_000_000)) { msg.innerHTML = '<p class="msg err">Icon must be under 256 KB and the banner under 1 MB.</p>'; return; }
+      b.disabled = true;
+      try {
+        const body = { product: p === 'enhanced' ? 'enhanced' : 'boost', token_id: pick.id, website: form.website.value, twitter: form.twitter.value };
+        if (p === 'enhanced') Object.assign(body, { description: form.description.value, icon: await fileB64(icon), banner: await fileB64(banner) });
+        else Object.assign(body, { pack: p.slice(6), banner: banner ? await fileB64(banner) : undefined });
+        const made = await api('promote', body);
+        const pay = made.product === 'enhanced'
+          ? await api('profile-pay', { id: made.id, method: b.dataset.pay, page: 'promote' })
+          : await api('boost-pay', { id: made.id, method: b.dataset.pay, back: '/promote' });
+        if (pay.url) { location.href = pay.url; return; }
+        msg.innerHTML = `<div class="kvl"><small>Send exactly</small><span><b>${esc(pay.amount_noid)} NOID</b> ${copyBtn(pay.amount_noid)}</span>
+          <small>To</small><span class="mono ell" title="${esc(pay.address)}">${esc(short(pay.address, 10, 8))} ${copyBtn(pay.address)}</span>
+          <small>Order</small><span class="mono">${esc(pay.id)}</span></div>
+          <p class="fine">The last digits identify your order. This page watches the address, or paste your payment receipt (<span class="mono">parano1d-cli receipt &lt;txid&gt;</span>) to verify it now. It stays hidden until it is approved.</p>
+          <label>Payment receipt<textarea id="pmrcpt" placeholder="Receipt hex" spellcheck="false"></textarea></label>
+          <button type="button" id="pmverify">Verify receipt</button><div id="pmrmsg"></div>`;
+        $('pmverify').onclick = async () => {
+          try {
+            const r = await api('order-receipt', { order: pay.id, receipt: $('pmrcpt').value });
+            $('pmrmsg').innerHTML = r.status === 'paid' ? '<p class="msg">Payment verified. Your order is in the review queue.</p>'
+              : `<p class="msg">Receipt is valid. Waiting for confirmations: ${esc(String(r.confirmations?.have ?? 0))}/${esc(String(r.confirmations?.need ?? ''))}. Try again shortly.</p>`;
+          } catch (err) { $('pmrmsg').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; }
+        };
+        clearInterval(usdcTimer);
+        usdcTimer = setInterval(async () => {
+          try {
+            const st = await api('topup/' + pay.id);
+            if (st?.status !== 'paid' || !$('pmrmsg')) return;
+            clearInterval(usdcTimer);
+            $('pmrmsg').innerHTML = '<p class="msg">Payment confirmed on chain. Your order is in the review queue.</p>';
+          } catch {}
+        }, 10_000);
+      } catch (err) {
+        msg.innerHTML = `<p class="msg err">${esc(err.message)}</p>`;
+        b.disabled = false;
+      }
+    });
+  },
   async admin() {
     app.innerHTML = `<div class="card" id="admin"><h2>Profile review</h2>
       <p class="muted">Pending enhanced profiles and promoted slots. This page is not linked from the public site.</p>
@@ -4075,7 +4238,9 @@ const pages = {
       const waiting = data.boosts || [];
       if (!pending.length && !waiting.length) { $('adminq').innerHTML = '<p class="muted">Nothing waiting.</p>'; return; }
       const boostCards = waiting.map((p) => `<article class="card" data-id="${esc(p.id)}" data-kind="boost">
-        <h2>${esc(p.asset_id)} ${promoBadge()} <small>${esc(p.kind)} · ${esc(p.pack)} · ${p.usdc} USDC</small></h2>
+        <h2>${esc(p.asset_id)} ${promoBadge()} <small>${esc(p.kind)} · ${esc(p.pack)} · ${p.usdc} USD</small></h2>
+        ${p.has_banner ? '<img class="banner" alt="" data-kind="banner">' : ''}
+        ${p.website || p.twitter ? `<p>${httpsLink(p.website, p.website || '')} ${p.twitter ? '· ' + httpsLink(p.twitter, 'X') : ''}</p>` : ''}
         <p class="paidnote">${esc(PAID)}</p>
         <div class="row"><button type="button" data-act="approve">Approve</button><button type="button" data-act="reject">Reject</button></div>
       </article>`).join('');
@@ -4158,7 +4323,7 @@ async function render() {
   alerts?.classList.toggle('on', type === 'alerts');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    const named = ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin'];
+    const named = ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote'];
     document.body.classList.toggle('pair', type === 'token' || type === 'collection');
     if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
     await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());

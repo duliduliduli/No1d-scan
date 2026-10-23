@@ -68,7 +68,15 @@ function demoProfile(id) {
   };
 }
 
-module.exports = function profiles(db) {
+// Optional extras sent with a promoted slot from the Promote page: banner, website and X. All optional.
+function extras(body) {
+  const website = httpsUrl(body?.website, 'website');
+  const twitter = httpsUrl(body?.twitter, 'X');
+  const banner = body?.banner ? images.prepare(b64(body.banner, 'banner'), 'banner') : null;
+  return website || twitter || banner ? { website, twitter, banner } : null;
+}
+
+module.exports = function profiles(db, fallback = null) {
   db.exec(`
     create table if not exists token_profiles (
       id text primary key, token_id text not null, account text not null,
@@ -175,7 +183,13 @@ module.exports = function profiles(db) {
     const apply = (t) => {
       if (!t?.id) return t;
       const e = demo ? demoProfile(t.id) : rows.find((r) => r.token_id === t.id);
-      if (!e) return { ...t, enhanced: null };
+      if (!e) {
+        // A live promoted slot bought with extras shows its banner and links, nothing else. No row, no banner.
+        const x = !demo && fallback?.extras?.(t.id);
+        if (!x) return { ...t, enhanced: null };
+        return { ...t, enhanced: { description: null, website: x.website, twitter: x.twitter, icon: null,
+          banner: x.banner ? `/api/profile-media/${encodeURIComponent(t.id)}/banner` : null, source: 'promote' } };
+      }
       const full = demo ? e : {
         description: e.description, website: e.website, twitter: e.twitter,
         icon: `/api/profile-media/${encodeURIComponent(t.id)}/icon`,
@@ -199,15 +213,16 @@ module.exports = function profiles(db) {
       return { bytes: demoBytes(kind), type: 'image/png' };
     }
     const row = q.pubImg.get(tokenId);
-    if (!row) return null;
+    if (!row) return kind === 'banner' ? fallback?.banner?.(tokenId) ?? null : null;
     return kind === 'icon' ? { bytes: row.icon, type: row.icon_type } : { bytes: row.banner, type: row.banner_type };
   }
   function adminImage(id, kind) {
     if (kind !== 'icon' && kind !== 'banner') return null;
     const row = q.anyImg.get(id || '');
-    if (!row) return null;
+    if (!row) return kind === 'banner' ? fallback?.adminBanner?.(id) ?? null : null;
     return kind === 'icon' ? { bytes: row.icon, type: row.icon_type } : { bytes: row.banner, type: row.banner_type };
   }
 
-  return { create, ownedUnpaid, markPaid, view, adminOk, adminList, review, decorate, image, adminImage, priceUsd, priceUsdc };
+  const setFallback = (f) => { fallback = f; bust(); };
+  return { extras, setFallback, create, ownedUnpaid, markPaid, view, adminOk, adminList, review, decorate, image, adminImage, priceUsd, priceUsdc };
 };
