@@ -1356,7 +1356,6 @@ function exploreShell(tab, params) {
   const sortMenu = picks.map(([v, l]) => `<button type="button" role="menuitem" data-pick="${esc(v)}" class="${v === curPick ? 'on' : ''}">${esc(l)}</button>`).join('');
   const curLabel = picks.find(([v]) => v === curPick)?.[1] || 'Sort';
   return `${tabs('extab', [['tokens', 'Tokens'], ['nfts', 'NFTs']], tab)}
-    <p class="mob mobmeta" id="mobmeta"></p>
     <div class="mob grid tiles3" id="mobtiles"></div>
     ${tab === 'tokens' ? '<p class="muted desknote" style="margin:8px 0 0">Auto-refresh 15s · volume, txns and makers follow the window above</p>' : ''}
     <div id="exbanner"></div><div id="promobox"></div>
@@ -1414,7 +1413,7 @@ function syncExploreUrl() {
   for (const input of document.querySelectorAll('#excard [data-f]')) if (input.value.trim()) next.set(input.dataset.f, input.value.trim());
   history.replaceState(null, '', location.pathname + (next.toString() ? '?' + next : ''));
 }
-function promoSection(promo) {
+function promoSection(promo, plain) {
   const rows = promo?.boosts || [];
   if (!rows.length) return '';
   const cards = rows.map((b) => {
@@ -1423,8 +1422,12 @@ function promoSection(promo) {
       ? demoHref('/collection/' + encodeURIComponent(b.asset_id))
       : demoHref('/token/' + encodeURIComponent(b.asset_id));
     const sub = a.ticker ? esc(a.ticker) : (a.floor_micronoid != null ? `${esc(fmtNoid(a.floor_micronoid))} floor` : '');
-    return `<a class="pcard" href="${href}" data-link>${promoBadge()}<b>${esc(a.name || b.asset_id)}</b> ${enhBadge(a)}<small>${sub}</small><span class="muted">until ${esc(when(b.until))}</span></a>`;
+    const name = `<b>${esc(a.name || b.asset_id)}</b>${sub ? `<small>${sub}</small>` : ''}`;
+    return plain
+      ? `<a class="pcard" href="${href}" data-link>${name}</a>`
+      : `<a class="pcard" href="${href}" data-link>${promoBadge()}${name} ${enhBadge(a)}<span class="muted">until ${esc(when(b.until))}</span></a>`;
   }).join('');
+  if (plain) return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted</h2></div><div class="promorow">${cards}</div></section>`;
   return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted <small>paid slots</small></h2><a class="getenh" href="/terms#promotion" data-link>Get Enhanced</a></div><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
 }
 async function loadPromo(tab, demo, gen) {
@@ -1436,7 +1439,7 @@ async function loadPromo(tab, demo, gen) {
     const promo = await api('boosts?' + q.toString());
     if (gen !== exGen) return;
     promoIds = new Set((promo.boosts || []).map((b) => b.asset_id));
-    box.innerHTML = promoSection(promo);
+    box.innerHTML = promoSection(promo, true);
   } catch {
     if (gen !== exGen) return;
     promoIds = new Set();
@@ -1456,7 +1459,6 @@ async function fillExplore() {
     if (gen !== exGen || !$('exlist')) return;
     const ids = [...starSet()];
     if (!ids.length) {
-      if ($('exbanner')) $('exbanner').innerHTML = params.get('demo') === '1' ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>` : '';
       $('listbar').hidden = false;
       $('exlist').removeAttribute('aria-busy');
       $('exlist').innerHTML = `<div class="empty"><b>Nothing starred</b><p class="muted">Star a token or collection to pin it here. ${myKey() ? 'Stars are saved on your account.' : 'They stay in this browser until you log in, then they save to your account.'}</p></div>`;
@@ -1468,7 +1470,7 @@ async function fillExplore() {
   if (gen !== exGen || !$('exlist')) return;
   const bare = ![...params.keys()].some((k) => !['tab', 'demo'].includes(k));
   const rows = tab === 'nfts' ? data.collections : data.tokens;
-  $('exbanner').innerHTML = data.demo ? `<p class="demo-banner">Sample data for layout preview. These rows are not on chain. Tokens coming with v2.1.</p>` : '';
+  if ($('exbanner')) $('exbanner').innerHTML = '';
   if (!data.demo && !data.live && !rows.length && bare) {
     $('listbar').hidden = true;
     $('exlist').removeAttribute('aria-busy');
@@ -1504,8 +1506,6 @@ function paintMobChrome(rows, data, tab, params) {
     else if (!preset && data.sort === 'volume' && data.dir !== 'asc') on = 'volume';
   }
   document.querySelectorAll('[data-tabs="mobtab"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === on));
-  const label = on === 'trending' ? 'Trending' : on === 'new' ? 'New' : on === 'volume' ? 'Top volume' : (data.sort || 'List');
-  if ($('mobmeta')) $('mobmeta').textContent = `${n0(data.count)} ${tab === 'nfts' ? 'collections' : 'tokens'} · ${label}${tab === 'tokens' ? ' · ' + win : ''}`;
   if ($('mobtiles')) {
     const full = data.count === rows.length;
     const volUsd = rows.reduce((s, r) => s + (Number(r.volume_usd) || 0), 0);
