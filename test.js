@@ -529,6 +529,9 @@ test('indexer + api', async (t) => {
   assert.match(await js.text(), /LightweightCharts/);
   const homeHtml = await (await fetch(base + '/')).text();
   assert.match(homeHtml, /Watchlist/);
+  assert.match(homeHtml, /class="alertbtn"/);
+  assert.match(homeHtml, /safe-area-inset-bottom/);
+  assert.doesNotMatch(homeHtml, /bottom:\s*56px/);
   assert.match(homeHtml, /data-star/);
   assert.match(homeHtml, /1W/);
   assert.match(homeHtml, /tokenchart/);

@@ -318,11 +318,10 @@
   .tile small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.06em; text-transform:uppercase }
   .tile b { display:block; font:700 14px var(--mono); overflow-wrap:anywhere }
   .mobmeta { margin:0 0 8px; color:var(--muted); font:12px var(--mono) }
-  .pairnav, .dock { position:fixed; left:0; right:0; z-index:30; background:var(--card); border-top:1px solid var(--line) }
-  .pairnav { bottom:56px; gap:6px; padding:8px 10px; align-items:center }
+  .pairnav { gap:6px; padding:4px 0 0; margin:0 0 8px; align-items:center; border-bottom:1px solid var(--line) }
   .mobfilters { position:relative; z-index:8; gap:6px; align-items:center }
-  .mobfilters select, .mobfilters button, .pairnav button { flex:1 }
-  .dock { bottom:0; justify-content:space-around; padding:6px 4px 8px }
+  .mobfilters select, .mobfilters button, .pairnav button { flex:1; min-width:0 }
+  .dock { position:fixed; left:0; right:0; bottom:0; z-index:30; background:var(--card); border-top:1px solid var(--line); justify-content:space-around; padding:6px 4px calc(8px + env(safe-area-inset-bottom, 0px)) }
   .dock a, .dock button { flex:1; border:0; background:none; color:var(--muted); font:600 10px var(--mono); letter-spacing:.04em; text-align:center; padding:4px 2px; box-shadow:none }
   .dock a.on, .dock button.on, .pairnav button.on { color:var(--accent) }
   .pairtools { display:flex; gap:8px; align-items:center }
@@ -343,6 +342,9 @@
   .splitbar .track > span { display:block; height:100%; background:var(--accent) }
   .pairactions { grid-template-columns:1fr 1fr; gap:8px; margin:10px 0 }
   .pairactions .tradebtn { grid-column:1 / -1 }
+  .pairactions button, .pairactions a.alertbtn { width:100%; min-height:40px; display:flex; align-items:center; justify-content:center; text-align:center }
+  .pairactions a.alertbtn { padding:9px 14px; border:1px solid var(--accent); border-radius:0; background:transparent; color:var(--accent); font:700 12px system-ui, sans-serif; letter-spacing:.01em; text-transform:none }
+  .pairactions a.alertbtn:hover { text-shadow:none }
   .infolist { border-top:1px solid var(--line) }
   .infolist div { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); font:13px var(--mono) }
   .infolist small { color:var(--muted) }
@@ -356,8 +358,7 @@
     .mob { display:block }
     .mob.flex { display:flex }
     .mob.grid { display:grid }
-    body { padding-bottom:76px }
-    body.widepage { padding-bottom:76px }
+    body, body.widepage { padding-bottom:calc(36px + env(safe-area-inset-bottom, 0px)) }
     #exsort, #exwin, [data-tabs="preset"], .desknote, .deskbit, .paircard { display:none }
     #extools .filters { display:none }
     #extools .filters.open { display:block }
@@ -366,9 +367,10 @@
     body.pair main { display:flex; flex-direction:column }
     body.pair .pairtools { order:0 }
     body.pair .idline { order:1 }
-    body.pair .banner { order:2 }
-    body.pair .pane-info { order:3 }
-    body.pair .split { order:4 }
+    body.pair .pairnav { order:2; margin-left:-12px; margin-right:-12px; padding-left:10px; padding-right:10px }
+    body.pair .banner { order:3 }
+    body.pair .pane-info { order:4 }
+    body.pair .split { order:5 }
     body.pair .demo-banner, body.pair .msg { order:-1 }
     body.pair:not([data-pane="info"]) .pane-info,
     body.pair:not([data-pane="info"]) .idline,
@@ -459,6 +461,7 @@
   h2::before { content:none }
   header, footer { border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); background:color-mix(in srgb, var(--card) 72%, transparent); box-shadow:0 0 18px color-mix(in srgb, var(--accent) 12%, transparent) }
   footer { margin-bottom:24px }
+  @media (max-width:899px) { footer { margin-bottom:0 } }
   html, body { overflow-x:clip; max-width:100% }
   #search { width:100% } #search input { width:100%; min-width:0 }
   .livebar { letter-spacing:.08em }
@@ -476,11 +479,15 @@
     background:color-mix(in srgb, var(--bg) 62%, transparent);
     box-shadow:0 0 12px color-mix(in srgb, var(--accent) 10%, transparent);
   }
-  .dock, .pairnav {
+  .dock {
     background:color-mix(in srgb, var(--bg) 86%, transparent);
     border-top:1px solid color-mix(in srgb, var(--accent) 45%, transparent);
     box-shadow:0 -8px 18px color-mix(in srgb, var(--accent) 8%, transparent);
     backdrop-filter:blur(8px);
+  }
+  .pairnav {
+    background:transparent; border:0; border-bottom:1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    box-shadow:none; backdrop-filter:none;
   }
   .listbar {
     background:color-mix(in srgb, var(--bg) 88%, transparent);
@@ -1701,7 +1708,7 @@ function winBox(t, key) {
 }
 function pairActions(id) {
   const on = starSet().has(id);
-  return `<div class="pairactions mob grid"><button type="button" id="watchjump" data-id="${esc(id)}">${on ? 'Watching' : 'Watchlist'}</button><a href="${demoHref('/alerts')}" data-link>Alerts</a><button type="button" id="tradejump" class="tradebtn">Trade</button></div>`;
+  return `<div class="pairactions mob grid"><button type="button" id="watchjump" data-id="${esc(id)}">${on ? 'Watching' : 'Watchlist'}</button><a class="alertbtn" href="${demoHref('/alerts')}" data-link>Alerts</a><button type="button" id="tradejump" class="tradebtn">Trade</button></div>`;
 }
 function pairNav() {
   return `<nav class="pairnav mob flex" aria-label="Pair sections"><button type="button" data-pane-btn="info" class="on">Info</button><button type="button" data-pane-btn="both">Chart+Txns</button><button type="button" data-pane-btn="chart">Chart</button><button type="button" data-pane-btn="tx">Txns</button></nav>`;
