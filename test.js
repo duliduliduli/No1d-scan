@@ -1398,6 +1398,16 @@ test('migrates a text-hash archive and backups round-trip', () => {
   snap.close();
 });
 
+test('the phone menu stays open when the hamburger is the click target', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
+  // Outside-click used to treat the hamburger as outside, so the same tap opened and closed it.
+  assert.match(html, /closest\('#menubtn, #dockmenu, #menu nav button'\)/);
+  assert.match(html, /\.menu nav \{ display:none; pointer-events:none;/);
+  assert.match(html, /\.menu\.open nav \{ display:flex; pointer-events:auto \}/);
+  assert.match(html, /\.menu \{ position:relative; z-index:41;/);
+  assert.match(html, /\.menu > button \{ position:relative; z-index:42;/);
+});
+
 test('a μNOID string with a trailing .0 still renders', () => {
   const html = fs.readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
   const src = html.match(/function microInt\(v\) \{[\s\S]*?\n\}/)[0] + '\n' + html.match(/function noid\(v\) \{[\s\S]*?\n\}/)[0];
