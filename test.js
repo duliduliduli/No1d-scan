@@ -581,6 +581,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="promotion"/);
   assert.match(homeHtml, /aria-label="Promoted"/);
   assert.match(homeHtml, /@keyframes promocrwl/);
+  assert.match(homeHtml, /class="metapill"/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
   assert.match(homeHtml, /Get Enhanced/);
   assert.match(homeHtml, /id="sortpop"/);
@@ -639,6 +640,8 @@ test('indexer + api', async (t) => {
   assert.strictEqual(promoTok.disclaimer, 'Paid promotion. Not a recommendation or endorsement by NOID Scan.');
   assert.doesNotMatch(JSON.stringify(promoTok), /Recommended/);
   assert.ok(promoTok.boosts[0].asset.enhanced);
+  assert.strictEqual(typeof promoTok.boosts[0].asset.price_usd, 'number');
+  assert.strictEqual(typeof promoTok.boosts[0].asset.change['24h'], 'number');
   const [, byFloor] = await get('collections?demo=1&sort=floor&dir=asc');
   assert.notStrictEqual(byFloor.collections[0].id, 'stamps');
   const [, promoNft] = await get('boosts?demo=1&kind=collection');

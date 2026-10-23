@@ -738,10 +738,10 @@ const boosts = require('./boosts.js')(db, (kind, id, demo) => {
   const params = new URLSearchParams(demo ? 'demo=1' : '');
   if (kind === 'collection') {
     const c = assets.collection(id, params)?.collection;
-    return c ? { id: c.id, name: c.name, kind: 'collection', floor_micronoid: c.floor_micronoid } : null;
+    return c ? { id: c.id, name: c.name, kind: 'collection', floor_micronoid: c.floor_micronoid, floor_usd: c.floor_usd } : null;
   }
   const t = assets.token(id, params)?.token;
-  return t ? { id: t.id, name: t.name, ticker: t.ticker, kind: 'token', price_micronoid: t.price_micronoid } : null;
+  return t ? { id: t.id, name: t.name, ticker: t.ticker, kind: 'token', price_micronoid: t.price_micronoid, price_usd: t.price_usd, change: t.change ? { '24h': t.change['24h'] } : null } : null;
 });
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip, profiles, boosts);
 

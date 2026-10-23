@@ -186,6 +186,14 @@
   #boostform { border-color:var(--gold) }
   .promorow { display:flex; gap:8px; overflow:auto; padding:0 12px }
   .promorow .pcard { flex:0 0 200px; display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:10px; border:1px solid color-mix(in srgb, var(--gold) 55%, var(--line)); border-radius:10px; background:color-mix(in srgb, var(--card) 78%, var(--gold)); color:inherit; text-decoration:none }
+  .promobar { display:flex; flex-wrap:nowrap; gap:16px; align-items:center; overflow-x:auto; margin:8px 10px 0; padding:8px 12px; background:var(--bg); border:1px solid var(--line); border-radius:12px; scrollbar-width:none }
+  .promobar::-webkit-scrollbar { display:none }
+  .metapill { display:inline-flex; flex:0 0 auto; align-items:center; gap:6px; color:var(--fg); text-decoration:none; white-space:nowrap }
+  .metapill:hover { text-shadow:none }
+  .metapill .logo { width:22px; height:22px; font-size:9px }
+  .metapill b { font:700 14px system-ui, sans-serif; letter-spacing:0; color:var(--fg) }
+  .metapill .px { color:var(--muted); font:500 13px system-ui, sans-serif; letter-spacing:0 }
+  .metapill .arr { font-size:9px; line-height:1 }
   .promorow .pcard .pill.promo { margin:0 0 2px }
   .paidnote, .paidnote a { text-transform:none; letter-spacing:0; font:12px/1.4 var(--mono); color:var(--muted) }
   .banner { display:block; width:100%; aspect-ratio:3/1; max-height:220px; object-fit:cover; border:1px solid var(--line); border-radius:4px; margin:0 0 12px }
@@ -1428,12 +1436,15 @@ function promoSection(promo, plain) {
       : demoHref('/token/' + encodeURIComponent(b.asset_id));
     const sub = a.ticker ? esc(a.ticker) : (a.floor_micronoid != null ? `${esc(fmtNoid(a.floor_micronoid))} floor` : '');
     const name = `<b>${esc(a.name || b.asset_id)}</b>${sub ? `<small>${sub}</small>` : ''}`;
-    return plain
-      ? `<a class="pcard" href="${href}" data-link>${name}</a>`
-      : `<a class="pcard" href="${href}" data-link>${promoBadge()}${name} ${enhBadge(a)}<span class="muted">until ${esc(when(b.until))}</span></a>`;
+    if (!plain) return `<a class="pcard" href="${href}" data-link>${promoBadge()}${name} ${enhBadge(a)}<span class="muted">until ${esc(when(b.until))}</span></a>`;
+    const ticker = a.ticker || a.name || b.asset_id;
+    const px = a.price_usd != null ? subUsd(a.price_usd) : (a.floor_usd != null ? subUsd(a.floor_usd) : null);
+    const ch = a.change?.['24h'];
+    const arrow = typeof ch === 'number' ? `<span class="arr ${ch >= 0 ? 'up' : 'down'}" aria-hidden="true">${ch >= 0 ? '▲' : '▼'}</span>` : '';
+    return `<a class="metapill" href="${href}" data-link>${logoHtml(a)}<b>${esc(ticker)}</b>${px != null ? `<span class="px">${esc(px)}</span>` : ''}${arrow}</a>`;
   }).join('');
   const crawl = 'PROMOTED  '.repeat(24);
-  if (plain) return `<section class="promo" aria-label="Promoted"><div class="promohead crawl"><div class="crawltrack"><span>${crawl}</span><span>${crawl}</span></div></div><div class="promorow">${cards}</div></section>`;
+  if (plain) return `<section class="promo" aria-label="Promoted"><div class="promohead crawl"><div class="crawltrack"><span>${crawl}</span><span>${crawl}</span></div></div><div class="promobar">${cards}</div></section>`;
   return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted <small>paid slots</small></h2><a class="getenh" href="/terms#promotion" data-link>Get Enhanced</a></div><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
 }
 async function loadPromo(tab, demo, gen) {
