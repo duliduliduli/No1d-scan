@@ -1264,6 +1264,9 @@ function wirePriceBox(name) {
     host.append(box, note);
     const theme = chartTheme();
     const chart = LightweightCharts.createChart(box, theme.options);
+    // The library's default 0.5px minimum bar spacing caps a ~350px phone chart at ~700 points, which pinned
+    // every line window to the last day or so. Let dense windows squeeze in.
+    chart.timeScale().applyOptions({ minBarSpacing: 0.01 });
     box.append(tip);
     const vol = view === 'vol', candles = !vol && mode === 'candles';
     const series = vol
