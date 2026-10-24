@@ -546,8 +546,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Before you sign/);
   assert.match(homeHtml, /never holds your wallet/);
   assert.match(homeHtml, /off until v2\.1/);
-  assert.match(homeHtml, /pill enh/);
-  assert.match(homeHtml, /Enhanced Token Info/);
+  assert.match(homeHtml, /aria-label="Paid promotion">⚡/);
+  assert.doesNotMatch(homeHtml, /pill enh|>Enhanced<|Duli Media/);
+  assert.match(homeHtml, /async promote\(\)/);
+  assert.match(homeHtml, /href="\/promote" data-link/);
   assert.match(homeHtml, /data-enh="usdc"/);
   assert.match(homeHtml, /id="book"/);
   assert.match(homeHtml, /Derived from pool reserves/);
@@ -586,7 +588,7 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /Recommended/);
   assert.doesNotMatch(homeHtml, /featured pick/i);
   assert.doesNotMatch(homeHtml, /\bendorsed\b/i);
-  assert.match(homeHtml, />Promoted</);
+  assert.match(homeHtml, /Promoted/);
   assert.match(homeHtml, /Paid promotion\. Not a recommendation or endorsement by NOID Scan\./);
   assert.match(homeHtml, /data-boost=/);
   assert.match(homeHtml, /id="promotion"/);
@@ -594,8 +596,13 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /@keyframes promocrwl/);
   assert.match(homeHtml, /class="metapill"/);
   assert.match(homeHtml, /id="topclist"/);
+  assert.match(homeHtml, /Connected nodes/);
+  assert.match(homeHtml, /id="gnode"/);
+  assert.match(homeHtml, /Peers connected to NOID Scan's node only · approximate city/);
+  assert.doesNotMatch(homeHtml, /YOUR NODE|Your node/);
+  assert.doesNotMatch(homeHtml, /Top countries|paintTopCountries/);
   assert.match(homeHtml, /aria-label="Zoom in"/);
-  assert.match(homeHtml, /YOUR NODE/);
+  assert.match(homeHtml, /'NOID SCAN'/);
   assert.match(homeHtml, /id="pxspark"/);
   assert.match(homeHtml, /Balance over time/);
   assert.match(homeHtml, /aria-label="Watch"/);
@@ -611,9 +618,9 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /arcDashAnimateTime/);
   assert.match(homeHtml, /1Y/);
   assert.doesNotMatch(homeHtml, /mined more than half/);
-  assert.match(homeHtml, /Countries of peers connected to this explorer's node/);
+  assert.doesNotMatch(homeHtml, /Countries of peers connected to this explorer's node/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
-  assert.match(homeHtml, /Get Enhanced/);
+  assert.match(homeHtml, /Promote ⚡/);
   assert.match(homeHtml, /id="sortpop"/);
   assert.match(homeHtml, /id="listbar"/);
   assert.match(homeHtml, /aria-label="USDC chain"/);
@@ -625,7 +632,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /color-mix\(in srgb, var\(--card\) 97%, transparent\)/);
   assert.match(homeHtml, /id="rcpthex"/);
   assert.match(homeHtml, /verifyReceipt/);
-  assert.match(homeHtml, /aria-label="\$\{esc\(kind\)\}"/);
+  assert.match(homeHtml, /aria-label="Paid promotion"/);
   const tokenCardSrc = homeHtml.slice(homeHtml.indexOf('function tokenCards'), homeHtml.indexOf('function nftTable'));
   assert.match(tokenCardSrc, /listBolt\(t\)/);
   assert.doesNotMatch(tokenCardSrc, /paidMarks|>Enhanced</);
@@ -641,7 +648,7 @@ test('indexer + api', async (t) => {
   assert.strictEqual(big.result[0].creation_id, '9223372036854775807');
 
   // Peer map: only established connections on the P2P port with public IPs count.
-  const { peerIps } = require('./server.js');
+  const { peerIps, peerConns, maskIp } = require('./server.js');
   const procNet = [
     '  sl  local_address rem_address   st',
     '   0: 0100007F:2580 0100007F:9C40 01', // loopback: private
@@ -652,6 +659,9 @@ test('indexer + api', async (t) => {
     '   5: 00000000000000000000000000000000:2580 0000000000000000FFFF00000A0B0C0D:C351 01', // v4-mapped v6
   ].join('\n');
   assert.deepStrictEqual(peerIps(procNet).sort(), ['1.1.1.1', '13.12.11.10', '8.8.8.8']);
+  assert.ok(peerConns(procNet).every((c) => typeof c.inbound === 'boolean'));
+  assert.strictEqual(maskIp('203.0.113.9'), '203.•.•.•');
+  assert.strictEqual(maskIp('2001:0db8:0000:0000:0000:0000:0000:0001'), '2001:•••');
 
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
@@ -830,6 +840,21 @@ test('indexer + api', async (t) => {
 
   // The indexer stores a snapshot once the node answers, and a reorg drops trades above the new tip.
   process.env.ASSET_PROBE_MS = '0';
+  // v2.1.0 nodes have no getAssetSnapshot; sync falls back to paged getNativeCatalog.
+  const seenKinds = [];
+  node.getNativeCatalog = ({ kind, limit, cursor }) => {
+    seenKinds.push(kind);
+    assert.ok(limit >= 1 && limit <= 64, 'node rejects limits outside 1..=64');
+    if (kind === 'markets' && !cursor) return { kind, height: 1, items: [], next: { after_key: 'k1' } };
+    if (kind === 'markets') return { kind, height: 1, items: [{ asset_id: 'ab'.repeat(32), whole_tokens: '100000', reserve_micronoid: '100000000' }], next: null };
+    return { kind, height: 1, items: [], next: null };
+  };
+  await tick();
+  assert.deepStrictEqual([...new Set(seenKinds)].sort(), ['collections', 'markets', 'nft_listings']);
+  const nat = db.prepare('select * from tokens where id = ?').get('ab'.repeat(32));
+  assert.ok(nat && nat.supply === '100000' && nat.ticker === 'ABABABAB', 'a native market is stored from the second catalogue page');
+  db.prepare('delete from tokens where id = ?').run('ab'.repeat(32));
+  delete node.getNativeCatalog;
   node.getAssetSnapshot = () => ({
     tokens: [{ id: 'live1', name: 'Live Coin', ticker: 'LIVE', supply: '1000', reserve_micronoid: '1000000', created_ts: 1700000000, graduated: false, price_micronoid: '1000', curve_target_micronoid: '20000000000', curve_raised_micronoid: '1000000000', holders: [{ address: 'o1acdefghjkmnpqr', balance: '400' }] }],
     trades: [{ txid: 'live1trade01', token_id: 'live1', ts: Math.floor(Date.now() / 1000) - 30, side: 'buy', token_amount: '10', noid_micronoid: '10000', price_micronoid: '1000', venue: 'curve', trader: 'o1acdefghjkmnpqr' }],
@@ -1211,7 +1236,7 @@ test('indexer + api', async (t) => {
     assert.strictEqual(madeBoost.status, 'unpaid');
     const [, colBoost] = await post('boost', { asset_id: 'col1', kind: 'collection', pack: '6h' }, K);
     assert.strictEqual(colBoost.kind, 'collection');
-    assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /USDC/);
+    assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /Card payments are not available/);
     assert.strictEqual((await get('boosts?kind=token&window=poly1'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 128);
     process.env.USDC_POLYGON_CONFIRMATIONS = '5';
     assert.strictEqual((await get('boosts?kind=token&window=poly2'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 5);

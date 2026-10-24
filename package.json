@@ -5,6 +5,6 @@
   "engines": { "node": ">=22.13" },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js",
-    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test.js test-promote.js"
   }
 }

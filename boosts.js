@@ -32,6 +32,8 @@ module.exports = function boosts(db, lookup) {
     create index if not exists boosts_live on boosts(status, ends);
     create index if not exists boosts_asset on boosts(asset_id, status);
   `);
+  // Profile extras bought with a promoted slot (Promote page). Shown only while the slot is live.
+  for (const col of ['website text', 'twitter text', 'banner blob', 'banner_type text']) try { db.exec(`alter table boosts add column ${col}`); } catch {}
   const q = {
     byId: db.prepare('select * from boosts where id = ?'),
     open: db.prepare("select id, account, status from boosts where asset_id = ? and status = ? limit 1"),
@@ -40,7 +42,11 @@ module.exports = function boosts(db, lookup) {
     updateUnpaid: db.prepare("update boosts set pack = ?, usdc = ?, secs = ? where id = ? and account = ? and status = 'unpaid'"),
     pay: db.prepare("update boosts set status = 'pending', pay_ref = ? where id = ? and account = ? and status = 'unpaid'"),
     review: db.prepare('update boosts set status = ?, reviewed = ?, starts = ?, ends = ? where id = ? and status = ?'),
-    pending: db.prepare("select id, asset_id, kind, pack, usdc, secs, created from boosts where status = 'pending'"),
+    pending: db.prepare("select id, asset_id, kind, pack, usdc, secs, created, website, twitter, banner is not null has_banner from boosts where status = 'pending'"),
+    setExtras: db.prepare("update boosts set website = ?, twitter = ?, banner = ?, banner_type = ? where id = ? and status = 'unpaid'"),
+    liveExtras: db.prepare("select website, twitter, banner is not null has_banner from boosts where asset_id = ? and status = 'live' and ends > ? order by ends desc limit 1"),
+    liveBanner: db.prepare("select banner, banner_type from boosts where asset_id = ? and status = 'live' and ends > ? and banner is not null order by ends desc limit 1"),
+    anyBanner: db.prepare('select banner, banner_type from boosts where id = ? and banner is not null'),
     live: db.prepare("select id, asset_id, kind, pack, usdc, ends from boosts where status = 'live' and ends > ? order by ends"),
     expire: db.prepare("update boosts set status = 'expired' where status = 'live' and ends <= ?"),
   };
@@ -80,7 +86,12 @@ module.exports = function boosts(db, lookup) {
     return { ...page, label: 'Promoted', disclaimer: DISCLAIMER, packs: packs() };
   }
 
-  function create(acct, body) {
+  function create(acct, body, extras = null) {
+    const out = createRow(acct, body);
+    if (extras) q.setExtras.run(extras.website ?? null, extras.twitter ?? null, extras.banner?.bytes ?? null, extras.banner?.type ?? null, out.id);
+    return out;
+  }
+  function createRow(acct, body) {
     const kind = body?.kind === 'collection' ? 'collection' : body?.kind === 'token' ? 'token' : '';
     if (!kind || !ID.test(body?.asset_id || '')) throw bad('expected a token or collection id');
     const pack = packs().find((p) => p.id === body.pack);
@@ -135,5 +146,20 @@ module.exports = function boosts(db, lookup) {
     return { id, status, until: ends };
   }
 
-  return { list, create, ownedUnpaid, markPaid, view, adminList, review, packs, disclaimer: DISCLAIMER };
+  // Extras (website, X, banner) for a listing with a live, approved slot; null otherwise.
+  function extrasFor(assetId, now = Date.now()) {
+    const row = q.liveExtras.get(assetId, now);
+    if (!row || (!row.website && !row.twitter && !row.has_banner)) return null;
+    return { website: row.website || null, twitter: row.twitter || null, banner: !!row.has_banner };
+  }
+  function banner(assetId) {
+    const row = q.liveBanner.get(assetId, Date.now());
+    return row ? { bytes: row.banner, type: row.banner_type } : null;
+  }
+  function adminBanner(id) {
+    const row = q.anyBanner.get(id || '');
+    return row ? { bytes: row.banner, type: row.banner_type } : null;
+  }
+
+  return { list, create, extrasFor, banner, adminBanner, ownedUnpaid, markPaid, view, adminList, review, packs, disclaimer: DISCLAIMER };
 };

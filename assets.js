@@ -32,6 +32,19 @@
 //   getNftOrders({collection_id}) -> { listings: [{ price_micronoid, item_id, size }], bids: [...] }
 //     When this method is missing, the book groups listings by price and is labeled floor depth.
 //
+// Parano1d v2.1.0 (shipped) does not have the methods above. It exposes, with object params:
+//   getNativeCatalog({kind: markets|collections|nft_listings, limit: 1..64, cursor?}) -> { height, items[], next }
+//     next is a NativeCatalogCursor; pass it back as cursor for the following page.
+//   getNativeHoldings({owner, limit, cursor?}) -> { holdings[], next }
+//   prepareNativeIntent({owner, request: {action, ...}}) -> unsigned intent + NativeWalletPreview
+//     (quoted_output, minimum_output, network_fee, market_fee, ...). trade takes
+//     {asset_id, buy, gross_input, minimum_output, slippage_bps (u16), valid_until (u16)}.
+//   submitTxIntent({hex}) submits a client-signed intent. This server never calls it.
+// Before activation (block 279,370) catalogues are empty and prepareNativeIntent answers
+// "native operations are not active at the candidate height".
+// When getAssetSnapshot is missing, sync() falls back to the native catalogue, quotes use the
+// local curve/pool formula and build uses prepareNativeIntent (the fee cannot be put in the tx).
+//
 // The fee is a separate output to SWAP_FEE_ADDRESS when buildSwap reports fee_in_tx.
 // Until the node can do that, the quote only itemizes the fee. This process never signs.
 const ADDR = /^o1[02-9ac-hj-np-z]{6,120}$/;
@@ -154,7 +167,7 @@ module.exports = function assets(db, rpc, priceNow) {
   };
 
   // available: getAssetSnapshot has answered. quote/build: swap RPC is present (not merely "method not found").
-  const status = { available: false, quote: false, build: false, orders: false, nftOrders: false, error: null, retryAt: 0, dexProbeAt: 0 };
+  const status = { native: false, available: false, quote: false, build: false, orders: false, nftOrders: false, error: null, retryAt: 0, dexProbeAt: 0 };
 
   const probeWait = () => {
     const n = Number(process.env.ASSET_PROBE_MS ?? 600_000);
@@ -202,7 +215,7 @@ module.exports = function assets(db, rpc, priceNow) {
       ok: process.env.SWAP_ENABLED === 'true' && bpsOk && addrOk,
     };
   };
-  const swapLive = () => feeConfig().ok && status.quote && status.build;
+  const swapLive = () => feeConfig().ok && ((status.quote && status.build) || status.native);
 
   function checkId(id) {
     if (!ID.test(id || '')) throw bad('expected a token or collection id');
@@ -1170,6 +1183,11 @@ module.exports = function assets(db, rpc, priceNow) {
     const now = Math.floor(Date.now() / 1000);
     const row = findPresented(id, demo, now);
     if (!row) return null;
+    if (!demo && !status.quote && status.native) {
+      // v2.1 has no quote RPC; the local formula estimates and prepareNativeIntent returns the node's exact quote.
+      const est = previewQuote(row, side, amount, slip, fee.bps);
+      return est && { ...est, demo: false, signable: true, formula: 'local', note: 'Estimate. The node returns the exact quoted_output and minimum_output when the intent is prepared.' };
+    }
     if (demo || !status.quote) return previewQuote(row, side, amount, slip, fee.bps);
     const body = {
       token_id: id, side, slippage_bps: slip, fee_bps: fee.bps, fee_address: fee.address,
@@ -1211,6 +1229,7 @@ module.exports = function assets(db, rpc, priceNow) {
     const quoted = await quote(params);
     if (!quoted) return null;
     const fee = feeConfig();
+    if (!status.build && status.native) return buildNative(params, quoted, sender);
     const out = await rpc('buildSwap', [{
       token_id: params.get('token'), side: quoted.side, sender,
       slippage_bps: quoted.slippage_bps, fee_bps: fee.bps, fee_address: fee.address,
@@ -1218,6 +1237,68 @@ module.exports = function assets(db, rpc, priceNow) {
     }]);
     if (!out || out.signature || out.signed || out.signed_tx) throw Object.assign(new Error('refusing a signed payload'), { status: 502 });
     return { signable: true, demo: false, unsigned: out.unsigned ?? null, fee_in_tx: out.fee_in_tx === true, draft: quoted.draft };
+  }
+
+  const NATIVE_TTL = 120; // valid_until is a u16 on the node; blocks of validity
+  async function buildNative(params, quoted, sender) {
+    const assetId = params.get('token');
+    const buy = quoted.side === 'buy';
+    const gross = buy ? quoted.in.noid_micronoid : quoted.in.token;
+    const minOut = buy ? quoted.min_out?.token : quoted.min_out?.noid_micronoid;
+    if (!gross) throw bad('missing amount');
+    const out = await rpc('prepareNativeIntent', {
+      owner: sender,
+      request: { action: 'trade', asset_id: assetId, buy, gross_input: String(gross), minimum_output: String(minOut ?? '0'), slippage_bps: quoted.slippage_bps, valid_until: NATIVE_TTL },
+    });
+    if (!out || out.signature || out.signed || out.signed_tx) throw Object.assign(new Error('refusing a signed payload'), { status: 502 });
+    return { signable: true, demo: false, native: true, unsigned: out, fee_in_tx: false, draft: quoted.draft };
+  }
+
+  async function nativePages(kind, maxPages = 20) {
+    const items = [];
+    let cursor = null;
+    for (let i = 0; i < maxPages; i++) {
+      const page = await rpc('getNativeCatalog', { kind, limit: 64, ...(cursor && { cursor }) }, 10_000);
+      if (Array.isArray(page?.items)) items.push(...page.items);
+      if (!page?.next) break;
+      cursor = page.next;
+    }
+    return items;
+  }
+  const pick = (o, ...ks) => { for (const k of ks) if (o?.[k] != null) return o[k]; return null; };
+  // shortcut: catalogue item fields are not documented and are empty until activation; map common names.
+  async function nativeSnapshot() {
+    const [markets, cols, listings] = await Promise.all([nativePages('markets'), nativePages('collections'), nativePages('nft_listings')]);
+    const tokens = [], pools = [];
+    for (const m of markets) {
+      const id = String(pick(m, 'asset_id', 'id', 'market_id') ?? '');
+      if (!id) continue;
+      const meta = m.metadata && typeof m.metadata === 'object' ? m.metadata : {};
+      const short = id.slice(0, 8);
+      tokens.push({
+        id, name: pick(meta, 'name') ?? pick(m, 'name') ?? `Token ${short}`, ticker: pick(meta, 'ticker', 'symbol') ?? pick(m, 'ticker', 'symbol') ?? short.toUpperCase(),
+        creator: pick(m, 'creator', 'owner'), supply: pick(m, 'whole_tokens', 'supply', 'total_supply'),
+        reserve_micronoid: pick(m, 'reserve_micronoid', 'backing_micronoid', 'reserve'), created_height: pick(m, 'created_height', 'height'),
+        logo: pick(meta, 'image', 'logo'), graduated: !!pick(m, 'graduated'), price_micronoid: pick(m, 'price_micronoid', 'spot_price_micronoid'),
+        launch: 'launchpad',
+      });
+      const rt = pick(m, 'pool_reserve_token', 'reserve_token'), rn = pick(m, 'pool_reserve_micronoid', 'reserve_noid_micronoid');
+      if (rt != null && rn != null) pools.push({ id: `${id}:pool`, token_id: id, reserve_token: rt, reserve_noid_micronoid: rn });
+    }
+    const byCol = new Map();
+    for (const L of listings) {
+      const cid = String(pick(L, 'collection_id') ?? '');
+      if (!cid) continue;
+      if (!byCol.has(cid)) byCol.set(cid, []);
+      byCol.get(cid).push({ item_id: String(pick(L, 'serial', 'item_id') ?? ''), price_micronoid: pick(L, 'ask_micronoid', 'price_micronoid'), seller: pick(L, 'seller', 'owner') });
+    }
+    const collections = cols.map((c) => {
+      const id = String(pick(c, 'collection_id', 'id') ?? '');
+      const meta = c.metadata && typeof c.metadata === 'object' ? c.metadata : {};
+      return { id, name: pick(meta, 'name') ?? pick(c, 'name') ?? `Collection ${id.slice(0, 8)}`, creator: pick(c, 'creator'), items: pick(c, 'minted', 'items', 'last_serial') ?? 0,
+        listings: byCol.get(id) || [] };
+    }).filter((c) => c.id);
+    return { tokens, pools, trades: [], collections };
   }
 
   async function swap(id, params) {
@@ -1328,7 +1409,16 @@ module.exports = function assets(db, rpc, priceNow) {
   async function sync() {
     if (!status.available && Date.now() < status.retryAt && probeWait() > 0) return false;
     try {
-      const snap = await rpc('getAssetSnapshot', [], status.available ? 20_000 : 2_000);
+      let snap;
+      try {
+        snap = await rpc('getAssetSnapshot', [], status.available ? 20_000 : 2_000);
+        status.native = false;
+      } catch (e) {
+        if (!missingMethod(e)) throw e;
+        snap = await nativeSnapshot(); // throws "method not found" on pre-2.1 nodes
+        if (!status.native) console.log('assets: using v2.1 native catalogue');
+        status.native = true;
+      }
       const wrote = ingest(snap || {});
       if (!status.available) console.log('assets: node snapshot online');
       status.available = true;
@@ -1340,6 +1430,7 @@ module.exports = function assets(db, rpc, priceNow) {
       const missing = missingMethod(e);
       if (status.available || !missing) console.error('assets:', e.message);
       status.available = false;
+      status.native = false;
       status.quote = false;
       status.build = false;
       status.orders = false;
