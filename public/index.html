@@ -1306,8 +1306,10 @@ function wirePriceBox(name) {
       try {
         const s = span();
         if (s && s < 1e9 && state.bars.length > 1) {
-          const to = state.bars.at(-1).time;
-          chart.timeScale().setVisibleRange({ from: to - s, to });
+          // Logical indices, so the right-edge margin doesn't eat into the window.
+          const from = state.bars.at(-1).time - s, last = state.bars.length - 1;
+          const i = Math.max(0, state.bars.findIndex((b) => b.time >= from));
+          chart.timeScale().setVisibleLogicalRange({ from: Math.min(i, last - 1) - 0.5, to: last + 3 });
         } else chart.timeScale().fitContent();
       } catch {}
       state.quiet--;
