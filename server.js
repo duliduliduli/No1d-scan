@@ -76,6 +76,8 @@ function ensureAux(database) {
       height integer not null, miner text, payout text not null, amount text, primary key (height, payout));
   `);
 }
+// String, not a JS number: sqlite text columns store a number as "5.0", and BigInt rejects that.
+const numCol = (v) => (v == null ? null : String(v));
 function rebuildBlocks(database) {
   const rows = database.prepare('select height, hash, details from blocks').all();
   database.exec(`create table blocks_new (
@@ -88,7 +90,7 @@ function rebuildBlocks(database) {
     try { details = JSON.parse(r.details); } catch {}
     const txs = Array.isArray(details.retained?.transactions) ? details.retained.transactions.length : (details.retained ? 0 : null);
     ins.run(r.height, Buffer.from(String(r.hash), 'hex'), zstdCompressSync(Buffer.from(r.details)), now, details.header?.timestamp ?? null,
-      details.retained?.reward_micronoid ?? null, details.retained?.total_fees_micronoid ?? null, txs);
+      numCol(details.retained?.reward_micronoid), numCol(details.retained?.total_fees_micronoid), txs);
   }
   database.exec('drop index if exists blocks_hash; drop table blocks; alter table blocks_new rename to blocks; create index blocks_hash on blocks(hash)');
 }
@@ -133,7 +135,6 @@ const optBytes = (hex) => {
   return /^[0-9a-f]+$/.test(s) && s.length % 2 === 0 ? Buffer.from(s, 'hex') : null;
 };
 const compressJson = (text) => zstdCompressSync(Buffer.from(text));
-const numCol = (v) => (v == null ? null : String(v));
 
 const q = {
   hashAt: db.prepare('select hash, blob, cold, first_seen from blocks where height = ?'),
