@@ -986,10 +986,10 @@ function chartTheme() {
   const css = getComputedStyle(document.documentElement);
   const pick = (n) => css.getPropertyValue(n).trim();
   const light = document.documentElement.dataset.theme === 'light';
-  const up = light ? '#0d8a54' : '#3ddc97', down = light ? '#c62828' : '#ff6b6b', accent = pick('--accent'), line = pick('--line'), card = pick('--card'), muted = pick('--muted');
+  const up = light ? '#1f9e72' : '#5fe3b0', down = light ? '#c4505c' : '#e0707a', accent = pick('--accent'), line = pick('--line'), card = pick('--card'), muted = pick('--muted');
   return {
     up, down, accent, card,
-    upSoft: alpha(up, .45), downSoft: alpha(down, .45), area: alpha(accent, .28),
+    upSoft: alpha(up, .45), downSoft: alpha(down, .45), upVol: alpha(up, .8), downVol: alpha(down, .8), area: alpha(accent, .28),
     options: {
       layout: { background: { color: card }, textColor: muted, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: line }, horzLines: { color: line } },
@@ -1185,10 +1185,12 @@ function volBars(raw, b) {
   for (const p of raw) {
     if (p.vol == null) continue;
     const t = Math.floor(p.time / b) * b;
-    if (out.at(-1)?.time === t) out.at(-1).value = p.vol;
-    else out.push({ time: t, value: p.vol });
+    const last = out.at(-1);
+    if (last?.time === t) { last.value = p.vol; last.close = p.value; }
+    else out.push({ time: t, value: p.vol, open: last?.close ?? p.value, close: p.value });
   }
-  return out;
+  // Direction: the bucket's last price vs the previous bucket's (or its own first price).
+  return out.map((x) => ({ time: x.time, value: x.value, up: x.close == null || x.open == null || x.close >= x.open }));
 }
 function pxWhen(t, mode, spec) {
   const day = mode === 'candles' && (spec === '1d' || spec === '1w');
@@ -1278,7 +1280,7 @@ function wirePriceBox(name) {
     const byTime = new Map();
     const state = { raw, bars: [], more, approx, next, quiet: 0, loading: false, w: 0, h: 0, dead: false };
     const derive = () => { state.bars = vol ? volBars(state.raw, VOL_BUCKET[spec] || 1800) : state.raw; };
-    const toLw = (b, th) => b.open == null ? { time: b.time, value: b.value } : {
+    const toLw = (b, th) => b.open == null ? { time: b.time, value: b.value, ...(b.up != null && { color: b.up ? th.upVol : th.downVol }) } : {
       time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
       ...(b.approx && { color: b.close >= b.open ? th.upSoft : th.downSoft, wickColor: b.close >= b.open ? th.upSoft : th.downSoft }),
     };
@@ -2792,7 +2794,7 @@ async function openTokenChart(id, demo, tf, opts = {}) {
   const byTime = new Map();
   const state = { bars: page.bars, more: page.more, loading: false, quiet: 0, dead: false, w: 0, h: 0, tf };
   const view = { type: 'candles', sma: false, scale: 0 };
-  const volBar = (b, th) => ({ time: b.time, value: b.vol, color: b.close >= b.open ? th.upSoft : th.downSoft });
+  const volBar = (b, th) => ({ time: b.time, value: b.vol, color: b.close >= b.open ? th.upVol : th.downVol });
   // shortcut: SMA length stays 20. Add a period control if traders ask for more than one average.
   const smaPoints = () => {
     const p = 20, out = [];
