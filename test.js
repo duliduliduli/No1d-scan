@@ -602,7 +602,7 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /YOUR NODE|Your node/);
   assert.doesNotMatch(homeHtml, /Top countries|paintTopCountries/);
   assert.match(homeHtml, /aria-label="Zoom in"/);
-  assert.match(homeHtml, /YOUR NODE/);
+  assert.match(homeHtml, /'NOID SCAN'/);
   assert.match(homeHtml, /id="pxspark"/);
   assert.match(homeHtml, /Balance over time/);
   assert.match(homeHtml, /aria-label="Watch"/);
