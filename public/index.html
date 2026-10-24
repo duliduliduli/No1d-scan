@@ -1417,7 +1417,7 @@ function markNew(tableId, oldTip) {
   for (const tr of document.querySelectorAll(`#${tableId} tr`)) if (Number(tr.cells[0]?.textContent) > oldTip) tr.classList.add('new');
 }
 
-// ---- globe: each peer connected to this explorer's node, at its approximate city (masked IPs, never miner locations)
+// ---- globe: each peer connected to NOID Scan's node, at its approximate city (masked IPs, never miner locations)
 const GLOBE_JS = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js';
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/example/datasets/ne_110m_admin_0_countries.geojson';
 const ISO_FIX = { France: 'FR', Norway: 'NO' }; // Natural Earth leaves these as -99
@@ -1485,7 +1485,7 @@ async function mountGlobe(net) {
     .hexPolygonsData(countries).hexPolygonResolution(3).hexPolygonMargin(0.32)
     .hexPolygonLabel(({ properties: p }) => peerLabel(p.cc, p.ADMIN))
     .pointLat('lat').pointLng('lng').pointAltitude((d) => d.home ? 0.02 : d.sel ? 0.06 : 0.025)
-    .pointLabel((d) => d.home ? `<b>YOUR NODE</b><br>${esc(G.homeName || 'this explorer’s node')}` : `<b>${esc(nodePlace(d.node))}</b><br>${esc(d.node.direction)} · ${esc(d.node.provider || d.node.ip)}`)
+    .pointLabel((d) => d.home ? `<b>NOID SCAN</b><br>${esc(G.homeName || 'NOID Scan’s node')}` : `<b>${esc(nodePlace(d.node))}</b><br>${esc(d.node.direction)} · ${esc(d.node.provider || d.node.ip)}`)
     .onPointClick((d) => (d.home ? globe.pointOfView({ ...G.home, altitude: 1.6 }, motionReduce() ? 0 : 600) : selectNode(d.node.id, true)))
     .pointsMerge(false)
     .ringMaxRadius((r) => (r.burst ? 9 : r.home ? 3.4 : 2.4)).ringPropagationSpeed((r) => (motionReduce() ? 0 : r.burst ? 6 : 1.15)).ringRepeatPeriod((r) => (r.burst ? 9e9 : 1700))
@@ -1574,7 +1574,7 @@ function placeCalls() {
     return Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl) > 0.08;
   };
   const items = [];
-  if (G.home && face(G.home.lat, G.home.lng)) items.push({ ...G.home, label: 'YOUR NODE', home: true });
+  if (G.home && face(G.home.lat, G.home.lng)) items.push({ ...G.home, label: 'NOID SCAN', home: true });
   const near = G.nodes.filter((n) => n.id === G.sel).concat(G.nodes.filter((n) => n.id !== G.sel));
   for (const n of near) {
     if (items.length >= 7) break;
@@ -2977,7 +2977,7 @@ const pages = {
         </div>
         <div class="event" id="gevent"></div>
         <div class="gnode" id="gnode" hidden role="dialog" aria-label="Peer node details"></div>
-        <div class="legend">Peers of this explorer's node only · approximate city from GeoIP, addresses masked · not miners or users</div></div>
+        <div class="legend">Peers connected to NOID Scan's node only · approximate city from GeoIP, addresses masked · not miners or users</div></div>
       <div class="card" id="topc"><h2>Connected nodes <small class="muted">tap to focus</small></h2><div class="gnlist" id="topclist"><p class="muted">Loading peers…</p></div></div>
       ${exploreCard(demo)}
       ${promoHtml}
@@ -3006,7 +3006,7 @@ const pages = {
         ${stat('Total burned', 'burn', esc(s.economics?.burned_micronoid == null ? 'unknown' : noid(s.economics.burned_micronoid)), 'Growth fees marked burned in stored bodies. Unknown until a body includes that field.')}
         ${stat('Next reward step', 'nextrew', esc(s.economics?.blocks_to_next_reward == null ? '1 NOID tail' : n0(s.economics.blocks_to_next_reward)), 'Blocks until the next issuance step.')}
         ${stat('Mempool', 'mp', '…', 'Transactions waiting to be mined, and the minimum fee rate accepted.')}
-        ${stat('Connected peers', 'peers', esc(s.peers), 'Other nodes this explorer’s node is talking to.')}
+        ${stat('Connected peers', 'peers', esc(s.peers), 'Other nodes NOID Scan’s node is talking to.')}
         ${stat('Node status', 'node', esc(s.node.synced ? 'synced' : 'syncing: ' + s.node.sync_stage), 'Whether this explorer has caught up with the network.')}
       </div></div>` : `<div class="card"><h2>Overview</h2>${errp(s0)}</div>`}
       <div class="card"><h2>Network history</h2>${tabs('cwin', WINDOW_TABS, '24h', 'seg')}</div>
