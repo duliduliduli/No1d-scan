@@ -240,6 +240,13 @@
   /* Price */
   .price-head { display:flex; gap:24px; flex-wrap:wrap; align-items:baseline }
   .price-head .big { font:700 30px var(--mono); color:var(--fg) }
+  .price-head .pxslot { display:inline-block; transition:opacity .18s ease, transform .18s ease }
+  .price-head.swapping .pxslot { opacity:0; transform:translateY(6px) scale(.97) }
+  button.stat.pxswap { font:inherit; color:inherit; text-align:left; cursor:pointer; background:transparent; border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius:4px; padding:6px 10px; min-width:0; max-width:100%; text-transform:none; letter-spacing:inherit; box-shadow:none }
+  button.stat.pxswap:hover, button.stat.pxswap:focus-visible { border-color:var(--accent); box-shadow:0 0 10px color-mix(in srgb, var(--accent) 35%, transparent) }
+  button.stat.pxswap small { display:block }
+  button.stat.pxswap br, button.stat.pxswap #pxch { display:none }
+  .price-head .pxhead #pxvol { display:inline-block }
   /* Checkout */
   .delta { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(90px, 100%), 1fr)); gap:8px } .delta div { text-align:center; padding:8px; border:1px solid var(--line); border-radius:4px; min-width:0 } .delta small { display:block; color:var(--muted); font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase } .delta b { font:700 15px var(--mono); overflow-wrap:anywhere }
   .checkout { border:1px solid var(--accent); border-radius:6px; padding:0; overflow:hidden; margin-top:14px; box-shadow:var(--glow) }
@@ -953,7 +960,7 @@ function priceSeries(h, key, height = 170) {
 }
 // Interactive NOID/USD chart (line or candles). TradingView lightweight-charts, vendored: pinch, wheel and drag.
 const CANDLE_TABS = [['15m', '15m'], ['1h', '1h'], ['4h', '4h'], ['1d', '1D'], ['1w', '1W']];
-const PX_WINDOWS = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400, all: 1e10 };
+const PX_WINDOWS = { '15m': 900, '4h': 4 * 3600, '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400, '1y': 365 * 86400, all: 1e10 };
 let pxChart = null, lwReady = null;
 function loadLw() {
   if (window.LightweightCharts) return Promise.resolve();
@@ -1148,27 +1155,49 @@ async function mountBalChart(box, points, auto) {
   };
   if (box.dataset.span && box.dataset.span !== state.span) balChart.range(box.dataset.span);
 }
-const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line', 'seg')}<span id="${name}t">${tabs(name, WINDOW_TABS, '24h', 'seg')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button><button type="button" class="on" id="${name}auto">Auto</button></div>
+const LINE_TABS = [['15m', '15m'], ['4h', '4H'], ['24h', '1D'], ['7d', '1W'], ['30d', '1M'], ['1y', '1Y'], ['all', 'ALL']];
+const priceBox = (name) => `<div class="row" style="gap:8px;flex-wrap:wrap">${tabs(name + 'm', [['line', 'Line'], ['candles', 'Candles']], 'line', 'seg')}<span id="${name}t">${tabs(name, LINE_TABS, '24h', 'seg')}</span><button type="button" class="fit" id="${name}fit" title="Reset zoom and fit the loaded prices">Fit</button><button type="button" class="on" id="${name}auto">Auto</button></div>
   <div id="${name}c" style="margin-top:10px"><p class="muted">Loading chart…</p></div>`;
-// Pages of /api/price (3-minute samples) or /api/candles. Older pages use before= the oldest time we have.
+// Line data: 15m/4H read raw samples (newest page); longer windows read /api/price?window=, which buckets the samples
+// and fills days before our first sample with CoinPaprika's hourly/daily closes. Panning left steps up to the next window.
+const LINE_NEXT = { '15m': '24h', '4h': '24h', '24h': '7d', '7d': '30d', '30d': '1y', '1y': 'all' };
+// Volume bars: one bar per bucket, the rolling 24h volume CoinPaprika reported at the end of it.
+const VOL_BUCKET = { '15m': 60, '4h': 300, '24h': 1800, '7d': 14400, '30d': 86400, '1y': 604800, all: 604800, '1h': 3600, '1d': 86400, '1w': 604800 };
+const CANDLE_LINE = { '15m': '24h', '1h': '7d', '4h': '30d', '1d': '1y', '1w': 'all' };
+const pxRow = (p) => ({ time: p.t, value: p.usd, vol: p.volume_24h_usd ?? null });
+async function pxLineFetch(win) {
+  if (win === '15m' || win === '4h') {
+    const r = await api('price?limit=2000');
+    return { bars: (r.points || []).filter((p) => p.usd != null).map(pxRow), more: true };
+  }
+  const r = await api(`price?window=${encodeURIComponent(win)}`);
+  return { bars: (r.points || []).filter((p) => p.usd != null).map(pxRow), more: win !== 'all' };
+}
+// Pages of /api/candles. Older pages use before= the oldest time we have.
 async function pxFetch(mode, spec, before, limit) {
-  const q = mode === 'candles'
-    ? `candles?interval=${encodeURIComponent(spec)}&limit=${limit}${before ? `&before=${before}` : ''}`
-    : `price?limit=${limit}${before ? `&before=${before}` : ''}`;
-  const r = await api(q);
-  const rows = mode === 'candles' ? r.candles || [] : r.points || [];
-  const bars = mode === 'candles'
-    ? rows.map((c) => ({ time: c.t, open: c.o, high: c.h, low: c.l, close: c.c, approx: !!c.approx }))
-    : rows.filter((p) => p.usd != null).map((p) => ({ time: p.t, value: p.usd }));
+  const r = await api(`candles?interval=${encodeURIComponent(spec)}&limit=${limit}${before ? `&before=${before}` : ''}`);
+  const bars = (r.candles || []).map((c) => ({ time: c.t, open: c.o, high: c.h, low: c.l, close: c.c, approx: !!c.approx }));
   return { bars, more: !!r.more, oldest: r.oldest ?? bars[0]?.time ?? null, approx: bars.some((b) => b.approx) };
+}
+function volBars(raw, b) {
+  const out = [];
+  for (const p of raw) {
+    if (p.vol == null) continue;
+    const t = Math.floor(p.time / b) * b;
+    if (out.at(-1)?.time === t) out.at(-1).value = p.vol;
+    else out.push({ time: t, value: p.vol });
+  }
+  return out;
 }
 function pxWhen(t, mode, spec) {
   const day = mode === 'candles' && (spec === '1d' || spec === '1w');
   return new Date(t * 1000).toLocaleString([], day ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
+const compactUsd = (v) => v == null ? '–' : '$' + Number(v).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+let pxSetView = null;
 function wirePriceBox(name) {
   unmountPriceChart();
-  let mode = 'line', spec = '24h', gen = 0;
+  let mode = 'line', spec = '24h', view = 'price', gen = 0;
   const host = $(name + 'c');
   const fitBtn = $(name + 'fit');
   if (fitBtn) fitBtn.onclick = () => pxChart?.fit?.();
@@ -1178,11 +1207,16 @@ function wirePriceBox(name) {
   onTabs(name + 'm', (m) => {
     mode = m;
     spec = m === 'line' ? '24h' : '1h';
-    $(name + 't').innerHTML = tabs(name, m === 'line' ? WINDOW_TABS : CANDLE_TABS, spec, 'seg');
+    $(name + 't').innerHTML = tabs(name, m === 'line' ? LINE_TABS : CANDLE_TABS, spec, 'seg');
     onTabs(name, pick);
     open();
   });
   onTabs(name, pick);
+  // Only the homepage panel has the swappable headline; the /price page keeps its own volume card.
+  if ($('pxvolbox')) pxSetView = (v) => { if (v !== view) { view = v; open(); } };
+  // Volume and line read the same /api/price data; candles in volume view use the matching line window.
+  const lineWin = () => (mode === 'line' ? spec : CANDLE_LINE[spec] || '24h');
+  const span = () => (mode === 'line' ? PX_WINDOWS[spec] || PX_WINDOWS['24h'] : 0);
 
   async function open() {
     const g = ++gen;
@@ -1190,46 +1224,38 @@ function wirePriceBox(name) {
     if (host) host.innerHTML = '<p class="muted">Loading chart…</p>';
     try {
       await loadLw();
-      let bars = [], more = false, approx = false, before = null, guard = 0;
-      const need = mode === 'line' && spec !== 'all' ? Math.floor(Date.now() / 1000) - (PX_WINDOWS[spec] || PX_WINDOWS['24h']) : 0;
-      do {
-        const limit = mode === 'candles' ? 200 : spec === '24h' && !before ? 500 : 2000;
-        const page = await pxFetch(mode, spec, before, limit);
-        if (g !== gen || !host?.isConnected) return;
-        const older = before ? page.bars.filter((b) => b.time < before) : page.bars;
-        if (before && !older.length) { more = false; break; }
-        bars = older.concat(bars);
-        more = page.more;
-        approx = approx || page.approx;
-        before = bars[0]?.time ?? null;
-        guard++;
-        if (mode !== 'line') break;
-        if (spec !== 'all' && before && before <= need) break;
-      } while (more && guard < (spec === 'all' ? 8 : 12));
-      if (g !== gen || !host?.isConnected) return;
-      // Candles open on the recent real samples so the square is not a year of daily closes. Zoom left loads the rest.
-      if (mode === 'candles' && bars.length) {
-        const real = bars.filter((b) => !b.approx);
-        const shown = (real.length ? real : bars).slice(-120);
-        if (shown[0] && bars[0] && shown[0].time > bars[0].time) more = true;
-        bars = shown;
-        approx = bars.some((b) => b.approx);
+      let raw, more, approx = false, next = null;
+      if (mode === 'line' || view === 'vol') {
+        const win = lineWin();
+        const page = await pxLineFetch(win);
+        raw = page.bars; more = page.more; next = LINE_NEXT[win] || null;
+      } else {
+        const page = await pxFetch(mode, spec, null, 200);
+        // Candles open on the recent real samples so the square is not a year of daily closes. Zoom left loads the rest.
+        const real = page.bars.filter((b) => !b.approx);
+        raw = (real.length ? real : page.bars).slice(-120);
+        more = page.more || (raw[0] && page.bars[0] && raw[0].time > page.bars[0].time);
+        approx = raw.some((b) => b.approx);
       }
-      if (bars.length < 1) {
-        host.innerHTML = '<p class="muted">Not enough price samples yet: the chart fills in as the explorer records the SafeTrade price every 3 minutes.</p>';
+      if (g !== gen || !host?.isConnected) return;
+      const ok = view === 'vol' ? volBars(raw, VOL_BUCKET[spec] || 1800).length : raw.length;
+      if (ok < 1) {
+        host.innerHTML = view === 'vol'
+          ? '<p class="muted">No volume samples in this window yet: the explorer records CoinPaprika\'s 24h volume every 3 minutes.</p>'
+          : '<p class="muted">Not enough price samples yet: the chart fills in as the explorer records the SafeTrade price every 3 minutes.</p>';
         return;
       }
-      mount(g, bars, more, approx);
+      mount(g, raw, more, approx, next);
     } catch (e) {
       if (g === gen && host?.isConnected) host.innerHTML = `<p class="msg err">Could not load the chart: ${esc(e.message)}</p>`;
     }
   }
 
-  function mount(g, bars, more, approx) {
+  function mount(g, raw, more, approx, next) {
     host.innerHTML = '';
     const box = document.createElement('div');
-    box.className = 'pxchart';
-    box.setAttribute('aria-label', 'NOID price chart');
+    box.className = 'pxchart' + (view === 'vol' ? ' pxvolchart' : '');
+    box.setAttribute('aria-label', view === 'vol' ? 'NOID 24h volume chart' : 'NOID price chart');
     const tip = document.createElement('div');
     tip.className = 'pxtip';
     const note = document.createElement('p');
@@ -1239,16 +1265,21 @@ function wirePriceBox(name) {
     const theme = chartTheme();
     const chart = LightweightCharts.createChart(box, theme.options);
     box.append(tip);
-    const series = mode === 'candles'
-      ? chart.addCandlestickSeries({ upColor: theme.up, downColor: theme.down, borderVisible: false, wickUpColor: theme.up, wickDownColor: theme.down })
-      : chart.addAreaSeries({ lineColor: theme.accent, topColor: theme.area, bottomColor: 'rgba(0,0,0,0)', lineWidth: 2, priceLineVisible: false });
+    const vol = view === 'vol', candles = !vol && mode === 'candles';
+    const series = vol
+      ? chart.addHistogramSeries({ color: alpha(theme.accent, .7), priceLineVisible: false, base: 0, priceFormat: { type: 'custom', formatter: compactUsd, minMove: 1 } })
+      : candles
+        ? chart.addCandlestickSeries({ upColor: theme.up, downColor: theme.down, borderVisible: false, wickUpColor: theme.up, wickDownColor: theme.down })
+        : chart.addAreaSeries({ lineColor: theme.accent, topColor: theme.area, bottomColor: 'rgba(0,0,0,0)', lineWidth: 2, priceLineVisible: false });
     const byTime = new Map();
-    const state = { bars, more, approx, quiet: 0, loading: false, w: 0, h: 0, dead: false };
+    const state = { raw, bars: [], more, approx, next, quiet: 0, loading: false, w: 0, h: 0, dead: false };
+    const derive = () => { state.bars = vol ? volBars(state.raw, VOL_BUCKET[spec] || 1800) : state.raw; };
     const toLw = (b, th) => b.open == null ? { time: b.time, value: b.value } : {
       time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
       ...(b.approx && { color: b.close >= b.open ? th.upSoft : th.downSoft, wickColor: b.close >= b.open ? th.upSoft : th.downSoft }),
     };
     const paint = (th) => {
+      derive();
       byTime.clear();
       for (const b of state.bars) byTime.set(b.time, b);
       state.quiet++;
@@ -1256,25 +1287,27 @@ function wirePriceBox(name) {
       state.quiet--;
       const spark = $('pxspark');
       if (spark) {
-        const ys = state.bars.map((b) => b.value ?? b.close).filter((v) => v != null);
+        const ys = state.raw.map((b) => b.value ?? b.close).filter((v) => v != null);
         spark.innerHTML = ys.length >= 2 ? sparkSvg(ys) : '';
       }
     };
     const writeNote = () => {
-      const kind = mode === 'candles' ? 'candles' : 'points';
+      const older = state.more ? ' · zoom or pan left for older data' : '';
+      if (vol) { note.textContent = `${state.bars.length.toLocaleString()} bars · CoinPaprika rolling 24h volume (SafeTrade) as sampled every 3 minutes; per-trade volume is not published${older}. Tap the price box to switch back.`; return; }
+      const kind = candles ? 'candles' : 'points';
       const fade = state.approx ? '; faded candles are older daily/hourly closes (no intra-candle range)' : '';
-      const older = state.more ? ' · zoom or pan left for older prices' : '';
       note.textContent = `${state.bars.length.toLocaleString()} ${kind} · SafeTrade price sampled every 3 minutes${fade}${older}`
-        + (mode === 'candles' ? '. No per-candle volume is published.' : '.');
+        + (candles ? '. No per-candle volume is published.' : '.');
     };
-    // Line windows open on that span; candles and All fit whatever was loaded into the square.
+    // Line and volume open on the selected span; candles and All fit whatever was loaded into the square.
     const fitSpan = () => {
       if (state.dead) return;
       state.quiet++;
       try {
-        if (mode === 'line' && spec !== 'all' && state.bars.length > 1) {
+        const s = span();
+        if (s && s < 1e9 && state.bars.length > 1) {
           const to = state.bars.at(-1).time;
-          chart.timeScale().setVisibleRange({ from: to - (PX_WINDOWS[spec] || PX_WINDOWS['24h']), to });
+          chart.timeScale().setVisibleRange({ from: to - s, to });
         } else chart.timeScale().fitContent();
       } catch {}
       state.quiet--;
@@ -1305,26 +1338,40 @@ function wirePriceBox(name) {
 
     async function pull(range) {
       if (state.dead || state.loading || !state.more || !range || range.from >= -1) return;
-      const before = state.bars[0]?.time;
+      const before = state.raw[0]?.time;
       if (!before) { state.more = false; return; }
       state.loading = true;
       try {
-        const page = await pxFetch(mode, spec, before, mode === 'candles' ? 300 : 2000);
+        let older, more;
+        if (candles) {
+          const page = await pxFetch(mode, spec, before, 300);
+          older = page.bars.filter((b) => b.time < before); more = page.more;
+          state.approx = state.approx || page.approx;
+        } else {
+          // Step up to the next wider window until it reaches past what we have.
+          older = []; more = false;
+          while (state.next && !older.length) {
+            const win = state.next;
+            state.next = LINE_NEXT[win] || null;
+            const page = await pxLineFetch(win);
+            older = page.bars.filter((b) => b.time < before);
+            more = !!state.next;
+          }
+        }
         if (g !== gen || state.dead || !host.isConnected) return;
-        const older = page.bars.filter((b) => b.time < before);
         if (!older.length) { state.more = false; writeNote(); return; }
-        state.bars = older.concat(state.bars);
-        state.more = page.more;
-        state.approx = state.approx || page.approx;
-        for (const b of older) byTime.set(b.time, b);
+        const n0 = state.bars.length;
+        state.raw = older.concat(state.raw);
+        state.more = more;
         const th = chartTheme();
         state.quiet++;
-        series.setData(state.bars.map((b) => toLw(b, th)));
-        chart.timeScale().setVisibleLogicalRange({ from: range.from + older.length, to: range.to + older.length });
+        paint(th);
+        const added = state.bars.length - n0;
+        chart.timeScale().setVisibleLogicalRange({ from: range.from + added, to: range.to + added });
         state.quiet--;
         writeNote();
       } catch (e) {
-        note.textContent = `Could not load older prices: ${e.message}`;
+        note.textContent = `Could not load older data: ${e.message}`;
         return;
       } finally {
         state.loading = false;
@@ -1339,9 +1386,11 @@ function wirePriceBox(name) {
       const t = typeof param.time === 'number' ? param.time : null;
       const d = t != null && byTime.get(t);
       if (!d || !param.point || param.point.x < 0 || param.point.y < 0) { tip.classList.remove('on'); return; }
-      tip.innerHTML = d.open == null
-        ? `<b>${esc(usd4(d.value))}</b> · ${esc(pxWhen(d.time, mode, spec))}`
-        : `${esc(pxWhen(d.time, mode, spec))}<br><span class="o">O</span> ${esc(usd4(d.open))} <span class="o">H</span> ${esc(usd4(d.high))}<br><span class="o">L</span> ${esc(usd4(d.low))} <span class="o">C</span> <b>${esc(usd4(d.close))}</b>${d.approx ? '<br><span class="o">daily/hourly close only</span>' : ''}`;
+      tip.innerHTML = vol
+        ? `<b>${esc(money(d.value, 0))}</b> 24h vol · ${esc(pxWhen(d.time, mode, spec))}`
+        : d.open == null
+          ? `<b>${esc(usd4(d.value))}</b> · ${esc(pxWhen(d.time, mode, spec))}`
+          : `${esc(pxWhen(d.time, mode, spec))}<br><span class="o">O</span> ${esc(usd4(d.open))} <span class="o">H</span> ${esc(usd4(d.high))}<br><span class="o">L</span> ${esc(usd4(d.low))} <span class="o">C</span> <b>${esc(usd4(d.close))}</b>${d.approx ? '<br><span class="o">daily/hourly close only</span>' : ''}`;
       tip.classList.add('on');
       const x = Math.min(Math.max(param.point.x - tip.offsetWidth / 2, 4), Math.max(box.clientWidth - tip.offsetWidth - 4, 4));
       tip.style.left = `${x}px`;
@@ -1362,7 +1411,7 @@ function wirePriceBox(name) {
         if (state.dead) return;
         const th = chartTheme();
         chart.applyOptions(th.options);
-        series.applyOptions(mode === 'candles'
+        if (view !== 'vol') series.applyOptions(mode === 'candles'
           ? { upColor: th.up, downColor: th.down, wickUpColor: th.up, wickDownColor: th.down }
           : { lineColor: th.accent, topColor: th.area });
         paint(th);
@@ -1372,6 +1421,26 @@ function wirePriceBox(name) {
   }
   open();
 }
+// Tapping the volume box puts volume in the headline and the chart; tapping the price (now in that box) swaps back.
+function swapPriceHead() {
+  const head = $('pxhead'), box = $('pxvolbox');
+  if (!head || !box || head.closest('.price-head')?.classList.contains('swapping')) return;
+  const ph = head.closest('.price-head');
+  const toVol = box.getAttribute('aria-pressed') !== 'true';
+  ph.classList.add('swapping');
+  setTimeout(() => {
+    const a = head.firstElementChild, b = box.firstElementChild;
+    head.append(b); box.append(a);
+    head.querySelectorAll('b').forEach((x, i) => x.classList.toggle('big', i === 0));
+    box.querySelectorAll('b.big').forEach((x) => x.classList.remove('big'));
+    box.setAttribute('aria-pressed', String(toVol));
+    box.title = toVol ? 'Show the price chart' : 'Show the volume chart';
+    ph.classList.toggle('volview', toVol);
+    ph.classList.remove('swapping');
+    pxSetView?.(toVol ? 'vol' : 'price');
+  }, 180);
+}
+addEventListener('click', (e) => { if (e.target.closest?.('#pxvolbox')) swapPriceHead(); });
 function pct(v) { return v == null ? '<span class="muted">–</span>' : `<b class="${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2)}%</b>`; }
 
 function minersCard(m) {
@@ -1402,9 +1471,9 @@ function priceHead(p, supplyMicro) {
   if (!p) return '<p class="muted">Price feed unavailable right now.</p>';
   const ch = p.change_24h_pct, cap = supplyMicro ? (Number(supplyMicro) / 1e6) * p.usd : null;
   return `<div class="price-head">
-      <div><small class="muted">NOID / USD</small><br><b class="big" id="px">${esc(usd4(p.usd))}</b>
-        <b id="pxch" class="${ch >= 0 ? 'up' : 'down'}">${ch >= 0 ? '▲' : '▼'} ${esc(Math.abs(ch).toFixed(2))}% <small class="muted">24h</small></b></div>
-      <div class="stat"><small>24h volume</small><b id="pxvol">${esc(money(p.volume_24h_usd, 0))}</b></div>
+      <div class="pxhead" id="pxhead"><span class="pxslot"><small class="muted">NOID / USD</small><br><b class="big" id="px">${esc(usd4(p.usd))}</b>
+        <b id="pxch" class="${ch >= 0 ? 'up' : 'down'}">${ch >= 0 ? '▲' : '▼'} ${esc(Math.abs(ch).toFixed(2))}% <small class="muted">24h</small></b></span></div>
+      <button type="button" class="stat pxswap" id="pxvolbox" title="Show the volume chart" aria-pressed="false"><span class="pxslot"><small>24h volume</small><b id="pxvol">${esc(money(p.volume_24h_usd, 0))}</b></span></button>
       <div class="stat" title="Price × circulating supply from this node"><small>Market cap</small><b id="pxcap">${esc(money(cap, 0))}</b></div>
       <div class="pxspark" id="pxspark" aria-hidden="true"></div>
     </div>`;
