@@ -106,7 +106,7 @@
   :root[data-theme="light"] .tok tr:hover td:first-child { background:#f4fafa }
   .tok .num { text-align:right; font-variant-numeric:tabular-nums }
   svg.spark { width:64px; height:22px; display:block } svg.spark polyline { stroke-width:1.5; filter:none }
-  svg.spark.down polyline { stroke:#ff6b6b } :root[data-theme="light"] svg.spark.down polyline { stroke:#c62828 }
+  svg.spark.down polyline { stroke:#e0707a } :root[data-theme="light"] svg.spark.down polyline { stroke:#c4505c }
   @media (max-width:1199px) { .tok .opt { display:none } }
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 }
   button.chipx, #exreset { padding:4px 8px; font-size:11px; letter-spacing:.04em; border-color:var(--line); color:var(--fg) }
@@ -128,7 +128,7 @@
   @media (max-width:900px) { .bookrow { grid-template-columns:1fr } }
   .book td { padding:3px 4px; border:0; position:relative }
   .book td.depth span { position:absolute; right:0; top:1px; bottom:1px; background:rgba(168,245,233,.18) }
-  .book tr.ask td.px, .book td.ask { color:#ff6b6b } .book tr.ask td.depth span { background:rgba(255,107,107,.22) }
+  .book tr.ask td.px, .book td.ask { color:#e0707a } .book tr.ask td.depth span { background:rgba(224,112,122,.22) }
   .book tr.bid td.px, .book td.bid { color:var(--accent) }
   .book .spread { text-align:center; padding:6px 0; color:var(--muted); border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin:4px 0 }
   .book h3 { margin:10px 0 4px; font:11px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
@@ -263,9 +263,9 @@
   .amt { font:700 26px var(--mono); color:var(--gold); user-select:all }
   .status { display:flex; gap:10px; align-items:center; padding:12px 16px; border-top:1px solid var(--line); font:13px var(--mono) }
   .spin { width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite } @keyframes spin { to { transform:rotate(360deg) } }
-  .ok { color:#3ddc97 } :root[data-theme="light"] .ok { color:#0d8a54 }
+  .ok { color:#5fe3b0 } :root[data-theme="light"] .ok { color:#1f9e72 }
   .trust { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap:10px; margin-top:12px; font-size:13px; color:var(--muted) } .trust b { color:var(--fg); display:block; font-size:13px }
-  .up { color:#3ddc97 } .down { color:#ff6b6b }
+  .up { color:#5fe3b0 } .down { color:#e0707a }
   .ichart .tip .o, .pxchart .pxtip .o { font-weight:400; color:var(--muted) }
   /* Square price chart: full card width on a phone, capped so a desktop card stays a square. */
   .pxchart { position:relative; width:100%; aspect-ratio:1; max-height:680px; touch-action:pan-y; overscroll-behavior:contain; user-select:none; background:var(--card) }
@@ -300,7 +300,7 @@
   .balchart .pxtip { display:none; position:absolute; z-index:4; pointer-events:none; background:var(--card); border:1px solid var(--accent); border-radius:3px; padding:4px 8px; font:12px var(--mono); box-shadow:var(--glow); max-width:min(220px, calc(100% - 8px)); white-space:normal; overflow-wrap:anywhere }
   .balchart .pxtip.on { display:block }
   button.fit { margin-left:auto }
-  :root[data-theme="light"] .up { color:#0d8a54 } :root[data-theme="light"] .down { color:#c62828 }
+  :root[data-theme="light"] .up { color:#1f9e72 } :root[data-theme="light"] .down { color:#c4505c }
   .tabs { display:flex; gap:6px; flex-wrap:wrap }
   select { padding:9px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono) } .tabs button.on { background:var(--accent); color:var(--bg) }
   /* Globe hero */
@@ -381,7 +381,7 @@
   .winnums b { font:700 13px var(--mono) }
   .splitbar { margin:6px 0 }
   .splitlab { display:flex; justify-content:space-between; gap:8px; font:11px var(--mono) }
-  .splitbar .track { height:6px; background:#ff6b6b; border-radius:4px; overflow:hidden; margin-top:3px }
+  .splitbar .track { height:6px; background:#e0707a; border-radius:4px; overflow:hidden; margin-top:3px }
   .splitbar .track > span { display:block; height:100%; background:var(--accent) }
   .pairactions { grid-template-columns:1fr 1fr; gap:8px; margin:10px 0 }
   .pairactions .tradebtn { grid-column:1 / -1 }
@@ -544,7 +544,7 @@
     backdrop-filter:blur(8px);
   }
   svg.spark polyline { stroke:var(--accent); filter:drop-shadow(0 0 3px var(--accent)) }
-  svg.spark.down polyline { stroke:#ff6b6b; filter:drop-shadow(0 0 3px #ff6b6b) }
+  svg.spark.down polyline { stroke:#e0707a; filter:drop-shadow(0 0 3px #e0707a) }
   .pxspark { margin-left:auto; min-width:140px } .pxspark svg.spark { width:160px; height:48px }
   .hudstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(104px, 100%), 1fr)); gap:8px; margin:0 0 12px; min-width:0 }
   .hudstats .chip { pointer-events:auto; min-width:0; overflow:hidden }
@@ -588,7 +588,7 @@
   .clip { display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom }
   table.list { table-layout:fixed; width:100%; font:12px var(--mono) }
   table.list th, table.list td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; overflow-wrap:normal; font-family:var(--mono); font-size:12px; padding:7px 6px }
-  table.list td.amt.up { color:#3ddc97 } table.list td.amt.down { color:#ff6b6b }
+  table.list td.amt.up { color:#5fe3b0 } table.list td.amt.down { color:#e0707a }
   table.list .ok { color:var(--accent) }
   a.viewall, button.viewall { display:flex; width:100%; justify-content:center; margin-top:12px; background:transparent; border:1px solid color-mix(in srgb, var(--accent) 70%, transparent); color:var(--accent); letter-spacing:.16em }
   .ichart .plot { display:flex; gap:8px; min-width:0 }
