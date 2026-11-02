@@ -663,6 +663,12 @@ test('indexer + api', async (t) => {
   assert.strictEqual(maskIp('203.0.113.9'), '203.•.•.•');
   assert.strictEqual(maskIp('2001:0db8:0000:0000:0000:0000:0000:0001'), '2001:•••');
 
+  // Country lookup keeps the flat shape (codes only, everything else null) and shrugs off a miss.
+  const { geoRow } = require('./server.js');
+  assert.strictEqual(geoRow({ ip: '8.8.8.8', country: 'US' }).cc, 'US');
+  assert.strictEqual(geoRow({ ip: '8.8.8.8', country: 'US' }).city, null);
+  assert.strictEqual(geoRow({ error: 'reserved range' }), null);
+
   const [, charts] = await get('charts');
   assert.ok(charts.length >= 3 && charts[0].peers === 8);
 

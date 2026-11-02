@@ -641,13 +641,13 @@ async function pollPriceHistory() {
   if (h.status === 'rejected' && d.status === 'rejected') throw h.reason;
 }
 
-// Network map: every peer connected to our node right now, placed at its approximate city. The node has no
-// peer-list RPC, so we read established TCP connections on the P2P port from /proc/net (world-readable) and look
-// each IP up once (ip-api.com batch, cached in memory). Full IPs never leave this process: the API sends a salted
-// id, a masked address (first octet / first group only), city-level location, ASN/provider, direction and
-// when we first saw the connection. Country counts stay for older clients.
+// Network map: every peer connected to our node right now, placed at its country. The node has no peer-list RPC, so
+// we read established TCP connections on the P2P port from /proc/net (world-readable) and look each IP up once
+// (country.is: free, no key, fine for commercial use, unlike ip-api.com's non-commercial free tier), cached in
+// memory. Full IPs never leave this process: the API sends a salted id, a masked address (first octet / first group
+// only), the country code, direction and when we first saw the connection. Country counts stay for older clients.
 const P2P_PORT = Number(process.env.P2P_PORT || 9600);
-const geo = new Map(); // ip -> { cc, country, region, city, lat, lon, asn, provider } | null
+const geo = new Map(); // ip -> { cc, country } (successes only)
 const firstSeen = new Map(); // ip -> ms we first saw the connection (cleared when it drops)
 const seen = new Map(); // country -> last time a peer was there (for the 24 h view)
 const SALT = crypto.randomBytes(16);
@@ -678,22 +678,25 @@ function peerConns(text) {
 const peerIps = (text) => peerConns(text).map((c) => c.ip);
 const maskIp = (ip) => (ip.includes('.') ? `${ip.split('.')[0]}.•.•.•` : `${ip.split(':')[0]}:•••`);
 const nodeId = (ip) => crypto.createHmac('sha256', SALT).update(ip).digest('hex').slice(0, 10);
-const GEO_FIELDS = 'status,country,countryCode,regionName,city,lat,lon,isp,org,as,query';
-const geoRow = (r) => (r?.status === 'success' ? {
-  cc: r.countryCode, country: r.country, region: r.regionName || null, city: r.city || null,
-  lat: Math.round(r.lat * 100) / 100, lon: Math.round(r.lon * 100) / 100, // ~1 km: city level, not a street
-  asn: (r.as || '').split(' ')[0] || null, provider: r.org || r.isp || null,
-} : null);
+// country.is answers { ip, country } with an ISO code and nothing else, so `country` carries the code: the page
+// turns it into a name, and older clients that only ever got a country string keep working. The rest of the shape
+// stays flat and null so no consumer changes.
+const geoRow = (r) => (r?.country ? { cc: r.country, country: r.country, region: null, city: null, lat: null, lon: null, asn: null, provider: null } : null);
+const GEO_URL = 'https://api.country.is';
 async function geoLookup(ips) {
   const todo = ips.filter((ip) => !geo.has(ip)).slice(0, 100);
-  if (!todo.length) return;
-  const r = await fetch(`http://ip-api.com/batch?fields=${GEO_FIELDS}`, { method: 'POST', body: JSON.stringify(todo), signal: AbortSignal.timeout(10_000) });
-  if (!r.ok) return;
-  for (const row of await r.json()) geo.set(row.query, geoRow(row));
+  for (let i = 0; i < todo.length; i += 4) {
+    if (i) await new Promise((r) => setTimeout(r, 200)); // four at a time: the free service has no batch endpoint
+    await Promise.all(todo.slice(i, i + 4).map(async (ip) => {
+      const r = await fetch(`${GEO_URL}/${ip}`, { signal: AbortSignal.timeout(6_000) }).catch(() => null);
+      const row = r?.ok ? geoRow(await r.json().catch(() => null)) : null;
+      if (row) geo.set(ip, row); // a miss stays uncached and is retried on the next minute's poll
+    }));
+  }
 }
 async function selfGeo() {
-  const r = await fetch(`http://ip-api.com/json/?fields=${GEO_FIELDS}`, { signal: AbortSignal.timeout(8_000) });
-  return r.ok ? geoRow(await r.json()) : null;
+  const r = await fetch(`${GEO_URL}/`, { signal: AbortSignal.timeout(6_000) }).catch(() => null);
+  return r?.ok ? geoRow(await r.json().catch(() => null)) : null;
 }
 async function pollNetwork() {
   if (!network.node) {
@@ -1568,4 +1571,4 @@ if (require.main === module) {
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, peerConns, maskIp, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance, nearestUsd, usdBalance };
+module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, peerConns, maskIp, geoRow, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance, nearestUsd, usdBalance };

@@ -1522,8 +1522,9 @@ function centroid(f) {
   return { lat: (Math.min(...ys) + Math.max(...ys)) / 2, lng: (Math.min(...xs) + Math.max(...xs)) / 2 };
 }
 const G = { peers: new Map(), seen: new Set(), nodes: [], sel: null, home: null, arcs: [], bursts: [], spin: false };
-const nodeSpot = (n) => (n.lat != null ? { lat: n.lat, lng: n.lon } : spot(n.cc));
-const nodePlace = (n) => [n.city, n.country].filter(Boolean).join(', ') || 'Unknown location';
+const ccName = (cc) => countries?.find((f) => f.properties.cc === cc)?.properties.ADMIN || cc || '';
+const nodeSpot = (n) => (n.lat != null ? { lat: n.lat, lng: n.lon } : spot(n.cc)); // no coords from country.is: the country's centroid
+const nodePlace = (n) => (n.city ? `${n.city}, ${ccName(n.country)}` : ccName(n.cc) || 'Unknown location');
 let arcRAF = 0, arcNext = 0, arcN = 0, callRAF = 0, callKey = '';
 const motionReduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const globeMobile = () => matchMedia('(max-width: 640px)').matches;
@@ -1600,7 +1601,7 @@ function setNetwork(net) {
   G.seen = new Set(net.countries_24h);
   G.nodes = net.nodes || [];
   if (G.sel && !G.nodes.some((n) => n.id === G.sel)) closeNode();
-  G.homeName = net.node ? [net.node.city, net.node.country].filter(Boolean).join(', ') : '';
+  G.homeName = net.node ? ccName(net.node.cc) : '';
   G.home = (net.node?.lat != null ? { lat: net.node.lat, lng: net.node.lon } : spot(net.node_country)) ?? G.home;
   setNum('gcc', G.peers.size || G.seen.size);
   paintNodeList();
@@ -1624,9 +1625,9 @@ function paintNodeCard() {
   const row = (k, v) => `<div><small>${k}</small><b class="ell">${esc(v ?? '–')}</b></div>`;
   card.innerHTML = `<button type="button" class="gnx" aria-label="Close">×</button>
     <h3 class="ell">${esc(nodePlace(n))}</h3>
-    <div class="gngrid">${row('Region', n.region)}${row('Direction', n.direction === 'inbound' ? 'Inbound (they dialed us)' : 'Outbound (we dialed them)')}
+    <div class="gngrid">${row('Country', n.country && ccName(n.country))}${row('Direction', n.direction === 'inbound' ? 'Inbound (they dialed us)' : 'Outbound (we dialed them)')}
     ${row('Provider', n.provider)}${row('ASN', n.asn)}${row('Address', n.ip)}${row('Connected', n.since ? `${ago(Math.floor(n.since / 1000))} (first seen)` : null)}</div>
-    <p class="muted">Version, height and ping aren't shown: the node has no read-only peer-info RPC. Approximate location from a GeoIP lookup.</p>`;
+    <p class="muted">Version, height and ping aren't shown: the node has no read-only peer-info RPC. Country comes from a GeoIP lookup, so the pin sits at the country's middle, not the peer's real city.</p>`;
   card.hidden = false;
   card.querySelector('.gnx').onclick = closeNode;
 }
@@ -1664,7 +1665,7 @@ function placeCalls() {
   for (const n of near) {
     if (items.length >= 7) break;
     const s = nodeSpot(n);
-    if (s && face(s.lat, s.lng)) items.push({ ...s, label: n.city || n.cc || 'peer', home: false });
+    if (s && face(s.lat, s.lng)) items.push({ ...s, label: ccName(n.cc) || 'peer', home: false });
   }
   const key = items.map((it) => it.label).join('|');
   if (key !== callKey) {
