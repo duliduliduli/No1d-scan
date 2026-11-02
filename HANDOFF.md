@@ -51,7 +51,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
   ```bash
   cd /opt/noid-scan && git pull && systemctl restart noid-scan && sleep 5 && systemctl is-active noid-scan && git log --oneline -1
   ```
-  Live now matches HEAD, but whether that came from auto-deploy or a manual pull is unconfirmed. Check the Actions logs for "skipping deploy" vs "deployed OK".
+  Live now matches HEAD. **Confirmed 2026-11-02: auto-deploy is wired** — `DEPLOY_HOST` and `DEPLOY_KEY` exist, runs take the deploy step and log `deployed OK`, so a push to `main` is a production deploy. The takeover agent's Mac cannot SSH to the droplet (`Permission denied (publickey)`), so anything server-side still has to be pasted into the console.
 - **New systemd files:** if a change edits `deploy/*.service`, the owner must also copy it and reload:
   ```bash
   cp /opt/noid-scan/deploy/noid-scan.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart noid-scan
@@ -100,9 +100,8 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
   ```
 - **Candles** (`/api/candles`) are built from the 3-minute samples: a spike between samples can be missed, and there is no per-candle volume. Older faded candles are close-only daily/hourly fills. The UI says so.
 - **Holders and rich list:** a sweep of every Live State slot (batched `getSlot`) every 2 h, taking about 20 min. The results are **approximate**, labeled as such, and matched noidexplorer.org when checked.
-- **Globe:** connected peer IPs are read from `/proc/net/tcp*` on port 9600 and resolved to city level with **ip-api.com** (batch, plain HTTP, cached in memory). The API sends only a salted id, a masked address, city-level location and ASN; full IPs stay in the process.
-  - **Licensing:** ip-api.com's free tier is for non-commercial use only, and this site sells credits and promotions. That needs a paid ip-api plan, or a switch back to a free country-level lookup (country.is, used before). Raise it with the owner.
-  - **Docs mismatch:** the README globe paragraph still says country.is and country level, so it is out of date.
+- **Globe:** connected peer IPs are read from `/proc/net/tcp*` on port 9600 and resolved to **country level with country.is** (one lookup per IP, four at a time, successes cached, misses retried on the next minute's poll). The API sends only a salted id, a masked address and the country code; full IPs stay in the process.
+  - **Licensing: settled** (2026-11-02). ip-api.com's free tier is non-commercial only and this site sells things, so the globe went back to country.is, which is free for any use and needs no key. City, region, ASN and provider are now null; the page pins a peer at its country's middle and says so. Reverting to ip-api would need their paid plan ($15+/mo) to be worth it.
 - **AI:** OpenRouter. The owner should keep a monthly spend cap on the key.
 
 ## 8. Working rules for this repo
@@ -132,10 +131,11 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 6. **Backups:** confirm `noid-scan-backup.timer` is enabled (`systemctl list-timers | grep noid`) and set `BACKUP_DEST` for an off-machine copy. Today the archive may exist only on the droplet.
 7. **Auto-deploy secrets:** decide whether to set `DEPLOY_HOST` / `DEPLOY_KEY` (see the README "Auto-deploy" section) or keep deploying by `git pull`.
 8. **Credential hygiene:** a temporary site password was once shared in chat during setup. It has been removed from the site; it must not be reused anywhere.
+9. **`ADMIN_TOKEN` is unset in production** (checked 2026-11-02: `GET /api/admin` is 404), so an approved enhanced profile or promoted slot has no route to be approved. Set it in `/etc/noid-scan.env` and restart; then open `https://parano1d-scan.com/admin` and paste the token. Console block in section 10.
 
 **Code and tech debt:**
-- Globe geolocation uses ip-api.com's free (non-commercial) tier; see section 7.
-- `deploy/noid-scan.service` still has stale commented env names (`USDC_CHAIN`, `USDC_PAY_ADDRESS`, `USDC_RPC_URL`). The real names are `USDC_EVM_ADDRESS`, `USDC_SOLANA_ADDRESS`, `USDC_<CHAIN>_ADDRESS` and `USDC_<CHAIN>_RPC_URL` (see README). Fix the comments.
+- ~~Globe geolocation uses ip-api.com's free (non-commercial) tier~~ — done 2026-11-02, back on country.is.
+- ~~`deploy/noid-scan.service` still has stale commented env names~~ — done 2026-11-02.
 - Header backfill stops retrying a height the node can't serve (`stuckGap`) until the process restarts. That is fine unless the node later regains it.
 - `labels.json` `_unresolved`: several known entities (SafeTrade, Parano1d Lab and others) have only partial addresses.
 - **v2.1 activation (~block 279,370):** watch logs and Explore for snapshot-shape mismatches, and confirm the native intent flow with real node responses before enabling `SWAP_ENABLED`.
@@ -164,4 +164,25 @@ On the droplet (owner pastes):
 systemctl is-active noid-scan parano1d && cd /opt/noid-scan && git log --oneline -1
 journalctl -u noid-scan -n 50 --no-pager
 node /opt/noid-scan/scripts/db-check.js /var/lib/noid-scan/noid.db
+```
+
+Books, backups and the admin token (owner pastes; read-only except the two env lines):
+```bash
+# no output means the ledger matches the balances
+sqlite3 /var/lib/noid-scan/noid.db "
+  select 'balance differs from ledger', a.id, a.credits, coalesce(sum(l.delta),0) from accounts a left join ledger l on l.account = a.id group by a.id having a.credits != coalesce(sum(l.delta),0);
+  select 'paid order without ledger entry', t.id, t.paid_ref from noid_topups t left join ledger l on l.ref = t.paid_ref where t.paid_ref is not null and l.id is null;
+  select 'payment needs review', ref, value, topup from noid_seen where status = 'review';"
+
+# is the backup timer armed, and is there a copy off this machine?
+systemctl list-timers --all | grep noid
+ls -la /var/lib/noid-scan/backups 2>/dev/null | tail -3
+grep -c '^BACKUP_DEST=' /etc/noid-scan.env
+
+# admin token and support email, only added when absent; the token is born on the box
+grep -q '^ADMIN_TOKEN=' /etc/noid-scan.env || echo "ADMIN_TOKEN=$(openssl rand -hex 32)" >> /etc/noid-scan.env
+grep -q '^SUPPORT_EMAIL=' /etc/noid-scan.env || echo 'SUPPORT_EMAIL=dulimediallc@gmail.com' >> /etc/noid-scan.env
+systemctl restart noid-scan && sleep 4 && systemctl is-active noid-scan
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/admin   # 401 = token loaded (404 = still unset)
+grep '^ADMIN_TOKEN=' /etc/noid-scan.env   # paste that into https://parano1d-scan.com/admin
 ```
