@@ -1615,7 +1615,7 @@ function paintNodeList() {
   if (!G.nodes.length) { el.innerHTML = '<p class="muted">No connected peers right now.</p>'; return; }
   el.innerHTML = G.nodes.map((n) => `<button type="button" class="gnrow${n.id === G.sel ? ' on' : ''}" data-node="${esc(n.id)}" aria-pressed="${n.id === G.sel}">
     <span class="gnplace ell">${esc(nodePlace(n))}</span><span class="gndir">${n.direction === 'inbound' ? '↘ IN' : '↗ OUT'}</span>
-    <span class="gnsub ell">${esc(n.provider || 'Unknown provider')}${n.asn ? ` · ${esc(n.asn)}` : ''}</span><span class="gnsince">${esc(ago(Math.floor(n.since / 1000)))}</span></button>`).join('');
+    <span class="gnsub ell">${esc(n.provider || n.ip)}${n.asn ? ` · ${esc(n.asn)}` : ''}</span><span class="gnsince">${esc(ago(Math.floor(n.since / 1000)))}</span></button>`).join('');
   el.onclick = (e) => { const b = e.target.closest('[data-node]'); if (b) selectNode(b.dataset.node, true); };
 }
 function paintNodeCard() {
