@@ -643,6 +643,7 @@
     <nav id="menunav">
       <a href="/explore" data-link>Explore tokens</a>
       <a href="/promote" data-link>Promote <span aria-hidden="true">⚡</span></a>
+      <a href="/verified" data-link>Verified <span aria-hidden="true">✓</span></a>
       <a href="/" data-link>Overview &amp; live stats</a>
       <a href="/blocks/latest" data-link>All blocks</a>
       <a href="/mempool" data-link>Mempool &amp; fees</a>
@@ -2190,7 +2191,7 @@ function promoSection(promo, plain) {
   }).join('');
   const crawl = 'PROMOTED  '.repeat(24);
   if (plain) return `<section class="promo" aria-label="Promoted"><div class="promohead crawl"><div class="crawltrack"><span>${crawl}</span><span>${crawl}</span></div></div><div class="promobar">${cards}</div></section>`;
-  return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted <small>paid slots</small></h2><a class="getenh" href="/promote" data-link>Promote ⚡</a></div><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
+  return `<section class="promo" aria-label="Promoted"><div class="promohead"><h2>Promoted <small>paid slots</small></h2><a class="getenh" href="/verified" data-link>Get verified ✓</a></div><p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p><div class="promorow">${cards}</div></section>`;
 }
 async function loadPromo(tab, demo, gen) {
   const box = $('promobox');
@@ -4243,7 +4244,8 @@ const pages = {
     const proto = data.protocol ? `<p class="fine">${data.protocol.active ? 'Calls are active on the next block.' : 'Calls are not active on the next block.'}${data.protocol.activation_height != null ? ` Activation height ${n0(data.protocol.activation_height)}.` : ''}${data.protocol.abi_version != null ? ` ABI ${esc(data.protocol.abi_version)}.` : ''}</p>` : '';
     app.innerHTML = `<div class="card"><h2>Contracts</h2><p class="muted">${esc(note)}</p>${proto}</div>${lists}<div class="tpls">${cards}</div>`;
   },
-  async promote() {
+  verified: () => pages.promote(true),
+  async promote(verified = false) {
     const params = new URLSearchParams(location.search);
     const demo = params.get('demo') === '1';
     const dq = demo ? '&demo=1' : '';
@@ -4255,8 +4257,9 @@ const pages = {
     const packs = promo.packs || [];
     const back = params.get('promote') === 'paid' || params.get('enhance') === 'paid'
       ? '<p class="msg">If the card payment completed, your order is in review. Nothing shows until it is approved.</p>' : '';
-    app.innerHTML = `${back}<div class="card" id="promote"><h2>Promote <span aria-hidden="true">⚡</span> <small>native tokens</small></h2>
+    app.innerHTML = `${back}<div class="card" id="promote"><h2>${verified ? 'Verified accounts' : 'Promote <span aria-hidden="true">⚡</span>'} <small>native tokens</small></h2>
       <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
+      ${verified ? '<p class="fine">A verified account puts a banner, an icon, a short description and your website and X links on the token page, plus the ⚡ mark next to the ticker. One-time fee, paid on chain in NOID, or by card when card payments are live. Shown as soon as the payment confirms; there is no waiting list.</p>' : ''}
       <p class="fine">Anyone can promote any token. Every order is reviewed before it goes live. A paid order unlocks a banner, a website and an X link on the token page; tokens without one show no banner at all.</p>
       <form id="promoform" autocomplete="off">
         <label>Token <span class="muted">ticker, name or id</span><input name="q" id="pmq" placeholder="Search tokens" spellcheck="false"></label>
@@ -4327,8 +4330,8 @@ const pages = {
         else Object.assign(body, { pack: p.slice(6), banner: banner ? await fileB64(banner) : undefined });
         const made = await api('promote', body);
         const pay = made.product === 'enhanced'
-          ? await api('profile-pay', { id: made.id, method: b.dataset.pay, page: 'promote' })
-          : await api('boost-pay', { id: made.id, method: b.dataset.pay, back: '/promote' });
+          ? await api('profile-pay', { id: made.id, method: b.dataset.pay, page: verified ? 'verified' : 'promote' })
+          : await api('boost-pay', { id: made.id, method: b.dataset.pay, back: verified ? '/verified' : '/promote' });
         if (pay.url) { location.href = pay.url; return; }
         msg.innerHTML = `<div class="kvl"><small>Send exactly</small><span><b>${esc(pay.amount_noid)} NOID</b> ${copyBtn(pay.amount_noid)}</span>
           <small>To</small><span class="mono ell" title="${esc(pay.address)}">${esc(short(pay.address, 10, 8))} ${copyBtn(pay.address)}</span>
@@ -4463,7 +4466,7 @@ async function render() {
   alerts?.classList.toggle('on', type === 'alerts');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    const named = ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote'];
+    const named = ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'verified'];
     document.body.classList.toggle('pair', type === 'token' || type === 'collection');
     if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
     await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());

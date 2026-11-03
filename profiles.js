@@ -140,7 +140,11 @@ module.exports = function profiles(db, fallback = null) {
     if (row.status === 'pending' && row.pay_ref === ref) return true;
     if (row.status !== 'unpaid') return false;
     const ok = q.pay.run(ref, id, row.account).changes === 1;
-    if (ok) bust();
+    if (ok) {
+      // With no ADMIN_TOKEN there is no review route, so a paid profile would stay hidden forever. Go live instead.
+      if (!process.env.ADMIN_TOKEN) q.review.run('approved', Date.now(), id);
+      bust();
+    }
     return ok;
   }
 

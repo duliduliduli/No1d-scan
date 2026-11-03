@@ -77,6 +77,7 @@ test('indexer + api', async (t) => {
   process.env.STRIPE_SECRET_KEY = 'sk_test_x';
   process.env.STRIPE_WEBHOOK_SECRET = WHSEC;
   process.env.NODE_ENV = 'test';
+  process.env.ADMIN_TOKEN = 'adm-test';
   await new Promise((r) => aiServer.listen(0, r));
   process.env.OPENROUTER_API_KEY = 'or-test';
   process.env.OPENROUTER_URL = `http://127.0.0.1:${aiServer.address().port}`;
@@ -548,7 +549,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /off until v2\.1/);
   assert.match(homeHtml, /aria-label="Paid promotion">⚡/);
   assert.doesNotMatch(homeHtml, /pill enh|>Enhanced<|Duli Media/);
-  assert.match(homeHtml, /async promote\(\)/);
+  assert.match(homeHtml, /async promote\(/);
   assert.match(homeHtml, /href="\/promote" data-link/);
   assert.match(homeHtml, /data-enh="usdc"/);
   assert.match(homeHtml, /id="book"/);
@@ -620,7 +621,7 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /mined more than half/);
   assert.doesNotMatch(homeHtml, /Countries of peers connected to this explorer's node/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
-  assert.match(homeHtml, /Promote ⚡/);
+  assert.match(homeHtml, /Get verified ✓/);
   assert.match(homeHtml, /id="sortpop"/);
   assert.match(homeHtml, /id="listbar"/);
   assert.match(homeHtml, /aria-label="USDC chain"/);
@@ -1005,7 +1006,7 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get(`profile/${made.id}`, { headers: K }))[1].status, 'pending');
   assert.strictEqual((await get('token/live1?window=1h'))[1].token.enhanced, null);
   assert.strictEqual((await fetch(base + '/api/profile-media/live1/icon', { headers: { 'sec-fetch-site': 'same-origin' } })).status, 404);
-  assert.strictEqual((await get('admin', { headers: { 'x-admin-token': 'adm-test' } }))[0], 404, 'review stays hidden until ADMIN_TOKEN is set');
+  assert.strictEqual((await get('admin', { headers: { 'x-admin-token': 'adm-test' } }))[0], 200);
   process.env.ADMIN_TOKEN = 'adm-test';
   try {
     assert.strictEqual((await get('admin'))[0], 401);
@@ -1044,6 +1045,7 @@ test('indexer + api', async (t) => {
     delete process.env.ADMIN_TOKEN;
   }
   assert.strictEqual((await get('admin', { headers: { 'x-admin-token': 'adm-test' } }))[0], 404);
+  process.env.ADMIN_TOKEN = 'adm-test';   // the rest of the suite walks the review queue
   const [, gcat] = await get('tokens/gcat?demo=1');
   assert.match(gcat.token.enhanced.banner, /demo=1/);
   assert.strictEqual(gcat.token.enhanced.twitter, 'https://x.com/ghostcat');

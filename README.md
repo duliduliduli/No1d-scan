@@ -173,3 +173,16 @@ sqlite3 /var/lib/noid-scan/noid.db "
 No output means everything matches. The ledger is append-only: fix a mistake with a new entry, never by editing or deleting rows.
 
 Crypto received for a service is ordinary income at its dollar value when received; keep the History tab or `select * from ledger` as your record.
+
+## Seeding our own token
+
+`/verified` sells an enhanced profile. Our own listings are seeded instead of bought:
+
+```bash
+DB_PATH=/var/lib/noid-scan/noid.db node scripts/seed-profile.js --token <asset_id> \
+  --website https://noidcat.com --x https://x.com/no1dcat \
+  --icon-url https://noidcat.com/assets/logo-512.png --banner-url https://noidcat.com/assets/banner.jpg \
+  --description "…" --boost 7d
+```
+
+Safe to re-run: it updates the existing row. Icon max 512×512/256 KB, banner max 1500×500/1 MB.

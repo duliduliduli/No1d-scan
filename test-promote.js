@@ -11,6 +11,8 @@ process.env.PAY_ADDRESS = PAY;
 process.env.USD_PER_NOID = '0.20';
 process.env.STRIPE_SECRET_KEY = 'sk_test_x';
 process.env.STRIPE_WEBHOOK_SECRET = 'whsec_p';
+// Most tests exercise the review queue; the auto-approve test clears this itself.
+process.env.ADMIN_TOKEN = 'admin-test';
 
 function setup(receipts = {}) {
   const db = new DatabaseSync(':memory:');
@@ -108,4 +110,17 @@ test('native trade intent: gated, mocked before activation, never signs', async 
   await assert.rejects(it.submit({ signed: 'zz' }), /hex/);
   assert.strictEqual((await it.submit({ signed: 'beef' })).submitted, true);
   delete process.env.SWAP_ENABLED;
+});
+
+test('with no admin token a paid order goes live at once', () => {
+  const { profiles, boosts, acct } = setup();
+  delete process.env.ADMIN_TOKEN;
+  const icon = images.solidPng(30, 10, [1, 2, 3]);
+  const p = profiles.create(acct, { token_id: 'tok1', description: 'x', icon: icon.toString('base64'), banner: png });
+  profiles.markPaid(p.id, 'ref-1', acct.id);
+  assert.strictEqual(profiles.view(acct, p.id).status, 'approved', 'profile goes live without review');
+  const b = boosts.create(acct, { kind: 'token', asset_id: 'tok1', pack: '1d' });
+  boosts.markPaid(b.id, 'ref-2', acct.id);
+  assert.strictEqual(boosts.view(acct, b.id).status, 'live', 'boost goes live without review');
+  process.env.ADMIN_TOKEN = 'admin-test';
 });

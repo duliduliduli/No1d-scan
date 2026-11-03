@@ -30,6 +30,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 | `intent.js` | Non-custodial native trades via Parano1d v2.1 intents (`prepareNativeIntent` → wallet signs → `submitTxIntent`). Off unless `SWAP_ENABLED=true`; activation height `NATIVE_ACTIVATION_HEIGHT` (default **279,370**, roughly 2 days after this handoff) |
 | `usdc.js` | Native Circle USDC payments on 6 EVM chains and Solana, matched by an exact-amount suffix; includes its own keccak for EIP-55 |
 | `profiles.js` / `boosts.js` / `images.js` | Paid enhanced token profiles (100 USDC), paid promoted slots (`BOOST_PACKS`), banner/icon validation (type sniffing, metadata stripping). Hidden until paid **and** admin-approved via `/api/admin` (`ADMIN_TOKEN`) |
+| `scripts/seed-profile.js` | First-party seed: writes an approved profile and a live slot for our own token from URLs, no account or payment. `DB_PATH=… node scripts/seed-profile.js --token <id> --icon-url … --banner-url … --boost 7d`. |
 | `scripts/backup.js` | `VACUUM INTO` snapshot, keeps 14, optional rsync to `BACKUP_DEST`; run daily by `deploy/noid-scan-backup.timer` |
 | `scripts/db-check.js` | Read-only integrity check; `--repair` writes a repaired **copy**, never the live file |
 | `labels.json` | Address labels (entity names). Unresolved entries are listed under `_unresolved` |

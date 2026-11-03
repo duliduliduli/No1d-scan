@@ -121,7 +121,10 @@ module.exports = function boosts(db, lookup) {
     if (!row || (account && row.account !== account)) return false;
     if (row.status === 'pending' && row.pay_ref === ref) return true;
     if (row.status !== 'unpaid') return false;
-    return q.pay.run(ref, id, row.account).changes === 1;
+    const ok = q.pay.run(ref, id, row.account).changes === 1;
+    // No ADMIN_TOKEN means no review route; approve a paid slot rather than let it sit hidden.
+    if (ok && !process.env.ADMIN_TOKEN) review(id, 'approve');
+    return ok;
   }
   function view(acct, id) {
     const row = q.byId.get(id || '');

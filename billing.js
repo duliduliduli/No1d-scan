@@ -389,8 +389,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (!row) return null;
       const usd = profiles.priceUsd();
       if (body.method === 'usdc') return usdcPay.quote(acct, row.id, null, body.chain);
-      if (body.method === 'card' && body.page === 'promote') return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/promote' });
-      if (body.method === 'noid' && body.page === 'promote') return noidOrder(acct, usd, 'profile', row.id);
+      if (body.method === 'card' && ['promote', 'verified'].includes(body.page)) return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/' + body.page });
+      if (body.method === 'noid' && ['promote', 'verified'].includes(body.page)) return noidOrder(acct, usd, 'profile', row.id);
       if (body.method === 'card') {
         if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
         const form = new URLSearchParams({
@@ -451,8 +451,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (!acct) throw bad('missing or unknown API key', 401);
       const usd = Number(body.usd);
       if (!PACKS_USD.includes(usd)) throw bad(`amount must be one of ${PACKS_USD.join(', ')} USD`);
-      if (body.method === 'card' && body.page === 'promote') return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/promote' });
-      if (body.method === 'noid' && body.page === 'promote') return noidOrder(acct, usd, 'profile', row.id);
+      if (body.method === 'card' && ['promote', 'verified'].includes(body.page)) return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/' + body.page });
+      if (body.method === 'noid' && ['promote', 'verified'].includes(body.page)) return noidOrder(acct, usd, 'profile', row.id);
       if (body.method === 'card') {
         if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
         return stripeCheckout(acct, usd);
