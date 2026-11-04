@@ -489,7 +489,11 @@ module.exports = function assets(db, rpc, priceNow) {
       if (!prev || (bi(p.reserve_noid_micronoid) || 0n) > (bi(prev.reserve_noid_micronoid) || 0n)) pools.set(p.token_id, p);
     }
     const since = now - 86400;
-    return q.tokens.all().map((t) => {
+    const rows0 = q.tokens.all();
+    if (!rows0.length) {
+      for (const x of extras) if (ID.test(String(x.id || ''))) rows0.push({ reserve_micronoid: '0', graduated: 0, ...x });
+    }
+    return rows0.map((t) => {
       const recent = q.tradesSince.all(t.id, since - 120);
       const base = q.tradeBefore.get(t.id, since);
       const trades = base && !recent.some((r) => r.txid === base.txid) ? [base, ...recent] : recent;

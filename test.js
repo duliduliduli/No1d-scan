@@ -677,8 +677,10 @@ test('indexer + api', async (t) => {
   delete process.env.TOKENS_DEMO; delete process.env.SWAP_ENABLED; delete process.env.SWAP_FEE_ADDRESS;
   const [, none] = await get('tokens');
   assert.strictEqual(none.demo, false);
-  assert.strictEqual(none.tokens.length, 0);
-  assert.match(none.notice, /Tokens coming with v2\.1/);
+  // curated fallback rows are served even from a node that does not speak v2.1
+  assert.strictEqual(none.tokens.length, 1);
+  assert.match(none.tokens[0].ticker, /^NOIDCAT$/);
+  assert.ok(none.notice === null || /v2\.1/.test(none.notice));
   assert.strictEqual((await get('collections'))[1].collections.length, 0);
   const [, demo] = await get('tokens?demo=1');
   assert.strictEqual(demo.demo, true);
