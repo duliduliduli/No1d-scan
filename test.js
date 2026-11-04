@@ -546,7 +546,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Total you pay/);
   assert.match(homeHtml, /Before you sign/);
   assert.match(homeHtml, /never holds your wallet/);
-  assert.match(homeHtml, /off until v2\.1/);
+  assert.match(homeHtml, /open here soon/);
   assert.match(homeHtml, /aria-label="Paid promotion">⚡/);
   assert.doesNotMatch(homeHtml, /pill enh|>Enhanced<|Duli Media/);
   assert.match(homeHtml, /async promote\(/);

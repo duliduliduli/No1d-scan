@@ -2429,11 +2429,9 @@ function wireExplore() {
   clearInterval(exploreTimer);
   exploreTimer = setInterval(() => { if (document.hidden || document.activeElement === $('exq')) return; fillExplore().catch(showExErr); }, 15_000);
 }
-function tradeLocked(swap) {
-  const pct = Number(swap?.fee_pct ?? 0.5).toFixed(2);
-  return `<div class="card swap off"><h2>Trade <small>off until v2.1</small></h2>
-    <p>Buy and sell stay off until a Parano1d node exposes token trades and this explorer sets <span class="mono">SWAP_ENABLED</span> and <span class="mono">SWAP_FEE_ADDRESS</span>. The fee would be ${esc(pct)}% of the NOID side, shown with the total before anyone signs.</p>
-    <p class="fine">When it is on, you sign in your own wallet. This site never holds keys or funds.</p></div>`;
+function tradeLocked() {
+  return `<div class="card swap off"><h2>Trade</h2>
+    <p class="fine">Buy and sell open here soon.</p></div>`;
 }
 async function mountSwap(d, id) {
   const feePct = Number(d.swap.fee_pct).toFixed(2);
