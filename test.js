@@ -32,7 +32,11 @@ const hash = (h) => H(h, h >= 98 ? fork : '');
 // Target 2^240 little-endian -> 2^16 expected hashes per block; blocks 60 s apart; two alternating miners.
 const TARGET = '00'.repeat(30) + '0100';
 const header = (h) => (h <= tip ? { height: h, hash: hash(h), prev_hash: hash(h - 1), timestamp: 1700000000 + h * 60, miner: h % 2 ? 'o1minerodd' : 'o1minereven', difficulty_target: TARGET, active_slot_count: 1000 + h, state_root: H('state' + h), tx_root: H('txroot' + h), nonce: '00000000000000ab', log_slots: 24 } : null);
-const tx = (h) => ({ tx_hash: H(`tx${h}`), fee_micronoid: 10 });
+const TRADE_ASSET = 'ab'.repeat(32); // 64 hex: a v2.1 asset id
+const tx = (h) => ({ tx_hash: H(`tx${h}`), fee_micronoid: 10,
+  // A buy as a v2.1 body carries it: 10 NOID in, 254.868967 tokens out -> 39,235 µNOID per token.
+  ...(h === 95 ? { trades: [{ asset_id: TRADE_ASSET, side: 'buy', owner: PAY_ADDR, execution_index: 0,
+    gross_input_units: '10000000', spent_input_units: '10000000', output_units: '254868967', network_fee_micronoid: 9800 }] } : {}) });
 
 const node = {
   blockCount: () => tip,
@@ -380,6 +384,20 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual((await get(`search?q=${hash(5)}`))[1], { type: 'block', id: hash(5) }, 'any block hash is searchable');
   const [, bl] = await get('blocks?limit=3');
   assert.strictEqual(bl.blocks[0].txs, 1, 'tx count from captured body');
+  // A block body is the only trade feed a v2.1 node has: the fill lands in token_trades and rolls into a candle.
+  const fill = db.prepare('select * from token_trades').get();
+  assert.ok(fill && fill.token_id === TRADE_ASSET, 'a fill embedded in a block is indexed');
+  assert.strictEqual(fill.side, 'buy');
+  assert.strictEqual(fill.noid_micronoid, '10000000', 'a buy spends the µNOID side');
+  assert.strictEqual(fill.price_micronoid, '39235', 'price is the µNOID side over the token side');
+  assert.strictEqual(fill.trader, PAY_ADDR, 'the fill keeps the trader');
+  assert.strictEqual(db.prepare('select count(*) n from token_candles where token_id = ?').get(TRADE_ASSET).n, 1, 'the fill rolls into a candle');
+  // Wipe the fills and let the backfill read them out of the stored bodies again.
+  db.prepare('delete from token_trades').run();
+  db.prepare('delete from token_candles').run();
+  db.prepare("insert or replace into meta (k, v) values ('trades_backfill_upto', '0')").run();
+  await tick();
+  assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 1, 'the backfill recovers fills from stored bodies');
 
   // Holes in the header history are refilled, not just the top; a height the node can't serve is not re-walked forever.
   db.prepare('delete from headers where height between 30 and 40').run();
@@ -848,7 +866,9 @@ test('indexer + api', async (t) => {
   assert.ok(BigInt(sell.fee.micronoid) > 0n && BigInt(sell.min_out.noid_micronoid) < BigInt(sell.expected_out.noid_micronoid));
   assert.strictEqual((await get('swap/build?demo=1&token=gcat&side=buy&amount=1'))[0], 400);
   assert.strictEqual(db.prepare('select count(*) n from tokens').get().n, 0, 'demo rows are not written');
-  assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 0);
+  // The only fills in the table are the ones a block body carried; nothing demo-shaped gets stored.
+  assert.strictEqual(db.prepare('select count(*) n from token_trades where token_id != ?').get(TRADE_ASSET).n, 0);
+  assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 1);
 
   // The indexer stores a snapshot once the node answers, and a reorg drops trades above the new tip.
   process.env.ASSET_PROBE_MS = '0';
@@ -889,6 +909,27 @@ test('indexer + api', async (t) => {
   assert.strictEqual(k2row.supply, '500000', 'supply is derived from the kind-3 backing relation');
   assert.strictEqual(k2row.reserve_micronoid, '250000', 'the market primary amount is the NOID reserve');
   db.prepare('delete from tokens').run();
+  // The curve quote is the only live price a v2.1 node offers: a 1 NOID buy preview, price = 1e12 / out.
+  node.walletPreviewNative = (arg) => { const r = Array.isArray(arg) ? arg[0] : arg;
+    return { asset_id: r.asset_id, buy: r.buy, gross_input: r.gross_input, plan_id: 'p1', quoted_output: '200000000' }; };
+  db.prepare('delete from token_marks').run();
+  await tick();
+  const priced = db.prepare('select * from tokens where id = ?').get(k2);
+  assert.strictEqual(priced.price_micronoid, '5000', 'a v2.1 row takes its price from the curve quote');
+  assert.strictEqual(db.prepare('select count(*) n from token_marks where id = ?').get(k2).n, 1, 'a sync leaves one price mark');
+  // Two marks two hours apart give the change window and the spark something to read.
+  db.prepare('insert into token_marks (id, ts, height, price_micronoid) values (?, ?, ?, ?)')
+    .run(k2, Math.floor(Date.now() / 1000) - 7200, 1, '2500');
+  const [, listed] = await get('tokens');
+  const pricedRow = listed.tokens.find((t) => t.id === k2);
+  assert.strictEqual(pricedRow.price_micronoid, '5000', 'the explorer row carries the curve price');
+  assert.strictEqual(pricedRow.mcap_micronoid, '2500000000', 'mcap is price times supply');
+  assert.strictEqual(pricedRow.fdv_micronoid, '2500000000', 'fdv follows the same price');
+  assert.strictEqual(pricedRow.change['1h'], 100, '1h change is computed from the recorded marks');
+  assert.strictEqual(pricedRow.spark.length, 2, 'the spark reads the recorded marks');
+  delete node.walletPreviewNative;
+  db.prepare('delete from tokens').run();
+  db.prepare('delete from token_marks').run();
   delete node.getNativeCatalog;
   node.getAssetSnapshot = () => ({
     tokens: [{ id: 'live1', name: 'Live Coin', ticker: 'LIVE', supply: '1000', reserve_micronoid: '1000000', created_ts: 1700000000, graduated: false, price_micronoid: '1000', curve_target_micronoid: '20000000000', curve_raised_micronoid: '1000000000', holders: [{ address: 'o1acdefghjkmnpqr', balance: '400' }] }],
@@ -899,7 +940,7 @@ test('indexer + api', async (t) => {
   await tick();
   await tick();
   assert.strictEqual(db.prepare(`select count(*) n from tokens where id = 'live1'`).get().n, 1, 'the snapshot token is stored once');
-  assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 1, 'the same trade is stored once');
+  assert.strictEqual(db.prepare("select count(*) n from token_trades where token_id = 'live1'").get().n, 1, 'the same trade is stored once');
   assert.strictEqual(db.prepare(`select n from token_candles where token_id = 'live1'`).get().n, 1, 'a trade rolls into one 1m candle, once');
   assert.strictEqual(db.prepare('select count(*) n from token_transfers').get().n, 1);
   const minute = Math.floor(Date.now() / 1000);
@@ -960,7 +1001,8 @@ test('indexer + api', async (t) => {
   tip -= 2;
   await tick();
   assert.strictEqual(db.prepare(`select count(*) n from token_trades where txid = 'reorgtrade1'`).get().n, 0);
-  assert.strictEqual(db.prepare('select count(*) n from token_candles where height > 0').get().n, 0);
+  // Candle heights are block heights now that fills come from bodies, so the reorg test asks about the tip.
+  assert.strictEqual(db.prepare('select count(*) n from token_candles where height > ?').get(tip).n, 0);
   assert.strictEqual(db.prepare(`select count(*) n from token_transfers where txid = 'reorgxfer01'`).get().n, 0);
   assert.strictEqual(db.prepare(`select count(*) n from nft_sales where txid = 'reorgsale01'`).get().n, 0);
   assert.strictEqual(db.prepare('select count(*) n from nft_candles where height > 0').get().n, 0);

@@ -77,6 +77,9 @@ module.exports = function assets(db, rpc, priceNow) {
       trader text, venue text, price_micronoid text);
     create index if not exists token_trades_tok_ts on token_trades(token_id, ts);
     create index if not exists token_trades_trader on token_trades(trader, ts);
+    create table if not exists token_marks (
+      id text not null, ts integer not null, height integer, price_micronoid text not null,
+      primary key (id, ts));
     create table if not exists token_holders (
       token_id text not null, address text not null, balance text not null, primary key (token_id, address));
     create index if not exists token_holders_addr on token_holders(address);
@@ -129,6 +132,8 @@ module.exports = function assets(db, rpc, priceNow) {
     token: db.prepare('select * from tokens where id = ?'),
     poolsFor: db.prepare('select * from pools where token_id = ?'),
     tradesFor: db.prepare('select * from token_trades where token_id = ? order by ts desc limit 400'),
+    marksFor: db.prepare('select ts, price_micronoid from token_marks where id = ? and ts >= ? order by ts'),
+    upMark: db.prepare('insert or ignore into token_marks (id, ts, height, price_micronoid) values (?, ?, ?, ?)'),
     // (trader, ts) covers the wallet scan. Sort stays in the index order.
     tradesByTrader: db.prepare('select * from token_trades where trader = ? order by ts desc limit 400'),
     // Sort in JS. ORDER BY cast(balance) cannot use (token_id, address) and asks SQLite for a temp b-tree.
@@ -369,7 +374,18 @@ module.exports = function assets(db, rpc, priceNow) {
     };
   }
 
-  function presentToken(raw, trades, now, usd) {
+  // Price change from the indexer's own marks. Used only while a token has no indexed trades.
+  function markChange(marks, now, sec) {
+    const cutoff = now - sec;
+    let prev = null;
+    for (const m of marks) if (m.ts <= cutoff && m.price != null) prev = m.price;
+    const last = [...marks].reverse().find((m) => m.price != null)?.price ?? null;
+    return prev == null || last == null ? null : pct(last, prev);
+  }
+
+  function presentToken(raw, trades, now, usd, marks = []) {
+    const hasTrades = (trades || []).length > 0;
+    const series = hasTrades ? trades : marks;
     const supply = bi(raw.supply) || 0n;
     const circulating = bi(raw.circulating) ?? supply;
     const reserve = bi(raw.reserve_micronoid) || 0n;
@@ -385,11 +401,11 @@ module.exports = function assets(db, rpc, priceNow) {
     const stats = {};
     for (const [k, sec] of Object.entries(WINS)) {
       const w = windowStats(trades || [], now, sec);
-      change[k] = w.change;
+      change[k] = hasTrades ? w.change : markChange(marks, now, sec);
       stats[k] = w;
     }
     const win = stats['24h'];
-    const prices = (trades || []).map((t) => t.price).filter((p) => p != null);
+    const prices = series.map((t) => t.price).filter((p) => p != null);
     let spark = [];
     if (prices.length >= 2) {
       const step = Math.max(1, Math.ceil(prices.length / 16));
@@ -501,7 +517,9 @@ module.exports = function assets(db, rpc, priceNow) {
         raised_micronoid: t.curve_raised_micronoid, target_micronoid: t.curve_target_micronoid,
         virtual_noid: t.curve_virtual_noid, virtual_token: t.curve_virtual_token,
       } : null;
-      return presentToken({ ...t, graduated: !!t.graduated, pool: pools.get(t.id) || null, curve }, indexTrades(trades).get(t.id) || [], now, noidUsd());
+      const marks = q.marksFor.all(t.id, since)
+        .map((m) => ({ ts: Number(m.ts), price: bi(m.price_micronoid) })).filter((m) => m.price != null);
+      return presentToken({ ...t, graduated: !!t.graduated, pool: pools.get(t.id) || null, curve }, indexTrades(trades).get(t.id) || [], now, noidUsd(), marks);
     });
   }
 
@@ -1282,6 +1300,17 @@ module.exports = function assets(db, rpc, priceNow) {
   // launchpad uses it, so supply = relation amount / BACKING_PER_TOKEN.
   const BACKING_PER_TOKEN = 1000n;
   // shortcut: catalogue item fields are not documented and are empty until activation; map common names.
+  // v2.1 publishes no trade feed, so the curve's own quote is the only live price: a 1 NOID buy
+  // preview returns the tokens out, and µNOID per whole token is 1e12 / out.
+  async function curvePriceMicronoid(id) {
+    try {
+      const pv = await rpc('walletPreviewNative',
+        [{ action: 'trade', asset_id: id, buy: true, gross_input: '1000000', slippage_bps: 0 }], 8_000);
+      const out = bi(pick(pv || {}, 'quoted_output', 'out', 'token_out'));
+      return out && out > 0n ? (10n ** 12n / out).toString() : null;
+    } catch { return null; }
+  }
+
   async function nativeSnapshot() {
     const [markets, cols, listings] = await Promise.all([nativePages('markets'), nativePages('collections'), nativePages('nft_listings')]);
     const tokens = [], pools = [];
@@ -1298,6 +1327,8 @@ module.exports = function assets(db, rpc, priceNow) {
       const back = Array.isArray(m.related) ? m.related.find((x) => Number(x?.kind) === 3) : null;
       const backAmt = bi(pick(back || {}, 'amount_micronoid'));
       const supplyFromChain = backAmt && backAmt > 0n ? String(backAmt / BACKING_PER_TOKEN) : null;
+      const quoted = pick(m, 'price_micronoid', 'spot_price_micronoid');
+      const spot = strInt(quoted) ?? await curvePriceMicronoid(id);
       tokens.push({
         id, name: pick(meta, 'name') ?? pick(m, 'name') ?? cur.name ?? `Token ${short}`,
         ticker: pick(meta, 'ticker', 'symbol') ?? pick(m, 'ticker', 'symbol') ?? cur.ticker ?? short.toUpperCase(),
@@ -1306,7 +1337,7 @@ module.exports = function assets(db, rpc, priceNow) {
         reserve_micronoid: pick(m, 'reserve_micronoid', 'backing_micronoid', 'reserve') ?? pick(m.primary || {}, 'amount_micronoid'),
         created_height: pick(m, 'created_height', 'height') ?? cur.created_height ?? null,
         logo: pick(meta, 'image', 'logo') ?? cur.logo ?? null, graduated: !!pick(m, 'graduated'),
-        price_micronoid: pick(m, 'price_micronoid', 'spot_price_micronoid'),
+        price_micronoid: spot,
         launch: 'launchpad',
       });
       const prim = m.primary && typeof m.primary === 'object' ? m.primary : {};
@@ -1341,6 +1372,51 @@ module.exports = function assets(db, rpc, priceNow) {
     return null;
   }
 
+  // v2.1 publishes no trade feed, but every block body carries the fills: tx.trades[] gives the side,
+  // the owner, the token units and the µNOID side. It is the only source of txns, volume and candles.
+  function tradeRows(height, txs, ts) {
+    const rows = [];
+    for (const t of txs || []) {
+      const group = String(t.group_txid || t.txid || t.tx_hash || '').toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(group)) continue;
+      const list = Array.isArray(t.trades) ? t.trades : [];
+      list.forEach((tr, i) => {
+        const id = String(tr.asset_id || '');
+        if (!ID.test(id)) return;
+        const side = tr.side === 'sell' ? 'sell' : tr.side === 'buy' ? 'buy' : null;
+        if (!side) return;
+        const units = bi(side === 'buy' ? tr.output_units : tr.gross_input_units);
+        const noidMicro = bi(side === 'buy' ? tr.spent_input_units : tr.output_units);
+        if (units == null || units <= 0n || noidMicro == null || noidMicro < 0n) return;
+        const exec = Number.isInteger(tr.execution_index) ? tr.execution_index : i;
+        rows.push({
+          txid: `${group}:${exec}`, token_id: id, ts, height, side,
+          // Whole tokens, floored: token_amount is read with BigInt math elsewhere.
+          token_amount: (units / 1000000n).toString(),
+          noid_micronoid: noidMicro.toString(),
+          trader: ADDR.test(tr.owner || '') ? tr.owner : null,
+          venue: 'curve',
+          price_micronoid: (noidMicro * 1000000n / units).toString(),
+        });
+      });
+    }
+    return rows;
+  }
+
+  // Writes the fills of one block. Returns how many were new. Safe inside another transaction.
+  // Named for the block it reads: the module already has an indexTrades(list) that groups rows for display.
+  function indexBlockTrades(height, txs, ts) {
+    let wrote = 0;
+    const touched = new Set();
+    for (const r of tradeRows(height, txs, ts)) {
+      const info = q.upTrade.run(r.txid, r.token_id, r.ts, r.height, r.side, r.token_amount,
+        r.noid_micronoid, r.trader, r.venue, r.price_micronoid);
+      if (info.changes) { wrote++; touched.add(r.token_id); }
+    }
+    for (const id of touched) bumpCandle(id, ts);
+    return wrote;
+  }
+
   function ingest(snap) {
     if (!snap || typeof snap !== 'object') return false;
     const tokens = Array.isArray(snap.tokens) ? snap.tokens : [];
@@ -1359,6 +1435,13 @@ module.exports = function assets(db, rpc, priceNow) {
           t.graduated ? 1 : 0, strInt(t.price_micronoid), strInt(t.curve_target_micronoid), strInt(t.curve_raised_micronoid),
           strInt(t.curve_virtual_noid_micronoid), strInt(t.curve_virtual_token), Number.isInteger(t.updated_height) ? t.updated_height : null,
           launch, links ? JSON.stringify(links) : null);
+        // v2.1 gives no trade feed: one price mark per sync keeps a price history for the chart and change.
+        const markPrice = strInt(t.price_micronoid);
+        if (markPrice && markPrice !== '0') {
+          const ts = Math.floor(Date.now() / 1000);
+          const info = q.upMark.run(String(t.id), ts, Number.isInteger(t.updated_height) ? t.updated_height : null, markPrice);
+          if (info.changes) bumpMarkCandle(String(t.id), ts);
+        }
         if (Array.isArray(t.holders)) {
           q.delHolders.run(String(t.id));
           for (const h of t.holders.slice(0, 50)) if (ADDR.test(h.address || '') && strInt(h.balance)) q.upHolder.run(String(t.id), h.address, strInt(h.balance));
@@ -1493,6 +1576,23 @@ module.exports = function assets(db, rpc, priceNow) {
     const safe = (x) => Number(x > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : x);
     q.upCandle.run(tokenId, bucket, safe(o), safe(h), safe(l), safe(c), safe(v), n, height);
   }
+  // A mark is a price quote, not a fill: it only fills a minute that has no trades, and it carries no volume.
+  function bumpMarkCandle(id, ts) {
+    const bucket = ts - (ts % 60);
+    if (q.tradesIn.all(id, bucket, bucket + 60).length) return;
+    let o, h, l, c, n = 0;
+    for (const r of q.marksFor.all(id, bucket)) {
+      if (r.ts >= bucket + 60) break;
+      const price = bi(r.price_micronoid);
+      if (price == null || price > BigInt(Number.MAX_SAFE_INTEGER)) continue;
+      const p = Number(price);
+      if (!n) o = h = l = p;
+      else { if (p > h) h = p; if (p < l) l = p; }
+      c = p; n++;
+    }
+    if (!n) return;
+    q.upCandle.run(id, bucket, o, h, l, c, 0, n, null);
+  }
   function bumpNftSale(id, ts) {
     const bucket = ts - (ts % 60);
     let o, h, l, c, v = 0n, n = 0, height = null;
@@ -1624,5 +1724,6 @@ module.exports = function assets(db, rpc, priceNow) {
     },
     collection: (id, params) => collectionDetail(id, params),
     swap,
+    indexBlockTrades,
   };
 };

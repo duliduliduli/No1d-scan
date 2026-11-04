@@ -184,6 +184,7 @@ const q = {
     from headers where ts >= :since group by ts / cast(:b as integer) order by t`),
   minersSince: db.prepare('select miner, count(*) blocks, max(height) last from headers where ts >= ? group by miner order by blocks desc'),
   bodyStats: db.prepare(`select height, lower(hex(hash)) hash, reward, fees, txs from blocks where height between ? and ?`),
+  blocksForTrades: db.prepare('select height, ts, blob from blocks where height > ? and blob is not null order by height limit ?'),
   txs24h: db.prepare('select sum(txs) n, count(*) blocks from blocks where ts >= ?'),
   addOrphan: db.prepare('insert into orphans (height, hash, kind, blob, first_seen, replaced_at, reason, cold) values (?, ?, ?, ?, ?, ?, ?, ?)'),
   orphansAt: db.prepare('select height, hash, kind, reason, first_seen, replaced_at from orphans where height = ? order by id'),
@@ -382,6 +383,11 @@ function indexBody(height, details) {
   }
   const miner = details.header?.miner;
   const reward = details.retained?.reward_micronoid;
+  // Fills live in the body, so indexing them here is what fills in txns, volume and candles.
+  if (Array.isArray(txs) && txs.length) {
+    const ts = Number(details.header?.timestamp) || Math.floor(Date.now() / 1000);
+    try { assets.indexBlockTrades(height, txs, ts); } catch (e) { console.error('trades:', e.message); }
+  }
   if (miner && reward != null) {
     const to = coinbaseTo || miner;
     q.putPayout.run(height, miner, to, String(reward));
@@ -510,6 +516,26 @@ const packStats = { raw: null, zstd: null };
 // a replaced block has a new hash at the same height and gets overwritten.
 const indexer = { tip: null, at: null, supply: null, error: null }; // last successful pass, exposed in /api/stats for uptime monitors
 const MAX_REORG = 18; // Parano1d consensus never replaces more blocks than this (CONSENSUS_FINALITY_DEPTH)
+// A v2.1 node keeps only the last RETAINED bodies, so fills older than that can only be recovered from
+// the bodies this scanner already stored. Batched: one call reads up to BACKFILL_PER_PASS heights.
+const BACKFILL_PER_PASS = 400;
+async function backfillTrades() {
+  const from = Number(q.meta.get('trades_backfill_upto')?.v ?? 0);
+  const rows = q.blocksForTrades.all(from, BACKFILL_PER_PASS);
+  if (!rows.length) return 0;
+  let n = 0, last = from;
+  for (const row of rows) {
+    try {
+      const details = unpackRow(row);
+      n += assets.indexBlockTrades(row.height, details?.retained?.transactions, Number(row.ts) || null);
+    } catch (e) { /* an unreadable body is not fatal: the next pass moves on */ }
+    last = Math.max(last, row.height);
+  }
+  q.setMeta.run('trades_backfill_upto', String(last));
+  if (n) console.log(`trades: backfilled ${n} fills through height ${last}`);
+  return n;
+}
+
 async function tick() {
   const tip = await rpc('blockCount');
   // The node's tip went down: a reorg (at most 18 blocks) drops the blocks above the new tip, which are no longer canonical.
@@ -555,6 +581,8 @@ async function tick() {
   await syncHeaders(tip);
   noteBodyGaps(tip);
   await recoverGaps().catch((e) => console.error('gaps:', e.message));
+  // One bounded batch of stored-body fills per pass, so a cold start backfills without blocking.
+  await backfillTrades().catch((e) => console.error('trades:', e.message));
   try { maybeCold(tip); } catch (e) { console.error('cold:', e.message); }
   await bill.settleNoid(tip);
   // Token indexing must not pause block indexing: a missing v2.1 method is normal until the node ships it.
