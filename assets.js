@@ -1271,8 +1271,10 @@ module.exports = function assets(db, rpc, priceNow) {
     const [markets, cols, listings] = await Promise.all([nativePages('markets'), nativePages('collections'), nativePages('nft_listings')]);
     const tokens = [], pools = [];
     for (const m of markets) {
-      const id = String(pick(m, 'asset_id', 'id', 'market_id') ?? '');
-      if (!id) continue;
+      let id = String(pick(m, 'asset_id', 'id', 'market_id') ?? '');
+      // v2.1 emits catalogue entries shaped {key, primary, related}; the id is the key minus its 2-byte class prefix
+      if (!id && m?.key) id = String(m.key).replace(/^[0-9a-fA-F]{4}/, '');
+      if (!id || id.length !== 64) continue;
       const meta = m.metadata && typeof m.metadata === 'object' ? m.metadata : {};
       const short = id.slice(0, 8);
       tokens.push({
@@ -1282,7 +1284,10 @@ module.exports = function assets(db, rpc, priceNow) {
         logo: pick(meta, 'image', 'logo'), graduated: !!pick(m, 'graduated'), price_micronoid: pick(m, 'price_micronoid', 'spot_price_micronoid'),
         launch: 'launchpad',
       });
-      const rt = pick(m, 'pool_reserve_token', 'reserve_token'), rn = pick(m, 'pool_reserve_micronoid', 'reserve_noid_micronoid');
+      const prim = m.primary && typeof m.primary === 'object' ? m.primary : {};
+      const pool = Array.isArray(m.related) ? m.related.find((x) => Number(x?.kind) === 1) : null;
+      const rt = pick(m, 'pool_reserve_token', 'reserve_token') ?? pick(pool || {}, 'amount_micronoid');
+      const rn = pick(m, 'pool_reserve_micronoid', 'reserve_noid_micronoid') ?? pick(prim, 'amount_micronoid');
       if (rt != null && rn != null) pools.push({ id: `${id}:pool`, token_id: id, reserve_token: rt, reserve_noid_micronoid: rn });
     }
     const byCol = new Map();

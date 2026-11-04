@@ -860,6 +860,15 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual([...new Set(seenKinds)].sort(), ['collections', 'markets', 'nft_listings']);
   const nat = db.prepare('select * from tokens where id = ?').get('ab'.repeat(32));
   assert.ok(nat && nat.supply === '100000' && nat.ticker === 'ABABABAB', 'a native market is stored from the second catalogue page');
+  // v2.1 emits {key, primary, related}: the asset id is the key minus its class prefix.
+  const k2 = 'cd'.repeat(32);
+  node.getNativeCatalog = ({ kind }) => (kind === 'markets'
+    ? { kind, height: 1, items: [{ key: `8000${k2}`, primary: { kind: 49, amount_micronoid: '250000' }, whole_tokens: '100000', related: [{ kind: 1, amount_micronoid: '9000000' }] }], next: null }
+    : { kind, height: 1, items: [], next: null });
+  await tick();
+  const shaped = db.prepare('select * from tokens where id = ?').get(k2);
+  assert.ok(shaped && shaped.supply === '100000', 'a key-shaped catalogue entry stores its token');
+  db.prepare('delete from tokens where id = ?').run(k2);
   db.prepare('delete from tokens where id = ?').run('ab'.repeat(32));
   delete node.getNativeCatalog;
   node.getAssetSnapshot = () => ({
