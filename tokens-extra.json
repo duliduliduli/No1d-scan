@@ -1,0 +1,14 @@
+[
+ {
+  "id": "26dd19b5a9c4431ede91f25ed1fb7df69ae85f77eab2b8d3c87e83dd9b58ff0a",
+  "name": "NoidCat",
+  "ticker": "NOIDCAT",
+  "supply": "500000",
+  "reserve_micronoid": "180555556",
+  "creator": "o10zz7h75swlpe2v2anpdrj5zvkrvedyvkulfr8mm6we8amn3q2k9sdjj2f2",
+  "logo": "https://noidcat.com/assets/logo.png",
+  "launch": "launchpad",
+  "created_height": 279371,
+  "graduated": false
+ }
+]

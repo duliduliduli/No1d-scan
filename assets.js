@@ -167,6 +167,7 @@ module.exports = function assets(db, rpc, priceNow) {
   };
 
   // available: getAssetSnapshot has answered. quote/build: swap RPC is present (not merely "method not found").
+  const fs = require('fs');
   const status = { native: false, available: false, quote: false, build: false, orders: false, nftOrders: false, error: null, retryAt: 0, dexProbeAt: 0 };
 
   const probeWait = () => {
@@ -1266,6 +1267,10 @@ module.exports = function assets(db, rpc, priceNow) {
     return items;
   }
   const pick = (o, ...ks) => { for (const k of ks) if (o?.[k] != null) return o[k]; return null; };
+  // Curated fallback: a node whose catalogue lags (or does not expose markets) still gets these rows.
+  const extras = (() => {
+    try { const j = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'tokens-extra.json'), 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; }
+  })();
   // shortcut: catalogue item fields are not documented and are empty until activation; map common names.
   async function nativeSnapshot() {
     const [markets, cols, listings] = await Promise.all([nativePages('markets'), nativePages('collections'), nativePages('nft_listings')]);
@@ -1289,6 +1294,10 @@ module.exports = function assets(db, rpc, priceNow) {
       const rt = pick(m, 'pool_reserve_token', 'reserve_token') ?? pick(pool || {}, 'amount_micronoid');
       const rn = pick(m, 'pool_reserve_micronoid', 'reserve_noid_micronoid') ?? pick(prim, 'amount_micronoid');
       if (rt != null && rn != null) pools.push({ id: `${id}:pool`, token_id: id, reserve_token: rt, reserve_noid_micronoid: rn });
+    }
+    for (const x of (tokens.length ? [] : extras)) {
+      if (!ID.test(String(x.id || '')) || tokens.some((t) => t.id === x.id)) continue;
+      tokens.push({ ...x, launch: x.launch || 'launchpad' });
     }
     const byCol = new Map();
     for (const L of listings) {
