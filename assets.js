@@ -1275,6 +1275,12 @@ module.exports = function assets(db, rpc, priceNow) {
   const extras = (() => {
     try { const j = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'tokens-extra.json'), 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; }
   })();
+  // Curated names, tickers and logos by asset id. The v2.1 catalogue carries no metadata blob, so a row
+  // built from it alone would be nameless; these fill the labels while the chain supplies the numbers.
+  const curated = new Map(extras.filter((x) => ID.test(String(x.id || ''))).map((x) => [String(x.id), x]));
+  // Backing per whole token (μNOID), the unit the kind-3 relation is sized in. Every launch on the
+  // launchpad uses it, so supply = relation amount / BACKING_PER_TOKEN.
+  const BACKING_PER_TOKEN = 1000n;
   // shortcut: catalogue item fields are not documented and are empty until activation; map common names.
   async function nativeSnapshot() {
     const [markets, cols, listings] = await Promise.all([nativePages('markets'), nativePages('collections'), nativePages('nft_listings')]);
@@ -1286,11 +1292,21 @@ module.exports = function assets(db, rpc, priceNow) {
       if (!id || id.length !== 64) continue;
       const meta = m.metadata && typeof m.metadata === 'object' ? m.metadata : {};
       const short = id.slice(0, 8);
+      const cur = curated.get(id) || {};
+      // v2.1's catalogue carries no whole_tokens. The kind-3 relation is the backing amount, sized as
+      // whole_tokens * BACKING_PER_TOKEN, so it recovers the supply the insert validation needs.
+      const back = Array.isArray(m.related) ? m.related.find((x) => Number(x?.kind) === 3) : null;
+      const backAmt = bi(pick(back || {}, 'amount_micronoid'));
+      const supplyFromChain = backAmt && backAmt > 0n ? String(backAmt / BACKING_PER_TOKEN) : null;
       tokens.push({
-        id, name: pick(meta, 'name') ?? pick(m, 'name') ?? `Token ${short}`, ticker: pick(meta, 'ticker', 'symbol') ?? pick(m, 'ticker', 'symbol') ?? short.toUpperCase(),
-        creator: pick(m, 'creator', 'owner'), supply: pick(m, 'whole_tokens', 'supply', 'total_supply'),
-        reserve_micronoid: pick(m, 'reserve_micronoid', 'backing_micronoid', 'reserve'), created_height: pick(m, 'created_height', 'height'),
-        logo: pick(meta, 'image', 'logo'), graduated: !!pick(m, 'graduated'), price_micronoid: pick(m, 'price_micronoid', 'spot_price_micronoid'),
+        id, name: pick(meta, 'name') ?? pick(m, 'name') ?? cur.name ?? `Token ${short}`,
+        ticker: pick(meta, 'ticker', 'symbol') ?? pick(m, 'ticker', 'symbol') ?? cur.ticker ?? short.toUpperCase(),
+        creator: pick(m, 'creator', 'owner') ?? cur.creator ?? null,
+        supply: pick(m, 'whole_tokens', 'supply', 'total_supply') ?? supplyFromChain ?? cur.supply,
+        reserve_micronoid: pick(m, 'reserve_micronoid', 'backing_micronoid', 'reserve') ?? pick(m.primary || {}, 'amount_micronoid'),
+        created_height: pick(m, 'created_height', 'height') ?? cur.created_height ?? null,
+        logo: pick(meta, 'image', 'logo') ?? cur.logo ?? null, graduated: !!pick(m, 'graduated'),
+        price_micronoid: pick(m, 'price_micronoid', 'spot_price_micronoid'),
         launch: 'launchpad',
       });
       const prim = m.primary && typeof m.primary === 'object' ? m.primary : {};

@@ -678,8 +678,11 @@ test('indexer + api', async (t) => {
   const [, none] = await get('tokens');
   assert.strictEqual(none.demo, false);
   // curated fallback rows are served even from a node that does not speak v2.1
-  assert.strictEqual(none.tokens.length, 1);
-  assert.match(none.tokens[0].ticker, /^NOIDCAT$/);
+  const curatedCount = require('./tokens-extra.json').length;
+  assert.strictEqual(none.tokens.length, curatedCount);
+  const noidcat = none.tokens.find((t) => t.ticker === 'NOIDCAT');
+  assert.ok(noidcat, 'the curated NOIDCAT row is served');
+  assert.strictEqual(noidcat.id, 'c9df752917d995cfd7636920c97e9c2770784b33944e678fdce4dae98235a93f', 'the curated row carries the real asset id, not another launch\'s');
   assert.ok(none.notice === null || /v2\.1/.test(none.notice));
   assert.strictEqual((await get('collections'))[1].collections.length, 0);
   const [, demo] = await get('tokens?demo=1');
@@ -876,6 +879,16 @@ test('indexer + api', async (t) => {
   await tick();
   assert.ok(db.prepare('select * from tokens where id = ?').get(k2), 'a key-shaped catalogue entry stores its token');
   db.prepare('delete from tokens').run();
+  // A v2.1 market row as the node really emits it: key/primary/related, no whole_tokens anywhere.
+  node.getNativeCatalog = ({ kind }) => (kind === 'markets'
+    ? { kind, height: 1, items: [{ key: `8000${k2}`, primary: { kind: 49, amount_micronoid: '250000' }, related: [{ kind: 1, amount_micronoid: '0' }, { kind: 3, amount_micronoid: '500000000' }] }], next: null }
+    : { kind, height: 1, items: [], next: null });
+  await tick();
+  const k2row = db.prepare('select * from tokens where id = ?').get(k2);
+  assert.ok(k2row, 'a v2.1 catalogue row with no whole_tokens is still stored');
+  assert.strictEqual(k2row.supply, '500000', 'supply is derived from the kind-3 backing relation');
+  assert.strictEqual(k2row.reserve_micronoid, '250000', 'the market primary amount is the NOID reserve');
+  db.prepare('delete from tokens').run();
   delete node.getNativeCatalog;
   node.getAssetSnapshot = () => ({
     tokens: [{ id: 'live1', name: 'Live Coin', ticker: 'LIVE', supply: '1000', reserve_micronoid: '1000000', created_ts: 1700000000, graduated: false, price_micronoid: '1000', curve_target_micronoid: '20000000000', curve_raised_micronoid: '1000000000', holders: [{ address: 'o1acdefghjkmnpqr', balance: '400' }] }],
@@ -885,7 +898,7 @@ test('indexer + api', async (t) => {
   });
   await tick();
   await tick();
-  assert.strictEqual(db.prepare('select count(*) n from tokens').get().n, 1);
+  assert.strictEqual(db.prepare(`select count(*) n from tokens where id = 'live1'`).get().n, 1, 'the snapshot token is stored once');
   assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 1, 'the same trade is stored once');
   assert.strictEqual(db.prepare(`select n from token_candles where token_id = 'live1'`).get().n, 1, 'a trade rolls into one 1m candle, once');
   assert.strictEqual(db.prepare('select count(*) n from token_transfers').get().n, 1);

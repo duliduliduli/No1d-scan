@@ -1,14 +1,41 @@
 [
  {
-  "id": "26dd19b5a9c4431ede91f25ed1fb7df69ae85f77eab2b8d3c87e83dd9b58ff0a",
+  "id": "c9df752917d995cfd7636920c97e9c2770784b33944e678fdce4dae98235a93f",
   "name": "NoidCat",
   "ticker": "NOIDCAT",
   "supply": "500000",
-  "reserve_micronoid": "180555556",
+  "reserve_micronoid": "324699834",
   "creator": "o10zz7h75swlpe2v2anpdrj5zvkrvedyvkulfr8mm6we8amn3q2k9sdjj2f2",
   "logo": "https://noidcat.com/assets/logo.png",
   "launch": "launchpad",
   "created_height": 279371,
+  "graduated": false
+ },
+ {
+  "id": "26dd19b5a9c4431ede91f25ed1fb7df69ae85f77eab2b8d3c87e83dd9b58ff0a",
+  "name": "Ignotus Nemo",
+  "ticker": "NEMO",
+  "supply": "1000000",
+  "reserve_micronoid": "9377396370",
+  "launch": "launchpad",
+  "graduated": false
+ },
+ {
+  "id": "1a05ae51cf7275495515971111bcfb0109abcbf9551327b09861372203c2ba5b",
+  "name": "Paranoid Cat",
+  "ticker": "PCAT",
+  "supply": "1000000",
+  "reserve_micronoid": "1853059842",
+  "launch": "launchpad",
+  "graduated": false
+ },
+ {
+  "id": "d651c44ab536426ef3e588cc7979cabdf59bfa3d3d3fd3996c26cbfca1adb098",
+  "name": "Quantum INU",
+  "ticker": "QINU",
+  "supply": "54000",
+  "reserve_micronoid": "1169397472",
+  "launch": "launchpad",
   "graduated": false
  }
 ]
