@@ -184,7 +184,8 @@ const q = {
     from headers where ts >= :since group by ts / cast(:b as integer) order by t`),
   minersSince: db.prepare('select miner, count(*) blocks, max(height) last from headers where ts >= ? group by miner order by blocks desc'),
   bodyStats: db.prepare(`select height, lower(hex(hash)) hash, reward, fees, txs from blocks where height between ? and ?`),
-  blocksForTrades: db.prepare('select height, ts, blob from blocks where height > ? and blob is not null order by height limit ?'),
+  blocksForTrades: db.prepare('select height, ts, blob from blocks where height < ? and blob is not null order by height desc limit ?'),
+  highestBody: db.prepare('select max(height) h from blocks where blob is not null'),
   txs24h: db.prepare('select sum(txs) n, count(*) blocks from blocks where ts >= ?'),
   addOrphan: db.prepare('insert into orphans (height, hash, kind, blob, first_seen, replaced_at, reason, cold) values (?, ?, ?, ?, ?, ?, ?, ?)'),
   orphansAt: db.prepare('select height, hash, kind, reason, first_seen, replaced_at from orphans where height = ? order by id'),
@@ -517,22 +518,24 @@ const packStats = { raw: null, zstd: null };
 const indexer = { tip: null, at: null, supply: null, error: null }; // last successful pass, exposed in /api/stats for uptime monitors
 const MAX_REORG = 18; // Parano1d consensus never replaces more blocks than this (CONSENSUS_FINALITY_DEPTH)
 // A v2.1 node keeps only the last RETAINED bodies, so fills older than that can only be recovered from
-// the bodies this scanner already stored. Batched: one call reads up to BACKFILL_PER_PASS heights.
+// the bodies this scanner already stored. Newest first: the fills worth having are the recent ones, and
+// walking down from the tip reaches yesterday's market in one pass instead of re-reading the whole chain.
 const BACKFILL_PER_PASS = 400;
 async function backfillTrades() {
-  const from = Number(q.meta.get('trades_backfill_upto')?.v ?? 0);
-  const rows = q.blocksForTrades.all(from, BACKFILL_PER_PASS);
-  if (!rows.length) return 0;
-  let n = 0, last = from;
+  const stored = Number(q.meta.get('trades_backfill_below')?.v ?? 0);
+  const below = stored || (Number(q.highestBody.get()?.h ?? 0) + 1);
+  const rows = q.blocksForTrades.all(below, BACKFILL_PER_PASS);
+  if (!rows.length) { q.setMeta.run('trades_backfill_below', '0'); return 0; }
+  let n = 0, low = below;
   for (const row of rows) {
     try {
       const details = unpackRow(row);
       n += assets.indexBlockTrades(row.height, details?.retained?.transactions, Number(row.ts) || null);
     } catch (e) { /* an unreadable body is not fatal: the next pass moves on */ }
-    last = Math.max(last, row.height);
+    low = Math.min(low, row.height);
   }
-  q.setMeta.run('trades_backfill_upto', String(last));
-  if (n) console.log(`trades: backfilled ${n} fills through height ${last}`);
+  q.setMeta.run('trades_backfill_below', String(low));
+  if (n) console.log(`trades: backfilled ${n} fills down to height ${low}`);
   return n;
 }
 

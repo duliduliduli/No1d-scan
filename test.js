@@ -395,7 +395,7 @@ test('indexer + api', async (t) => {
   // Wipe the fills and let the backfill read them out of the stored bodies again.
   db.prepare('delete from token_trades').run();
   db.prepare('delete from token_candles').run();
-  db.prepare("insert or replace into meta (k, v) values ('trades_backfill_upto', '0')").run();
+  db.prepare("insert or replace into meta (k, v) values ('trades_backfill_below', '0')").run();
   await tick();
   assert.strictEqual(db.prepare('select count(*) n from token_trades').get().n, 1, 'the backfill recovers fills from stored bodies');
 
