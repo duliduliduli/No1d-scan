@@ -432,7 +432,11 @@ NOID through a real Parano1d contract, not a fee address with dust digits.
   `headers` table with a `matched` count, so a search covers every header it kept rather than the page
   the node holds. A list with no filter still comes from the node. New params are in `PARAMS`.
 - **Density and mobile fixes.** The five live tiles are one row; the globe sits left with the country
-  list scrolling beside it (callouts fall back to the country code past 12 characters); the mining
+  list scrolling beside it, the two frames one height (`.gnsplit` sets `height:var(--gnh)` and stretches
+  both cards, so they start and end together at every width; the list sizes its rows `max-content` or a
+  definite height squashes them and the text overlaps); the zoom stack sits inside the globe frame;
+  tapping a peer opens its detail card full width under the row, not inside the 161px globe frame where
+  it clipped itself (callouts fall back to the country code past 12 characters); the mining
   calculator's three fields are plain fields, not bordered tiles that ran into each other; and every
   field is 16px so iOS does not zoom the page when one is focused.
 
