@@ -883,10 +883,15 @@ module.exports = function assets(db, rpc, priceNow) {
       let onchain = null;
       try { onchain = await nodeHoldings(address); } catch { onchain = null; }
       if (onchain) {
+        // Price the way the screener does: the stored column can be empty (the node quotes a curve price only while
+        // it is asked), so the last trade wins and the column is the fallback. Built once for every holding.
+        let shown = new Map();
+        if (onchain.size) { try { shown = new Map(realTokens(now).map((r) => [r.id, r])); } catch { shown = new Map(); } }
         holdings = [...onchain].map(([id, units]) => {
           const t = q.token.get(id);
           return { token_id: id, name: t?.name || `Token ${id.slice(0, 8)}`, ticker: t?.ticker || '', logo: t?.logo || null,
-            units: units.toString(), balance: wholeUnits(units), price_micronoid: t?.price_micronoid || null, onchain: true };
+            units: units.toString(), balance: wholeUnits(units),
+            price_micronoid: shown.get(id)?.price_micronoid ?? t?.price_micronoid ?? null, onchain: true };
         });
       } else {
         holdings = q.holdersByAddr.all(address).map((h) => {

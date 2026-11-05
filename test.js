@@ -1262,8 +1262,20 @@ test('indexer + api', async (t) => {
   assert.strictEqual(held.balance, '400');
   assert.strictEqual(held.ticker, 'PAGE');
   assert.strictEqual(held.onchain, true);
-  assert.strictEqual(held.value_micronoid, '800000', 'micro-units are scaled against the per-token price');
+  const [, screener] = await get('tokens/' + HEXID);
+  assert.strictEqual(held.price_micronoid, screener.token.price_micronoid, 'the wallet prices a token exactly as the screener does');
+  assert.strictEqual(held.value_micronoid, (BigInt(held.balance) * BigInt(held.price_micronoid)).toString(), 'value is quantity times price');
   assert.ok(Number.isFinite(held.value_usd));
+  // The stored price column is often empty on the live chain; then the last trade is the price, as on the screener.
+  db.prepare("update tokens set price_micronoid = null where id = ?").run(HEXID);
+  db.prepare(`insert or replace into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid, trader, venue, price_micronoid)
+    values ('pagepx01', ?, ?, 60, 'buy', '5', '6175', 'o1acdefghjkmnpqr', 'curve', '1235')`).run(HEXID, Math.floor(Date.now() / 1000) - 10);
+  const [, repriced] = await get('wallet/o1tkaxk4f6n638xesg8k7jyydx0ruugeccwtynsl5cmjedg6vpjhfsfes7dp');
+  const rp = repriced.holdings.find((h) => h.token_id === HEXID);
+  assert.ok(rp, 'a fresh address still reads its holdings');
+  assert.strictEqual(rp.price_micronoid, '1235', 'the last trade prices a token the column left empty');
+  assert.strictEqual(rp.value_micronoid, '494000', '400 whole tokens at 1235');
+  db.prepare('delete from token_trades where txid = ?').run('pagepx01');
   // A node without the method is the refusal case, and a different address keeps the response cache out of it.
   delete node.getNativeHoldings;
   await tick();
