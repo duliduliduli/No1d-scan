@@ -856,6 +856,9 @@
   .gnsplit .gltools { right:6px; gap:6px; max-width:30px }
   .gnsplit .gltools button { width:28px; height:28px; font-size:13px }
   .gnsplit .gnrow { padding:6px 7px; gap:1px 6px }
+  /* The peer detail card is a full-width panel under the two frames: inside the 161px globe frame it clipped its own text. */
+  .gnsplit + #gnode { position:relative; inset:auto; width:auto; margin:0 0 10px; padding:10px 12px }
+  .gnsplit + #gnode .gngrid { grid-template-columns:repeat(auto-fit, minmax(min(150px, 100%), 1fr)) }
   @media (max-width:640px) {
     .gnsplit { grid-template-columns:minmax(0, 44%) minmax(0, 1fr); gap:6px; height:var(--gnh, min(44vh, 250px)) }
     .gnsplit .globe .legend { display:none }
@@ -3647,10 +3650,10 @@ const pages = {
           <button type="button" id="glrec" aria-label="Recenter">◎</button>
         </div>
         <div class="event" id="gevent"></div>
-        <div class="gnode" id="gnode" hidden role="dialog" aria-label="Peer node details"></div>
         <div class="legend">Peers connected to NOID Scan's node only · approximate city from GeoIP, addresses masked · not miners or users</div></div>
       <div class="card" id="topc"><h2>Connected nodes <small class="muted">tap to focus</small></h2><div class="gnlist" id="topclist"><p class="muted">Loading peers…</p></div></div>
       </div>
+      <div class="gnode" id="gnode" hidden role="dialog" aria-label="Peer node details"></div>
       ${exploreCard(demo)}
       ${promoHtml}
       ${strip}
