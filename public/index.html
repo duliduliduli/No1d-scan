@@ -84,6 +84,9 @@
   @media (max-width:640px) { header h1 { order:1 } a.explore { order:2 } #menu { order:3 } #search { order:4; flex-basis:100% } }
   a.explore { padding:8px 12px; border:1px solid var(--accent); border-radius:3px; background:var(--accent); color:var(--bg); font:700 12px var(--mono); letter-spacing:.12em; text-transform:uppercase; box-shadow:var(--glow); white-space:nowrap }
   a.explore:hover { text-shadow:none; filter:brightness(1.08); color:var(--bg) }
+  a.walletbtn { padding:8px 12px; border:1px solid var(--accent); border-radius:3px; color:var(--accent); font:700 12px var(--mono); letter-spacing:.12em; text-transform:uppercase; white-space:nowrap }
+  a.walletbtn:hover { text-shadow:none; box-shadow:var(--glow) }
+  a.walletbtn.here { background:var(--head) }
   a.entry { display:block; color:var(--fg); border-color:var(--accent); box-shadow:var(--glow) }
   a.entry:hover { text-shadow:none } a.entry p { margin:0 0 10px } a.entry .go { font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--accent) }
   .demo-banner { margin:0 0 12px; padding:8px 12px; border:1px solid var(--gold); border-radius:4px; color:var(--gold); font:12px var(--mono) }
@@ -655,6 +658,7 @@
 <header>
   <h1><a href="/" data-link>NOID Scan</a></h1>
   <a class="explore" href="/explore" data-link>Explore</a>
+  <a class="walletbtn" href="/wallet" data-link>Wallet</a>
   <form id="search"><input name="q" placeholder="Search blocks, txs, addresses…" aria-label="Search" autocomplete="off"></form>
   <div class="menu" id="menu">
     <button type="button" id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="menunav">☰</button>
@@ -4465,7 +4469,7 @@ async function render() {
   feed?.close(); feed = null; clearInterval(ticker); clearInterval(exploreTimer); clearInterval(tokenTimer); clearInterval(usdcTimer); exploreTimer = null; tokenTimer = null; usdcTimer = null;
   unmountPriceChart(); unmountBalChart(); unmountTokenChart(); unmountGlobe();
   const onEx = type === 'explore' || type === 'token' || type === 'collection';
-  for (const a of document.querySelectorAll('#menu nav a, a.explore')) {
+  for (const a of document.querySelectorAll('#menu nav a, a.explore, a.walletbtn')) {
     const href = a.getAttribute('href');
     a.classList.toggle('here', href === location.pathname || (onEx && href === '/explore'));
   }
