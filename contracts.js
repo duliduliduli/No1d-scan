@@ -59,14 +59,17 @@ function between(points, x) {
   }
   return null;
 }
+// Seconds to words, rounded to the minute and never up: 2 NOID is 3 hours 30 minutes, not 4 hours.
 function duration(secs) {
   const d = Math.floor(secs / 86400);
-  const h = Math.round((secs % 86400) / 3600);
-  if (d && h) return `${d} day${d === 1 ? '' : 's'} ${h} hour${h === 1 ? '' : 's'}`;
-  if (d) return `${d} day${d === 1 ? '' : 's'}`;
-  if (h) return `${h} hour${h === 1 ? '' : 's'}`;
-  const m = Math.max(1, Math.round(secs / 60));
-  return `${m} minute${m === 1 ? '' : 's'}`;
+  const rest = secs % 86400;
+  const h = Math.floor(rest / 3600);
+  const m = Math.round((rest % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(`${d} day${d === 1 ? '' : 's'}`);
+  if (h) parts.push(`${h} hour${h === 1 ? '' : 's'}`);
+  if (m && !d) parts.push(`${m} minute${m === 1 ? '' : 's'}`);
+  return parts.length ? parts.join(' ') : 'under a minute';
 }
 function termFor(kind, noid) {
   const n = Math.round(Number(noid));
