@@ -13,6 +13,8 @@ npm test      # indexer + API against a fake node
 npm start     # http://127.0.0.1:8080
 ```
 
+To check UI changes against real chain data without deploying, `node scripts/preview-live.js` serves this checkout's `public/` on http://127.0.0.1:8090 and forwards `/api/*` to the live explorer (`PREVIEW_API` to change it). Treat it as read-only: anything submitted there reaches the real server.
+
 | Env | Default | |
 |---|---|---|
 | `RPC_URL` | `http://127.0.0.1:9601` | Node JSON-RPC |
