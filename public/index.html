@@ -191,6 +191,7 @@
   .swap .risk ul { margin:0; padding-left:1.1em } .swap .risk li { margin:4px 0 }
   .avail { margin:10px 0 0; font:12px var(--mono); color:var(--muted) }
   .avail b { color:var(--fg) }
+  .est { margin:6px 0 0; font:12px var(--mono); color:var(--muted) }
   .amrow { display:flex; gap:8px; align-items:center }
   .amrow input { flex:1; min-width:0 }
   .amrow button { white-space:nowrap }
@@ -2781,6 +2782,7 @@ function mountTrade(d, id) {
       <label class="muted" id="trlab" for="tramt" style="display:block;margin-top:6px">You pay (NOID)</label>
       <div class="amrow"><input id="tramt" inputmode="decimal" placeholder="0.0" aria-label="Amount" autocomplete="off"><button type="button" id="trmax">Max</button></div>
       <input id="trrange" type="range" min="0" max="1000" value="0" step="1" aria-label="How much of your balance to use">
+      <p class="est" id="trest" aria-live="polite"></p>
       <label class="muted" for="trslip" style="display:block;margin-top:10px">Slippage</label>
       <div class="row" style="flex-wrap:nowrap"><div class="tabs" data-tabs="trslip">${['0.5', '1', '3'].map((v) => `<button type="button" data-v="${v}" class="${v === '1' ? 'on' : ''}">${v}%</button>`).join('')}</div>
         <input id="trslip" inputmode="decimal" value="1" aria-label="Slippage percent" autocomplete="off" style="max-width:80px"></div>
@@ -2798,6 +2800,7 @@ function mountTrade(d, id) {
     $('tramt').placeholder = side === 'buy' ? '0.0' : 'whole tokens';
     $('trrange').value = '0';
     paintAvail();
+    paintEst();
   });
   onTabs('trslip', (v) => { $('trslip').value = v; reset(); });
   $('tramt').addEventListener('input', () => { syncSlider(); reset(); });
@@ -2815,6 +2818,29 @@ function mountTrade(d, id) {
     return `${w}${f ? '.' + f : ''}`;
   };
   let avail = { noid: 0n, units: 0n, ready: false };
+  // The number under the amount: what the field you typed buys or sells, at a price this page already shows.
+  // A sale is not valued at the mark price alone - when the server can quote the node's payout for the whole
+  // balance, that implied price is the honest one, because the curve takes its fee and moves with size.
+  const markNoid = Number(d.token?.price_micronoid || 0) / 1e6;
+  let payout = null; // { net, whole } - the node's own payout for the entire balance
+  const estNum = (v, d) => v.toLocaleString('en-US', { maximumFractionDigits: d });
+  function paintEst() {
+    const el = $('trest');
+    if (!el) return;
+    const n = Number($('tramt').value.trim());
+    if (!Number.isFinite(n) || n <= 0) { el.textContent = ''; return; }
+    if (side === 'sell' && payout && payout.whole > 0 && payout.net > 0n) {
+      const per = Number(payout.net) / payout.whole / 1e6;
+      el.textContent = `\u2248 ${estNum(n * per, 4)} NOID at ${estNum(per, 6)} NOID a token \u2014 the node's payout for your whole balance. The exact figure comes from the node when you review.`;
+    } else if (markNoid > 0) {
+      const per = `at the last traded price ${estNum(markNoid, 6)} NOID`;
+      el.textContent = side === 'buy'
+        ? `\u2248 ${estNum(n / markNoid, 4)} ${ticker} ${per}. The node quotes the exact fill when you review.`
+        : `\u2248 ${estNum(n * markNoid, 4)} NOID ${per}. The node quotes the exact payout when you review.`;
+    } else {
+      el.textContent = '';
+    }
+  }
   const maxBuyMicro = () => (avail.noid > FEE_RESERVE_MICRO ? avail.noid - FEE_RESERVE_MICRO : 0n);
   const maxSellWhole = () => avail.units / MICRO; // a sell is whole tokens
   const availMax = () => (side === 'buy' ? maxBuyMicro() : maxSellWhole() * MICRO);
@@ -2830,9 +2856,10 @@ function mountTrade(d, id) {
   function syncSlider() {
     const max = availMax();
     const raw = $('tramt').value.trim();
-    if (max <= 0n || !/^\d+(\.\d+)?$/.test(raw)) { $('trrange').value = '0'; return; }
+    if (max <= 0n || !/^\d+(\.\d+)?$/.test(raw)) { $('trrange').value = '0'; paintEst(); return; }
     const got = side === 'buy' ? BigInt(Math.round(Number(raw) * 1e6)) : BigInt(Math.floor(Number(raw))) * MICRO;
     $('trrange').value = got >= max ? '1000' : String(Number((got * 1000n) / max));
+    paintEst();
   }
   $('trrange').oninput = () => {
     const max = availMax();
@@ -2840,6 +2867,7 @@ function mountTrade(d, id) {
     const v = BigInt($('trrange').value);
     const part = (max * v) / 1000n;
     $('tramt').value = side === 'buy' ? dec(part) : String(Number(part / MICRO));
+    paintEst();
     reset();
   };
   $('trmax').onclick = () => {
@@ -2847,6 +2875,7 @@ function mountTrade(d, id) {
     if (max <= 0n) return;
     $('tramt').value = side === 'buy' ? dec(max) : String(Number(max / MICRO));
     $('trrange').value = '1000';
+    paintEst();
     reset();
   };
   async function loadAvail() {
@@ -2855,12 +2884,16 @@ function mountTrade(d, id) {
     if (!addr) { $('travail').innerHTML = '<span class="muted">No wallet in this browser yet.</span>'; return; }
     const [acct, pos] = await Promise.all([
       fetch(`/api/address/${addr}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(`/api/wallet/${addr}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`/api/wallet/${addr}?quote=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     const h = (pos?.holdings || []).find((x) => (x.token_id || x.asset_id) === id);
     avail = { noid: BigInt(String(acct?.balance_micronoid || '0')), units: BigInt(String(h?.units || '0')), ready: true };
+    // quote=1 asks the server for the node's own payout for this whole balance, so a sale is not valued at the mark.
+    payout = h?.sell_now && h.sell_now.net_micronoid
+      ? { net: BigInt(String(h.sell_now.net_micronoid)), whole: Number(BigInt(String(h?.units || '0')) / MICRO) } : null;
     paintAvail();
     syncSlider();
+    paintEst();
   }
   // A trade is not in the index until its block is indexed, so keep asking for a couple of minutes.
   const watchAvail = (tries = 0) => setTimeout(async () => { await loadAvail(); if (tries < 24) watchAvail(tries + 1); }, 5000);
@@ -3576,19 +3609,39 @@ const pages = {
   },
   async tx(id) {
     const t = await api('tx/' + encodeURIComponent(id));
-    const { details, ...ptr } = t;
+    const { details, effects, parties, source, ...ptr } = t;
     const outs = Array.isArray(details?.outputs) ? details.outputs : [];
     const to = [...new Map(outs.filter((o) => o.owner).map((o) => [o.owner, (outs.filter((x) => x.owner === o.owner)).reduce((s, x) => s + Number(x.amount_micronoid), 0)])).entries()];
+    // The node forgets a transaction once the block is pruned; this explorer captured it when the block was new and
+    // never drops a txid, so an older transaction is answered from those rows and says so.
+    const spenders = (parties || []).filter((p) => p.dir === 'in');
+    const receivers = (parties || []).filter((p) => p.dir === 'out');
+    const mined = (parties || []).some((p) => p.dir === 'miner');
     const flow = details ? `<div class="card"><h2>${details.coinbase ? 'Mining reward' : 'Transfer'} <small class="muted">${esc(noid(details.output_sum_micronoid))}${details.fee_micronoid ? ' · fee ' + esc(noid(details.fee_micronoid)) : ''}</small></h2>
       <div class="kvl">
         <small>From</small><span>${details.coinbase ? '<span class="muted">New coins (block reward)</span>' : details.input_owner ? link('address', details.input_owner) + copyBtn(details.input_owner) : '<span class="muted">–</span>'}</span>
         ${to.map(([a, amt]) => `<small>To</small><span>${link('address', a)}${copyBtn(a)} <span class="muted">${esc(noid(amt))}</span></span>`).join('')}
-      </div></div>` : '';
+      </div></div>`
+      : (parties && parties.length ? `<div class="card"><h2>${mined ? 'Mining reward' : 'Transfer'} <small class="muted">from this explorer&rsquo;s own index</small></h2>
+      <div class="kvl">
+        <small>From</small><span>${mined ? '<span class="muted">New coins (block reward)</span>' : spenders.length ? spenders.map((p) => link('address', p.address) + copyBtn(p.address)).join(' ') : '<span class="muted">–</span>'}</span>
+        ${receivers.map((p) => `<small>To</small><span>${link('address', p.address)}${copyBtn(p.address)} <span class="muted">${esc(noid(p.amount_micronoid))}</span></span>`).join('')}
+      </div>
+      <p class="fine">The node has pruned this block&rsquo;s body, so this comes from what NOID Scan captured when the block was new - amounts and owners read straight off that body. The pointer above is the permanent record.</p></div>` : '');
+    const trades = (effects?.trades || []);
+    const xfers = (effects?.transfers || []);
+    const did = (trades.length || xfers.length) ? `<div class="card"><h2>What it did <small class="muted">indexed here</small></h2>
+      <table><thead><tr><th>Token</th><th>Side</th><th class="num">Tokens</th><th class="num">NOID</th></tr></thead><tbody>
+      ${trades.map((tr) => `<tr><td>${link('token', tr.token_id)} <span class="muted">${esc(short(tr.token_id, 6))}</span></td><td class="${tr.side === 'buy' ? 'up' : 'down'}">${esc(tr.side)}</td><td class="num">${esc(n2(tr.token_amount))}</td><td class="num">${esc(noid(tr.noid_micronoid))}</td></tr>`).join('')}
+      ${xfers.map((x) => `<tr><td>${link('token', x.token_id)} <span class="muted">${esc(short(x.token_id, 6))}</span></td><td>transfer</td><td class="num">${esc(n2(x.amount))}</td><td class="num">–</td></tr>`).join('')}
+      </tbody></table>
+      <p class="fine">Read from the trade and transfer tables this explorer keeps permanently, keyed by this txid.</p></div>` : '';
     const parts = feePartsView(details);
-    app.innerHTML = `${flow}${parts}<div class="card"><h2>Transaction</h2>
+    app.innerHTML = `${flow}${did}${parts}<div class="card"><h2>Transaction</h2>
       <p class="addrhead"><span class="mono clip" title="${esc(id)}">${esc(short(id))}</span>${copyBtn(id)}</p>
       ${kv(ptr)}</div>
-      <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
+      <div class="card"><h2>Details</h2>${details ? kv(details)
+        : `<p class="muted">${source === 'index' ? 'The node has pruned this block&rsquo;s body. The facts above were captured by this explorer when it indexed the block.' : 'Body pruned and not captured here; the pointer above is permanent.'}</p>`}</div>`;
   },
   'api-access': () => go('/account'),
   chat: () => go('/'), // the AI assistant is gone; old links land on the overview

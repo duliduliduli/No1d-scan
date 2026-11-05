@@ -146,6 +146,9 @@ module.exports = function assets(db, rpc, priceNow) {
     candlesBefore: db.prepare('select bucket t, o, h, l, c, v, n from token_candles where token_id = ? and bucket < ? order by bucket desc limit cast(? as integer)'),
     candleOlder: db.prepare('select 1 x from token_candles where token_id = ? and bucket < ? limit 1'),
     transfersFor: db.prepare('select txid, ts, height, from_addr, to_addr, amount from token_transfers where token_id = ? order by ts desc limit 40'),
+    // A single transaction's effects, by its txid. Trade rows carry the txid with a ":<output>" suffix.
+    tradesByTx: db.prepare('select * from token_trades where txid = ? or txid like ? order by ts limit 20'),
+    transfersByTx: db.prepare('select * from token_transfers where txid = ? or txid like ? order by ts limit 20'),
     cols: db.prepare('select * from nft_collections'),
     col: db.prepare('select * from nft_collections where id = ?'),
     items: db.prepare('select id, name, owner, image, traits from nft_items where collection_id = ? order by id limit 60'),
@@ -880,6 +883,42 @@ module.exports = function assets(db, rpc, priceNow) {
     return tokenPagesToHoldings(pages);
   }
 
+  // What the curve would actually pay if the whole balance were sold now. The mark price (the last trade) is what a
+  // wallet is valued at, and the sale offer is not the same number: the curve takes its market fee and moves with
+  // size, so a portfolio valued at the mark reads higher than the money a sale would produce. Only asked for when
+  // the caller passes quote=1, at most six holdings, and cached, because each quote is one read-only node plan.
+  const SELL_QUOTE_MS = 20_000;
+  const sellQuoteCache = new Map();
+  async function sellNowQuotes(address, holdings) {
+    const out = [];
+    for (const h of holdings.slice(0, 6)) {
+      const whole = (bi(h.units) || 0n) / 1000000n;
+      if (whole <= 0n) { out.push(null); continue; }
+      const key = `${address}|${h.token_id}|${whole}`;
+      const hit = sellQuoteCache.get(key);
+      if (hit && Date.now() - hit.at < SELL_QUOTE_MS) { out.push(hit.v); continue; }
+      let v = null;
+      try {
+        const plan = await rpc('prepareNativeIntent', { owner: address, request: {
+          action: 'trade', asset_id: h.token_id, buy: false, gross_input: (whole * 1000000n).toString(), slippage_bps: 100,
+        } }, 20_000);
+        const rev = plan?.review || plan?.native_plan?.review || {};
+        if (rev.quoted_output) {
+          const gross = bi(rev.quoted_output) ?? 0n;
+          const net = bi(rev.noid_credit_micronoid) ?? gross;
+          const fee = bi(rev.fee_micronoid) ?? 0n;
+          v = { units: (whole * 1000000n).toString(), tokens: whole.toString(),
+            gross_micronoid: gross.toString(), net_micronoid: net.toString(), fee_micronoid: fee.toString(),
+            net_usd: usdOf(net, noidUsd()) };
+        }
+      } catch { v = null; }
+      sellQuoteCache.set(key, { at: Date.now(), v });
+      out.push(v);
+    }
+    if (sellQuoteCache.size > 600) sellQuoteCache.clear();
+    return out;
+  }
+
   async function walletView(address, params) {
     if (!ADDR.test(address || '')) throw bad('expected an address');
     const demo = isDemo(params);
@@ -940,15 +979,22 @@ module.exports = function assets(db, rpc, priceNow) {
     const pnl = pnlOf(focused, priceOf, usd);
     return {
       demo, address, token_id: focus || null,
-      holdings: holdings.map((h) => {
-        // price_micronoid is per whole token, so micro-units are scaled down before the multiply.
-        const value = bi(h.price_micronoid) == null ? null
-          : h.units != null ? (BigInt(h.units) * bi(h.price_micronoid)) / 1000000n
-            : (bi(h.balance) || 0n) * bi(h.price_micronoid);
-        return { token_id: h.token_id, name: h.name, ticker: h.ticker, logo: h.logo ?? null, balance: String(h.balance),
-          units: h.units ?? null, onchain: !!h.onchain, price_micronoid: h.price_micronoid ?? null,
-          value_micronoid: value == null ? null : value.toString(), value_usd: usdOf(value, usd) };
-      }),
+      holdings: (await (async () => {
+        const priced = holdings.map((h) => {
+          // price_micronoid is per whole token, so micro-units are scaled down before the multiply.
+          const value = bi(h.price_micronoid) == null ? null
+            : h.units != null ? (BigInt(h.units) * bi(h.price_micronoid)) / 1000000n
+              : (bi(h.balance) || 0n) * bi(h.price_micronoid);
+          return { token_id: h.token_id, name: h.name, ticker: h.ticker, logo: h.logo ?? null, balance: String(h.balance),
+            units: h.units ?? null, onchain: !!h.onchain, price_micronoid: h.price_micronoid ?? null,
+            value_micronoid: value == null ? null : value.toString(), value_usd: usdOf(value, usd) };
+        });
+        if (!demo && params.get('quote') === '1') {
+          const sells = await sellNowQuotes(address, holdings);
+          priced.forEach((p, i) => { p.sell_now = sells[i] || null; });
+        }
+        return priced;
+      })()),
       trades: focused.slice(0, 80).map(publicTrade),
       pnl, activity: { txns: pnl.txns, buys: pnl.buys, sells: pnl.sells, first_ts: pnl.first_ts, last_ts: pnl.last_ts },
       ...(demo ? { balance_points: demoBalance(address, now) } : {}),
@@ -985,6 +1031,21 @@ module.exports = function assets(db, rpc, priceNow) {
       noid_micronoid: noid, usd: usdOf(bi(noid), noidUsd()),
       price_micronoid: t.price_micronoid == null ? (t.price?.toString() ?? null) : String(t.price_micronoid),
       trader: t.trader || null, venue: t.venue || null, height: t.height ?? null,
+    };
+  }
+
+  // What one transaction did, read from the tables this explorer keeps for good. The node prunes block bodies after
+  // its retained window, so when getTx returns null these rows are often the only copy left of a transaction - a
+  // trade row or a transfer carries its own txid.
+  function txEffects(txid) {
+    const id = String(txid).toLowerCase();
+    const like = id + ':%';
+    return {
+      trades: q.tradesByTx.all(id, like).map(publicTrade),
+      transfers: q.transfersByTx.all(id, like).map((t) => ({
+        txid: t.txid, ts: Number(t.ts), height: t.height ?? null, token_id: t.token_id || null,
+        from: t.from_addr || null, to: t.to_addr || null, amount: String(t.amount),
+      })),
     };
   }
 
@@ -1827,5 +1888,6 @@ module.exports = function assets(db, rpc, priceNow) {
     collection: (id, params) => collectionDetail(id, params),
     swap,
     indexBlockTrades,
+    txEffects,
   };
 };

@@ -209,6 +209,12 @@ const q = {
   delAddrHeight: db.prepare('delete from addr_tx where height = ?'),
   delPayout: db.prepare('delete from miner_payouts where height = ?'),
   putTx: db.prepare('insert or replace into tx_index (txid, height, position, fee, burned, coinbase, contract) values (?, ?, ?, ?, ?, ?, ?)'),
+  // One txid, from the rows this explorer keeps for good: the node only serves its retained window.
+  txRow: db.prepare(`select lower(hex(t.txid)) txid, t.height, t.position, t.fee, t.burned, t.coinbase, t.contract,
+    h.ts, lower(hex(h.hash)) block_hash
+    from tx_index t left join headers h on h.height = t.height where t.txid = ? limit 1`),
+  txParties: db.prepare('select address, dir, amount, height from addr_tx where txid = ? order by rowid limit 24'),
+  txKnown: db.prepare('select 1 one from tx_index where txid = ? limit 1'),
   contractTxs: db.prepare(`select lower(hex(t.txid)) txid, t.height, t.contract, t.fee, h.ts
     from tx_index t left join headers h on h.height = t.height
     where t.contract is not null order by t.height desc limit ?`),
@@ -1176,10 +1182,24 @@ const routes = {
 
   async tx(id) {
     if (!RE.hash.test(id)) throw Object.assign(new Error('expected a 64-char hex txid'), { status: 400 });
-    const ptr = await rpc('getTx', [id]);
-    if (!ptr) return null;
-    const block = await blockByHeight(ptr.height);
-    return { ...ptr, details: findTx(block?.retained, id) };
+    const ptr = await rpc('getTx', [id]).catch(() => null);
+    if (ptr) {
+      const block = await blockByHeight(ptr.height);
+      return { ...ptr, source: 'node', details: findTx(block?.retained, id) };
+    }
+    // The node serves only its retained window, so an older txid is answered from what this explorer captured when
+    // that block was new. Those rows are permanent: for a pruned body they are the only copy of what the tx did.
+    const buf = hashBuf(id);
+    const row = q.txRow.get(buf);
+    if (!row) return null;
+    return {
+      tx_hash: id, height: row.height, block_hash: row.block_hash ?? null, tx_position: row.position,
+      fee_micronoid: row.fee ?? null, burned_micronoid: row.burned ?? null, coinbase: !!row.coinbase,
+      contract: row.contract ?? null, ts: row.ts ?? null, source: 'index',
+      parties: q.txParties.all(buf).map((p) => ({ address: p.address, dir: p.dir, amount_micronoid: String(p.amount ?? '0'), height: p.height })),
+      details: null,
+      effects: assets.txEffects(id),
+    };
   },
 
   async address(addr, params) {
@@ -1359,7 +1379,9 @@ const routes = {
     if (RE.height.test(s)) return { type: 'block', id: s };
     if (RE.address.test(s)) return { type: 'address', id: s };
     if (RE.hash.test(s)) {
-      if (await rpc('getTx', [s])) return { type: 'tx', id: s };
+      if (await rpc('getTx', [s]).catch(() => null)) return { type: 'tx', id: s };
+      // The node forgets a txid once the body is pruned; our own index does not.
+      if (q.txKnown.get(hashBuf(s))) return { type: 'tx', id: s };
       const buf = hashBuf(s);
       if (q.heightOf.get(buf) || q.headerByHash.get(buf) || q.orphanByHash.get(buf)) return { type: 'block', id: s };
     }
@@ -1378,7 +1400,7 @@ const cache = new Map();
 const inflight = new Map();
 const PARAMS = ['min_out', 'before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids', 'asset',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
-  'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners'];
+  'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners', 'quote'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
 setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
 

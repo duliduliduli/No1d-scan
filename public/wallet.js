@@ -383,13 +383,22 @@
     return now >= before + (least > 0n ? least : 1n);
   }
   // Watches the address after a submit: yellow while it waits, then repaints once it lands.
+  // The hash the node hands back at submit time is the mempool's own, and it does not become the chain's txid - so
+  // the code written down at submit time cannot be searched. Once the block lands, the trade row carries the real
+  // one, and the banner shows that instead, with a link to it.
+  const chainTxidOf = (seen, p) => {
+    const row = (seen?.trades || []).find((t) => t.token_id === p.token_id && Number(t.ts) * 1000 >= p.at - 120000);
+    const id = String(row?.txid || '');
+    return /^[0-9a-f]{64}/i.test(id) ? id.split(':')[0] : '';
+  };
+
   async function pollPending(box, tries = 0) {
     const p = readPending();
     if (!p || p.status !== 'pending') return;
     let seen = null;
     try { seen = await fetch(`/api/wallet/${p.address}`).then((r) => (r.ok ? r.json() : null)); } catch {}
     if (seen && settled(p, unitsOf(seen.holdings, p.token_id))) {
-      writePending({ ...p, status: 'confirmed', seen_at: Date.now() });
+      writePending({ ...p, status: 'confirmed', seen_at: Date.now(), chain_txid: chainTxidOf(seen, p) || p.chain_txid || '' });
       return render(box);
     }
     if (Date.now() - p.at > PEND_MAX_WAIT_MS) {
@@ -432,7 +441,7 @@
 
     const [account, positions, stats, book] = await Promise.all([
       fetch(`/api/address/${address}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(`/api/wallet/${address}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`/api/wallet/${address}?quote=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/stats').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/tokens?limit=24&sort=volume').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
@@ -442,10 +451,13 @@
     const txs = account?.activity?.transactions || [];
     const holdings = positions?.holdings || [];
     const pend = readPending();
-    const pendTx = pend && pend.txid ? ` <span class="mono">${esc(short(pend.txid, 12))}</span>` : '';
+    const pendChain = pend && pend.chain_txid ? ` &middot; tx <a href="/tx/${esc(pend.chain_txid)}" data-link class="mono">${esc(short(pend.chain_txid, 12))}</a>` : '';
+    const pendTx = pend && pend.txid
+      ? ` <span class="mono">${esc(short(pend.txid, 12))}</span><small class="muted"> (the code the node gave this trade when it was sent${pend.chain_txid ? ' - the chain txid is below' : '; the chain txid appears here once the block lands'})</small>`
+      : '';
     const pendWatch = '<small id="pwatch" class="muted"></small>';
     const pendLine = !pend ? '' : pend.status === 'confirmed'
-      ? `<div class="pending ok"><b>Confirmed</b> &mdash; the block landed and the chain shows your ${esc(pend.side)}${pend.ticker ? ` of ${esc(pend.ticker)}` : ''}. The figures below are read straight from the node.${pendTx}${pendWatch}</div>`
+      ? `<div class="pending ok"><b>Confirmed</b> &mdash; the block landed and the chain shows your ${esc(pend.side)}${pend.ticker ? ` of ${esc(pend.ticker)}` : ''}. The figures below are read straight from the node.${pendChain}${pendWatch}</div>`
       : pend.status === 'waiting'
       ? `<div class="pending"><b>Still pending</b> &mdash; the node accepted your ${esc(pend.side)} and it is queued for a block. Nothing is lost by leaving this page: open it again and this banner is still here.${pendTx}${pendWatch}</div>`
       : `<div class="pending"><b>Pending</b> &mdash; your ${esc(pend.side)} was accepted and it settles in the next block, about 30 seconds. Your portfolio updates the moment it lands; this page is watching.${pendTx}${pendWatch}</div>`;
@@ -498,11 +510,13 @@
             const label = h.ticker || h.name || short(id, 10);
             const value = h.value_usd != null ? usd(h.value_usd) : (h.value_micronoid != null ? `${esc(fmtNoid(h.value_micronoid))}` : '–');
             const per = h.price_micronoid != null ? `${fmtUnits(Number(h.price_micronoid) / 1e6)} NOID` : '–';
+            // The mark price and the sale offer are different numbers: the curve takes its fee and moves with size.
+            const sell = h.sell_now && h.sell_now.net_micronoid ? `<br><small class="muted">sell now ≈ ${esc(fmtNoid(h.sell_now.net_micronoid))}</small>` : '';
             return `<tr>
               <td><a href="/token/${esc(id)}" data-link>${esc(label)}</a> <span class="muted">${esc((h.name || '').slice(0, 22))}</span></td>
               <td class="num">${esc(fmtUnits(h.balance ?? '0'))}</td>
               <td class="num">${esc(per)}</td>
-              <td class="num">${value}</td>
+              <td class="num">${value}${sell}</td>
               <td><span class="row"><button type="button" data-trade="${esc(id)}">Trade</button><button type="button" class="copy" data-copy="${esc(id)}" title="Copy the token's id" aria-label="Copy token id">⧉</button>${typeof starBtn === 'function' ? starBtn(id, label) : ''}</span></td>
             </tr>`;
           }).join('')}
@@ -524,6 +538,7 @@
           <button type="button" id="tmax">Max</button>
         </div>
         <input id="trange" type="range" min="0" max="1000" value="0" step="1" aria-label="How much of your balance to use">
+        <p class="est" id="test" aria-live="polite"></p>
         <div class="wrow">
           <input id="tslip" inputmode="decimal" value="1" size="3" aria-label="Slippage percent"> <span class="muted">% slippage</span>
           <button type="button" id="tquote">Get quote</button>
@@ -630,12 +645,39 @@
         : `Available <b>${esc(dec(unitsHeld(id)))} ${esc((holdings.find((x) => (x.token_id || x.asset_id) === id)?.ticker) || 'tokens')}</b>`;
       $('tmax').disabled = availMax() <= 0n;
     }
+    // What the amount you typed buys or sells, so nobody has to guess the other side of the trade. A sale uses the
+    // node's own payout for the whole balance when the server could quote it - the curve's price is not the mark.
+    const rowOf = (id) => holdings.find((x) => (x.token_id || x.asset_id) === id) || null;
+    const tickOf = (id) => rowOf(id)?.ticker || rowOf(id)?.name || 'tokens';
+    const num = (v, d) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d });
+    function paintEst() {
+      const el = $('test');
+      if (!el) return;
+      const n = Number($('tamt').value.trim());
+      const id = picked();
+      if (!Number.isFinite(n) || n <= 0) { el.textContent = ''; return; }
+      const mark = Number(rowOf(id)?.price_micronoid || 0) / 1e6;
+      const sell = side === 'sell' ? rowOf(id)?.sell_now : null;
+      const whole = Number(BigInt(String(rowOf(id)?.units || '0')) / MICRO);
+      if (sell && sell.net_micronoid && whole > 0) {
+        const per = Number(sell.net_micronoid) / whole / 1e6;
+        el.textContent = `\u2248 ${num(n * per, 4)} NOID at ${num(per, 6)} NOID a token \u2014 the node's payout for your whole balance. The exact figure comes from the node when you quote.`;
+      } else if (mark > 0) {
+        const per = `at the last traded price ${num(mark, 6)} NOID`;
+        el.textContent = side === 'buy'
+          ? `\u2248 ${num(n / mark, 4)} ${tickOf(id)} ${per}. The node quotes the exact fill when you quote.`
+          : `\u2248 ${num(n * mark, 4)} NOID ${per}. The node quotes the exact payout when you quote.`;
+      } else {
+        el.textContent = '';
+      }
+    }
     function syncSlider() {
       const max = availMax();
       const raw = $('tamt').value.trim();
-      if (max <= 0n || !/^\d+(\.\d+)?$/.test(raw)) { $('trange').value = '0'; return; }
+      if (max <= 0n || !/^\d+(\.\d+)?$/.test(raw)) { $('trange').value = '0'; paintEst(); return; }
       const got = side === 'buy' ? BigInt(Math.round(Number(raw) * 1e6)) : BigInt(Math.floor(Number(raw))) * MICRO;
       $('trange').value = got >= max ? '1000' : String(Number((got * 1000n) / max));
+      paintEst();
     }
     const setSide = (s) => {
       side = s;
@@ -646,6 +688,7 @@
       $('trange').value = '0';
       $('tres').innerHTML = '';
       paintAvail();
+      paintEst();
     };
     $('tamt').addEventListener('input', syncSlider);
     $('trange').oninput = () => {
@@ -653,6 +696,7 @@
       if (max <= 0n) return;
       const part = (max * BigInt($('trange').value)) / 1000n;
       $('tamt').value = side === 'buy' ? dec(part) : String(Number(part / MICRO));
+      paintEst();
       $('tres').innerHTML = '';
     };
     $('tmax').onclick = () => {
@@ -660,6 +704,7 @@
       if (max <= 0n) return;
       $('tamt').value = side === 'buy' ? dec(max) : String(Number(max / MICRO));
       $('trange').value = '1000';
+      paintEst();
       $('tres').innerHTML = '';
     };
     const openPane = (id) => {
@@ -680,7 +725,7 @@
     });
     $('tsidebuy').onclick = () => setSide('buy');
     $('tsidesell').onclick = () => setSide('sell');
-    $('tasset').onchange = () => { $('twhat').textContent = $('tasset').selectedOptions[0]?.textContent || ''; $('tres').innerHTML = ''; paintAvail(); syncSlider(); };
+    $('tasset').onchange = () => { $('twhat').textContent = $('tasset').selectedOptions[0]?.textContent || ''; $('tres').innerHTML = ''; paintAvail(); syncSlider(); paintEst(); };
     setSide('buy');
     $('tquote').onclick = async () => {
       const token = $('tasset').value, amount = $('tamt').value.trim(), slip = $('tslip').value.trim() || '1';

@@ -133,6 +133,24 @@ test('indexer + api', async (t) => {
 
   assert.deepStrictEqual((await get('search?q=70'))[1], { type: 'block', id: '70' });
   assert.deepStrictEqual((await get(`search?q=${H('tx70')}`))[1], { type: 'tx', id: H('tx70') });
+
+  // The node forgets a transaction once the block body is pruned. This explorer captured the body when the block was
+  // new and keeps the txid for good, so a searched txid still answers, and says where the answer came from.
+  const oldTx = '7c'.repeat(32);
+  db.prepare('insert or replace into tx_index (txid, height, position, fee, burned, coinbase, contract) values (?, ?, ?, ?, ?, ?, ?)')
+    .run(Buffer.from(oldTx, 'hex'), 30, 2, '9000', null, 0, null);
+  db.prepare(`insert or replace into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid, trader, venue, price_micronoid)
+    values (?, ?, ?, 30, 'buy', '12', '400000', ?, 'curve', '33333')`).run(oldTx + ':1', TRADE_ASSET, 1700000100, PAY_ADDR);
+  const [oldStatus, oldT] = await get(`tx/${oldTx}`);
+  assert.strictEqual(oldStatus, 200, 'a pruned transaction is still answered from our own index');
+  assert.strictEqual(oldT.source, 'index');
+  assert.strictEqual(oldT.height, 30);
+  assert.strictEqual(oldT.fee_micronoid, '9000');
+  assert.strictEqual(oldT.effects.trades.length, 1, 'what the transaction did comes with it');
+  assert.strictEqual(oldT.effects.trades[0].token_amount, '12');
+  assert.deepStrictEqual((await get(`search?q=${oldTx}`))[1], { type: 'tx', id: oldTx }, 'search finds it once the node has forgotten it');
+  assert.strictEqual((await get(`tx/${'5a'.repeat(32)}`))[0], 404, 'a txid nobody has seen is still not found');
+  assert.strictEqual((await get(`tx/${H('tx70')}`))[1].source, 'node', 'the node still answers first while it can');
   assert.deepStrictEqual((await get(`search?q=${ADDR}`))[1], { type: 'address', id: ADDR });
 
   assert.strictEqual((await get('block/abc'))[0], 400);
@@ -1349,6 +1367,21 @@ test('indexer + api', async (t) => {
   db.prepare('delete from token_trades where txid = ?').run('bagpx02');
   db.prepare('delete from tokens where id = ?').run(BAGTOK);
 
+  // What a sale would actually pay, not what the mark price says: the node's own plan, asked for with quote=1.
+  node.prepareNativeIntent = ({ owner, request }) => ({ review: {
+    quoted_output: '2100000', noid_credit_micronoid: '2092600', fee_micronoid: '7400', request,
+  } });
+  const SELLADDR = 'o1acdefghjkmnpqrstuvwx';
+  const [, qwal] = await get('wallet/' + SELLADDR + '?quote=1');
+  const qh = qwal.holdings.find((h) => h.token_id === HEXID);
+  assert.ok(qh, 'the holding is still listed with a quote');
+  assert.strictEqual(qh.sell_now.net_micronoid, '2092600', 'the sale offer is the net credit after the network fee');
+  assert.strictEqual(qh.sell_now.gross_micronoid, '2100000');
+  assert.strictEqual(qh.sell_now.tokens, '400', 'a sale is sized in whole tokens');
+  assert.ok(qh.sell_now.net_usd > 0 && qh.sell_now.net_usd < qh.value_usd, 'the offer in USD is below the mark value');
+  const [, plain] = await get('wallet/' + SELLADDR);
+  assert.strictEqual(plain.holdings.find((h) => h.token_id === HEXID).sell_now, undefined, 'no quote is asked for without quote=1');
+  delete node.prepareNativeIntent;
   // A node without the method is the refusal case, and a different address keeps the response cache out of it.
   delete node.getNativeHoldings;
   await tick();
@@ -1729,6 +1762,12 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.doesNotMatch(html, /class="risk"/);
   assert.match(html, /<p class="fine">Trading is not investment advice/);
   // A submitted trade is kept in this browser and said out loud until the chain shows it.
+  assert.match(html, /id="trest"/, 'the trade card says what the amount buys or sells');
+  assert.match(html, /function paintEst\(\)/, 'the estimate is painted as the amount changes');
+  assert.match(w, /id="test"/, 'the wallet panel says the same');
+  assert.match(w, /function paintEst\(\)/);
+  assert.match(w, /\?quote=1/, 'the wallet asks the server for the sale offer, not just the mark price');
+  assert.match(w, /chainTxidOf/, 'the banner shows the chain txid once the block lands');
   assert.match(w, /no1d_wallet_pending_v1/);
   assert.match(w, /PEND_MAX_WAIT_MS/);
   assert.match(w, /function settled\(p, unitsNow\)/);
