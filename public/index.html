@@ -174,6 +174,11 @@
   .favrow .grow { flex:1 1 12ch; min-width:0 }
   .favrow .mono { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
   .favrow .acts { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap }
+  .favrow { padding:7px 0 }
+  .favrow .who { display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:var(--fg); min-width:0 }
+  .favrow .who b { font-weight:600 } .favrow .who small { display:block; font:12px var(--ui) }
+  .favrow .acts a { padding:4px 9px; border:1px solid var(--line2); border-radius:var(--r); font:500 12px var(--ui); text-decoration:none; color:var(--fg); white-space:nowrap }
+  .favrow .acts a:hover { border-color:var(--accent); color:var(--accent) }
   .mcard .px button.star { margin:0 0 4px; display:inline-block }
   .tape td.side { font-weight:700 }
   .statrow { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(108px, 100%), 1fr)); gap:8px; margin-top:12px }
@@ -3422,32 +3427,47 @@ const pages = {
     const ids = [...starSet()];
     const tokenIds = ids.filter((id) => !isAddrStar(id));
     const addrIds = ids.filter(isAddrStar).map((id) => id.slice(5));
+    // One failed call must never blank the page: every fetch falls back to an error marker.
+    const safe = (p) => p.catch(() => ({ _err: true }));
     const [tok, ...addrs] = await Promise.all([
-      tokenIds.length ? part('tokens?ids=' + encodeURIComponent(tokenIds.join(','))) : Promise.resolve({ tokens: [] }),
-      ...addrIds.slice(0, 24).map((a) => part('address/' + encodeURIComponent(a))),
+      tokenIds.length ? safe(part('tokens?ids=' + encodeURIComponent(tokenIds.join(',')))) : Promise.resolve({ tokens: [] }),
+      ...addrIds.slice(0, 24).map((a) => safe(part('address/' + encodeURIComponent(a)))),
     ]);
-    const tokens = (tok && tok.tokens) || [];
-    const rows = tokens.map((t) => `<tr>
-      <td>${starBtn(t.id, t.name)}</td>
-      <td><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.ticker || t.name)}</b> <small class="muted">${esc(t.name)}</small></span></a></td>
-      <td>${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
-      <td>${chgHtml(t.change && t.change['24h'])}</td>
-      ${numCell(t.volume_micronoid)}${numCell(t.mcap_micronoid)}
-      <td><a href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>Open</a></td></tr>`).join('');
-    const addrRows = addrs.map((r, i) => {
-      const a = addrIds[i];
+    const byId = new Map(((tok && tok.tokens) || []).map((t) => [String(t.id).toLowerCase(), t]));
+    // The batch filter can miss an id (a token the catalogue has not caught up with). Ask for those one by one.
+    const missing = tokenIds.filter((id) => !byId.has(String(id).toLowerCase())).slice(0, 12);
+    if (missing.length) {
+      const one = await Promise.all(missing.map((id) => safe(part('token/' + encodeURIComponent(id)))));
+      for (const t of one) if (t && !t._err && t.id) byId.set(String(t.id).toLowerCase(), t);
+    }
+    const addrById = new Map(addrIds.map((a, i) => [a, addrs[i]]));
+    const tokenRow = (t) => {
+      const href = demoHref('/token/' + encodeURIComponent(t.id));
+      const chg = t.change && t.change['24h'];
+      return `<div class="favrow">
+        <a class="grow who" href="${href}" data-link>${logoHtml(t)}<span><b>${esc(t.ticker || t.name || short(t.id))}</b> <small class="muted">${esc(t.name || '')}</small></span></a>
+        <span class="mono">${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></span>
+        <span class="mono">${chgHtml(chg)}</span>
+        <span class="acts"><a href="${href}#trade" data-link>Trade</a>${starBtn(t.id, t.name || t.ticker || t.id)}</span></div>`;
+    };
+    const addrRow = (a) => {
+      const r = addrById.get(a);
       const acts = `<span class="acts"><a href="/address/${encodeURIComponent(a)}" data-link>Open</a>${starBtn(ADDR_STAR(a), 'this address')}</span>`;
       if (!r || r._err) return `<div class="favrow"><span class="grow mono" title="${esc(a)}">${esc(short(a))}</span><span class="muted">unavailable</span>${acts}</div>`;
       return `<div class="favrow"><span class="grow mono" title="${esc(a)}"><a href="/address/${encodeURIComponent(a)}" data-link>${esc(short(a))}</a></span>
-        <span>${esc(noid(r.balance_micronoid))}</span><span class="muted">${n0(r.blocks_mined)} blocks</span>${acts}</div>`;
+        <span class="mono">${esc(noid(r.balance_micronoid))}</span><span class="muted">${n0(r.blocks_mined)} blocks</span>${acts}</div>`;
+    };
+    // Every saved id gets a row, even one this chain cannot resolve, so the list can never look empty.
+    const rows = ids.map((id) => {
+      if (isAddrStar(id)) return addrRow(id.slice(5));
+      const t = byId.get(String(id).toLowerCase());
+      if (t) return tokenRow(t);
+      return `<div class="favrow"><span class="grow mono" title="${esc(id)}">${esc(short(id))}</span><span class="muted">not a token on this chain</span><span class="acts">${starBtn(id, 'this favorite')}</span></div>`;
     }).join('');
     const empty = !ids.length;
     app.innerHTML = `<div class="card"><h2>Favorites <small>${ids.length ? `${ids.length} saved` : ''}</small></h2>
       <p class="fine">${myKey() ? 'Saved on your account, so they follow your key to any browser.' : 'Saved in this browser. Create a key on the account page and they save to it.'}</p>
-      ${empty ? `<div class="empty"><b>Nothing saved yet</b><p class="muted">Tap <b>☆ Save</b> on any token, collection or address and it lands here. The star is on every token row, on each token page and on every address page.</p><p><a href="/explore" data-link>Browse tokens →</a></p></div>` : ''}
-      ${tokens.length ? `<div class="wide scroller"><table class="list tok"><thead><tr><th></th><th>Token</th><th>Price</th><th>24h</th><th>Volume</th><th>MCap</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
-      ${addrIds.length ? `<h3>Addresses</h3>${addrRows}` : ''}
-      ${!empty && !tokens.length && !addrIds.length ? '<p class="muted">Those favorites are no longer listed on this chain.</p>' : ''}
+      ${empty ? `<div class="empty"><b>Nothing saved yet</b><p class="muted">Tap <b>☆ Save</b> on any token, collection or address and it lands here. The star is on every token row, on each token page and on every address page.</p><p><a href="/explore" data-link>Browse tokens →</a></p></div>` : rows}
     </div>`;
   },
   async wallet(id) {
@@ -4180,6 +4200,7 @@ const pages = {
     onTabs('tf', (tf) => { openTokenChart(id, demo, tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
     await openTokenChart(id, demo, '15m');
     if (tradeOn && $('swappane')) (!d.demo && d.swap?.intent?.enabled ? mountTrade : mountSwap)(d, id);
+    if (location.hash === '#trade' && $('swappane')) setTimeout(() => $('swappane').scrollIntoView({ block: 'center', behavior: 'smooth' }), 80);
     wireEnhance(d, t, demo);
     wireBoost('token', t.id, demo);
     const paintBook = async () => {

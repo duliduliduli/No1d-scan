@@ -590,6 +590,10 @@ test('indexer + api', async (t) => {
   assert.match((await fetch(base + '/')).headers.get('cache-control') || '', /no-cache/, 'the app page revalidates too');
   assert.match(homeHtml, /ADDR_STAR/, 'addresses are favorites too');
   assert.match(homeHtml, /migrateAddrWatch\(\)/, 'the old browser-only address list folds into favorites at boot');
+  // Every saved id gets a row, so a favorite can never vanish from the list, and each token row opens the token and its trade panel.
+  assert.match(homeHtml, /not a token on this chain/, 'a favorite the chain cannot resolve still gets a row');
+  assert.match(homeHtml, /\$\{href\}#trade/, 'a favorite token links straight to its trade panel');
+  assert.match(homeHtml, /const missing = tokenIds\.filter/, 'an id the catalogue missed is asked for one by one');
   assert.doesNotMatch(homeHtml, /id="addrwatch"/, 'the second, unlistable address list is gone');
   assert.match(homeHtml, /class="alertbtn"/);
   assert.match(homeHtml, /safe-area-inset-bottom/);
