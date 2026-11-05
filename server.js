@@ -1384,6 +1384,11 @@ const STATIC = {
   '/favicon.ico': 'image/x-icon', '/favicon-32.png': 'image/png', '/apple-touch-icon.png': 'image/png',
   '/icon-192.png': 'image/png', '/icon-512.png': 'image/png', '/og.png': 'image/png', '/site.webmanifest': 'application/manifest+json',
   '/lightweight-charts.js': 'text/javascript; charset=utf-8',
+  // The self-custody wallet: its page script, the BIP39 word list it reads, and
+  // the wasm engine that derives addresses on the user's device.
+  '/wallet.js': 'text/javascript; charset=utf-8',
+  '/bip39.txt': 'text/plain; charset=utf-8',
+  '/noid-wallet.wasm': 'application/wasm',
 };
 
 function readBody(req, max = 64_000) {

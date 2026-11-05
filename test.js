@@ -550,11 +550,26 @@ test('indexer + api', async (t) => {
   assert.strictEqual(js.status, 200);
   assert.match(js.headers.get('content-type'), /javascript/);
   assert.match(await js.text(), /LightweightCharts/);
+
+  // The self-custody wallet ships as files: page script, BIP39 words, wasm engine.
+  // They must never fall back to the app page, and the engine must be real wasm.
+  const wallet = await fetch(base + '/wallet.js');
+  assert.strictEqual(wallet.status, 200);
+  assert.match(wallet.headers.get('content-type'), /javascript/);
+  assert.match(await wallet.text(), /No1dWallet/);
+  const words = await (await fetch(base + '/bip39.txt')).text();
+  assert.strictEqual(words.trim().split('\n').length, 2048, 'the word list is complete');
+  const engine = await fetch(base + '/noid-wallet.wasm');
+  assert.strictEqual(engine.status, 200);
+  assert.strictEqual(engine.headers.get('content-type'), 'application/wasm');
+  assert.deepStrictEqual([...new Uint8Array((await engine.arrayBuffer()).slice(0, 4))], [0x00, 0x61, 0x73, 0x6d], 'wasm magic');
+  assert.strictEqual((await fetch(base + '/wallet')).status, 200, 'the wallet page is the app page');
   const homeHtml = await (await fetch(base + '/')).text();
   assert.match(homeHtml, /Watchlist/);
   assert.match(homeHtml, /class="alertbtn"/);
   assert.match(homeHtml, /safe-area-inset-bottom/);
   assert.match(homeHtml, /axisDoubleClickReset/);
+  assert.match(homeHtml, /\/wallet\.js/, 'the app page loads the wallet module');
   assert.match(homeHtml, /touch-action:pan-y/);
   assert.match(homeHtml, /vertTouchDrag: true/);
   assert.match(homeHtml, /class="iauto on"/);

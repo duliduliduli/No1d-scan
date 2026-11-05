@@ -143,7 +143,30 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 - **Card + NOID price for profiles:** `ENHANCED_PROFILE_USD` defaults to the USDC price.
 - **Rate limiter and caches** are in-memory and per-process. That is fine for one droplet; move them to the proxy if the site ever scales out.
 
-## 10. Quick verification commands
+## 10. Browser wallet (added 2026-11-05)
+
+`public/wallet.js` + `public/noid-wallet.wasm` + `public/bip39.txt` behind the
+`/wallet` route (the SPA's `pages.wallet(id)`; `id` present still renders the
+address page, which is now `pages.addressWallet`).
+
+The engine is built from the chain source in `~/noid-wallet-wasm`
+(`cargo build --release --target wasm32-unknown-unknown`; `getrandom` needs its
+`js` feature). It exposes `noid_alloc`, `noid_free`, `noid_wallet_address`,
+`noid_wallet_address_text`, `noid_validate_address` — a hand-rolled ABI, so no
+wasm-bindgen toolchain is needed to build or ship it.
+
+Verified: index 13 of the node's own `wallet.key.backup` derives exactly the
+address `paranoid_walletStatus` reports, and a 24-word phrase round-trips
+through the page (create -> wipe -> restore -> same address). `paranoid_validateAddress`
+accepts the derived addresses.
+
+Not built yet: spending. `noid_gkr` (the witness-hiding authorization prover)
+also compiles for wasm32, and the prove path is rayon-free, so the prover can be
+bundled next; until then `signAndSubmit` throws an explicit error instead of
+faking a signature. The seed holds the same bytes a node keystore does, so a
+wallet created here can be exported as `wallet.key` and driven by the daemon.
+
+## 11. Quick verification commands
 
 Local:
 ```bash

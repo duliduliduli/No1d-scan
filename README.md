@@ -58,6 +58,32 @@ Errors are JSON `{"error": "…"}`: 400 bad input, 401 missing/unknown key, 402 
 
 All amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); large values come as decimal strings.
 
+## Wallet
+
+`/wallet` is a self-custody Parano1d wallet that runs in the visitor's browser.
+It makes a 24-word seed from the browser's own randomness, derives `o1…`
+addresses on the device, and keeps the seed only as an AES-GCM blob under a
+passphrase the user picks. Nothing about the seed is ever sent to this server.
+
+* `public/wallet.js` — the wallet: seed words, keystore, page, and the
+  `window.parano1d` provider the DEX card already looks for.
+* `public/noid-wallet.wasm` — the address engine, built from the chain's own
+  source (Apache-2.0) with `cargo build --release --target wasm32-unknown-unknown`.
+  `noid_wallet_address_text(seed, index, out)` derives exactly the address a
+  daemon derives for the same master secret; verified against a live node wallet.
+* `public/bip39.txt` — the standard BIP39 English list, so a phrase written here
+  restores 256 bits of entropy that a desktop wallet accepts.
+
+Spending is deliberately absent: Parano1d authorizes a payment with a
+zero-knowledge proof, not a signature, and this build ships the address engine
+only. The send and trade buttons are disabled and say so. Wiring them means
+bundling the chain's authorization prover as wasm, which compiles for
+`wasm32-unknown-unknown` (verified) and is the next step.
+
+The seed writes the same 48-byte `wallet.key` a node reads (`noid_plain_key_1`
+plus 32 secret bytes), so it can be exported from the wallet and used to run the
+chain's own wallet, or imported from one.
+
 ## Deploy (one VPS)
 
 1. **Node:** download the Core release and verify its SHA256. `./parano1d --check-hardware` must report `NODE READY`. Install to `/usr/local/bin`, then `cp deploy/parano1d.service /etc/systemd/system/` and `systemctl enable --now parano1d` (it runs as its own `parano1d` user, data in `/var/lib/parano1d`, RPC on `127.0.0.1:9601`). Never expose the RPC port publicly. Check it with `parano1d-cli status`.

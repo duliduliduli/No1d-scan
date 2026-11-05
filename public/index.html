@@ -631,6 +631,24 @@
     .ichart svg { clip-path:none }
     .bar .fill, .globe .event { transition:none }
   }
+  /* Self-custody wallet page */
+  .wrow { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 }
+  .wfield { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 12px }
+  .wfield small { font:600 11px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); min-width:104px }
+  .wfield b { font:13px var(--mono); word-break:break-all }
+  .wfield .copy { padding:3px 8px }
+  .wbig { font:700 26px var(--mono); color:var(--accent); margin:6px 0 }
+  .wlist { display:flex; flex-direction:column; gap:4px; margin:8px 0 }
+  .wlist > div { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid var(--line); padding:6px 0; font:12px var(--mono) }
+  .wseed { display:grid; grid-template-columns:repeat(auto-fill,minmax(94px,1fr)); gap:8px; margin:12px 0 }
+  .wseed span { border:1px solid var(--line); border-radius:3px; padding:6px 8px; font:12px var(--mono); display:flex; gap:6px; align-items:baseline }
+  .wseed i { color:var(--muted); font-style:normal; font-size:10px; min-width:14px }
+  .wcheck { display:flex; gap:8px; align-items:center; margin:10px 0; font:12px var(--mono) }
+  .wh3 { font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px }
+  button.danger { border-color:#e2777a; color:#e2777a }
+  button[disabled] { opacity:.45; cursor:not-allowed; box-shadow:none }
+  textarea { width:100%; box-sizing:border-box; padding:9px 12px; border:1px solid var(--line); border-radius:3px; background:var(--card); color:var(--fg); font:13px var(--mono); outline:none; resize:vertical }
+  input[type=password] { width:100%; box-sizing:border-box; margin:8px 0 }
 </style>
 </head>
 <body>
@@ -642,6 +660,7 @@
     <button type="button" id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="menunav">☰</button>
     <nav id="menunav">
       <a href="/explore" data-link>Explore tokens</a>
+      <a href="/wallet" data-link>Wallet</a>
       <a href="/promote" data-link>Promote <span aria-hidden="true">⚡</span></a>
       <a href="/verified" data-link>Verified <span aria-hidden="true">✓</span></a>
       <a href="/" data-link>Overview &amp; live stats</a>
@@ -668,6 +687,7 @@
   <button type="button" id="dockmenu">Menu</button>
 </nav>
 <footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them. <a href="/terms" data-link>Terms</a> · <a href="/privacy" data-link>Privacy</a></footer>
+<script src="/wallet.js?v=1"></script>
 <script>
 const app = document.getElementById('app');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -3021,6 +3041,19 @@ function statHead(t) {
   </div>`;
 }
 const pages = {
+  async wallet(id) {
+    if (id) return pages.addressWallet(id);
+    app.innerHTML = `<div class="card"><h2>No1d Wallet</h2>
+      <p>Your own keys, made and kept in this browser. The seed and the address derivation run on your device; the explorer only reads public chain data for the address you show it.</p>
+      <p class="fine">Writing the seed down is the whole backup. This page can never move funds on its own, and it holds no key of yours on the server.</p></div>
+      <div id="wbox"></div>`;
+    const box = $('wbox');
+    if (!window.No1dWallet) {
+      box.innerHTML = `<div class="card"><h2>Wallet unavailable</h2><p class="msg err">The wallet script did not load. Reload the page, or check that /wallet.js is reachable.</p></div>`;
+      return;
+    }
+    await window.No1dWallet.render(box);
+  },
   async home() {
     const demo = new URLSearchParams(location.search).get('demo') === '1';
     const [s0, b0, t0, hi0, net0, mi0, preview, colsPreview, boost0] = await Promise.all([
@@ -3726,7 +3759,7 @@ const pages = {
       paintBook().catch(() => {});
     }, 5_000);
   },
-  async wallet(id) {
+  async addressWallet(id) {
     const params = new URLSearchParams(location.search);
     const demo = params.get('demo') === '1';
     const token = params.get('token') || '';
@@ -4451,7 +4484,7 @@ async function render() {
   alerts?.classList.toggle('on', type === 'alerts');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    const named = ['api-access', 'account', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'verified'];
+    const named = ['api-access', 'account', 'wallet', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'verified'];
     document.body.classList.toggle('pair', type === 'token' || type === 'collection');
     if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
     await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
