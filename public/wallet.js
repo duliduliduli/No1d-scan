@@ -36,6 +36,27 @@
   const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
   const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
   const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const unhex = (s) => Uint8Array.from(String(s).match(/../g) || [], (h) => parseInt(h, 16));
+
+  // A refresh should not ask for the passphrase again. The unlocked seed is kept in sessionStorage, which the
+  // browser holds for this tab only and drops when the tab closes; Lock clears it at once.
+  const SESS_KEY = 'no1d_wallet_session_v1';
+  const saveSession = () => {
+    try {
+      if (SESSION.master) sessionStorage.setItem(SESS_KEY, JSON.stringify({ v: 1, master: hex(SESSION.master), index: SESSION.index, at: Date.now() }));
+      else sessionStorage.removeItem(SESS_KEY);
+    } catch {}
+  };
+  const loadSession = () => {
+    try {
+      const s = JSON.parse(sessionStorage.getItem(SESS_KEY) || 'null');
+      if (!s || !s.master) return false;
+      SESSION.master = unhex(s.master);
+      SESSION.index = Number(s.index) || 0;
+      return true;
+    } catch { return false; }
+  };
+  const dropSession = () => { try { sessionStorage.removeItem(SESS_KEY); } catch {} };
 
   // ---------------------------------------------------------------- engine ---
   async function loadEngine() {
@@ -325,6 +346,7 @@
     SESSION.master = master;
     const id = readIdentity();
     SESSION.index = id ? Number(id.index) || 0 : 0;
+    saveSession();
   }
 
   const provider = {
@@ -426,6 +448,7 @@
 
   async function render(box) {
     box.innerHTML = `<div class="skel"></div>`;
+    if (locked()) loadSession();
     const blob = storedBlob();
 
     if (locked()) {
@@ -557,9 +580,10 @@
       </div>`;
 
     $('wcopy2').onclick = async () => { await copyText(address, $('wcopy2')); };
-    $('wlock').onclick = () => { SESSION.master = null; SESSION.seedWords = null; render(box); };
+    $('wlock').onclick = () => { SESSION.master = null; SESSION.seedWords = null; dropSession(); render(box); };
     $('wnew').onclick = async () => {
       SESSION.index += 1;
+      saveSession();
       render(box);
     };
     $('wreveal').onclick = async () => {
@@ -756,6 +780,7 @@
       clearBlob();
       clearIdentity();
       SESSION.master = null; SESSION.seedWords = null;
+      dropSession();
       render(box);
     };
   }
@@ -807,6 +832,7 @@
         writeBlob(await encryptSeed(SESSION.pendingMaster, passphrase));
         SESSION.master = SESSION.pendingMaster;
         SESSION.seedWords = SESSION.pendingWords;
+        saveSession();
         SESSION.pendingMaster = null; SESSION.pendingWords = null;
         SESSION.index = 0;
         render(box);
@@ -845,6 +871,7 @@
         SESSION.master = master;
         SESSION.seedWords = await entropyToWords(master);
         SESSION.index = 0;
+        saveSession();
         render(box);
       };
     };
@@ -855,6 +882,7 @@
       <div class="card">
         <h2>Unlock your No1d wallet</h2>
         <p class="muted">Stored encrypted in this browser. Your passphrase opens it; nothing is sent anywhere.</p>
+        <p class="fine">Unlocking keeps you in for this tab: a refresh will not ask again, and closing the tab locks it. <b>Lock</b> locks it now.</p>
         <input type="password" id="wpass" placeholder="Passphrase" autocomplete="current-password">
         <div class="wrow"><button type="button" id="wgo">Unlock</button><button type="button" id="wforget">Delete stored wallet</button></div>
         <p class="fine" id="wnote"></p>
@@ -863,6 +891,7 @@
       try {
         SESSION.master = await decryptSeed(storedBlob(), $('wpass').value);
         SESSION.index = 0;
+        saveSession();
         render(box);
       } catch { $('wnote').textContent = 'That passphrase did not open the wallet.'; }
     };
@@ -872,6 +901,7 @@
       if (!confirm('Delete the stored wallet from this browser? Without your written words it cannot be restored.')) return;
       clearBlob();
       clearIdentity();
+      dropSession();
       render(box);
     };
   }
