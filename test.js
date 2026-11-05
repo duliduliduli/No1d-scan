@@ -1772,12 +1772,20 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.match(w, /chainTxidOf/, 'the banner shows the chain txid once the block lands');
   // The wallet total is stated in NOID: the spendable balance plus every token position, and separately what a sale
   // would pay, because the curve does not pay the mark price.
-  assert.match(w, /id="walltotal"/);
   assert.match(w, /const totalNoidMicro = noidMicro \+ heldMicro/);
-  assert.match(w, /const totalSoldMicro = noidMicro \+ soldMicro/);
-  assert.match(w, /if all sold now/);
-  assert.match(html, /\.wtotal \{/, 'the total line has its own style');
+  assert.match(w, /<div class="wbig" id="walltotal">\$\{esc\(fmtNoid\(totalNoidMicro\)\)\}<\/div>/, 'the headline number is the wallet total');
+  assert.match(w, /<b id="wtotal">Total \$\{esc\(fmtNoid\(totalNoidMicro\)\)\}<\/b>/);
   assert.match(html, /<small>Wallet total<\/small><b>\$\{esc\(fmtNoid\(/, 'the account card states the total in NOID too');
+  // No explanatory clutter around the total, and no intro copy the owner asked removed.
+  assert.doesNotMatch(w, /this balance plus/);
+  assert.doesNotMatch(w, /If the tokens were sold now/);
+  assert.doesNotMatch(w, /Explorer index as of block/);
+  assert.doesNotMatch(w, /Your seed stayed in this browser/);
+  assert.doesNotMatch(w, /what this build can and cannot do/);
+  assert.doesNotMatch(w, /Recent activity/);
+  assert.doesNotMatch(w, /No activity this explorer has retained/);
+  assert.doesNotMatch(html, /Your own keys, made and kept/);
+  assert.doesNotMatch(html, /Writing the seed down is the whole backup/);
   assert.match(w, /no1d_wallet_pending_v1/);
   assert.match(w, /PEND_MAX_WAIT_MS/);
   assert.match(w, /function settled\(p, unitsNow\)/);

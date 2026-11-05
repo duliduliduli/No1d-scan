@@ -585,8 +585,6 @@
   .wfield b { font:13px var(--mono); word-break:break-all }
   .wfield .copy { padding:3px 8px }
   .wbig { font:700 26px var(--mono); color:var(--accent); margin:6px 0 }
-  .wtotal { margin:10px 0 0; padding:8px 10px; border:1px solid var(--line); border-radius:var(--r); font:13px var(--mono) }
-  .wtotal b { color:var(--accent); font-size:15px }
   .pending { margin:0 0 12px; padding:10px 12px; border:1px solid var(--gold); border-left:3px solid var(--gold); border-radius:3px; background:var(--gold-soft); color:var(--fg); font:13px/1.5 var(--ui) }
   .pending b { color:var(--gold); text-transform:uppercase; letter-spacing:.06em }
   .pending .mono { word-break:break-all; color:var(--muted) }
@@ -3436,10 +3434,7 @@ const pages = {
   },
   async wallet(id) {
     if (id) return pages.addressWallet(id);
-    app.innerHTML = `<div class="card"><h2>No1d Wallet</h2>
-      <p>Your own keys, made and kept in this browser. The seed and the address derivation run on your device; the explorer only reads public chain data for the address you show it.</p>
-      <p class="fine">Writing the seed down is the whole backup. This page can never move funds on its own, and it holds no key of yours on the server.</p></div>
-      <div id="wbox"></div>`;
+    app.innerHTML = `<div id="wbox"></div>`;
     const box = $('wbox');
     if (!window.No1dWallet) {
       box.innerHTML = `<div class="card"><h2>Wallet unavailable</h2><p class="msg err">The wallet script did not load. Reload the page, or check that /wallet.js is reachable.</p></div>`;
