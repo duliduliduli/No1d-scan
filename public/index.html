@@ -816,6 +816,21 @@
   .popwrap > button { display:block; width:100%; line-height:34px; padding:0 10px }
   .narrow .mcard .l1 { flex-wrap:wrap; row-gap:0 } .narrow .mcard .l1 b { overflow:visible }
   @media (max-width:899px) { [data-tabs="preset"] { display:none } }
+  /* Density: shorter boxes. Less air inside every card, tile, list and table row - no type or colour changes. */
+  .card { padding:11px 13px; margin-bottom:10px }
+  h2 { margin:0 0 9px }
+  .tiles .stat, .card .stat, .tile, .winbox { padding:7px 10px }
+  .tiles, .card > .grid, .tilegrid { gap:6px }
+  .tiles3 { gap:6px; margin:0 0 8px }
+  .stat b { font-size:17px; line-height:1.15 } .tile b { font-size:14px }
+  .stat small, .tile small { font-size:10px }
+  th, td { padding:6px 8px }
+  table.list th, table.list td { padding:6px 7px }
+  .tok td, .tok th { padding:7px 8px }
+  .bars { gap:6px } .bar { gap:2px 12px } .bar .track { height:6px }
+  .curve { margin-top:2px }
+  .livebar { margin-bottom:8px }
+  .listbar { padding:6px 0 4px }
 </style>
 </head>
 <body>
@@ -1681,10 +1696,13 @@ function charts(h) {
   const card = (title, html) => `<div class="card"><h2>${esc(title)}</h2>${html}</div>`;
   const fx = BUCKET_FMT[h.window], pts = h.points;
   const note = h.sync.synced_to < h.sync.tip - 50 ? `<p class="muted" style="grid-column:1/-1">Loading full chain history: ${n0(h.sync.synced_to + 1)} of ${n0(h.sync.tip + 1)} blocks (${((100 * (h.sync.synced_to + 1)) / (h.sync.tip + 1)).toFixed(0)}%). Charts fill in as it goes.</p>` : '';
-  return note + card('Network hashrate', ichart(pts.map((p) => [p.t, p.hashrate]), fx, 'hs', 130))
-    + card('Average block time', ichart(pts.map((p) => [p.t, p.block_time]), fx, 'sec', 130))
-    + card('Difficulty (expected hashes per block)', ichart(pts.map((p) => [p.t, p.work]), fx, 'work', 130))
-    + card('Active slots (live outputs)', ichart(pts.map((p) => [p.t, p.slots]), fx, 'num', 130));
+  // Shorter plots on a phone: same shape, less empty height (the owner wants the boxes condensed).
+  const vw = typeof innerWidth === 'number' ? innerWidth : 1100;
+  const CH = vw < 700 ? 92 : vw < 900 ? 112 : 130;
+  return note + card('Network hashrate', ichart(pts.map((p) => [p.t, p.hashrate]), fx, 'hs', CH))
+    + card('Average block time', ichart(pts.map((p) => [p.t, p.block_time]), fx, 'sec', CH))
+    + card('Difficulty (expected hashes per block)', ichart(pts.map((p) => [p.t, p.work]), fx, 'work', CH))
+    + card('Active slots (live outputs)', ichart(pts.map((p) => [p.t, p.slots]), fx, 'num', CH));
 }
 const BLOCK_COLS = ['height', 'hash', 'timestamp', 'miner', 'txs', 'reward_micronoid', 'total_fees_micronoid'];
 function markNew(tableId, oldTip) {
