@@ -24,7 +24,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 | File | What it does |
 |---|---|
 | `server.js` | Indexer loop (10 s), header backfill, reorg/orphan handling, gaps and cold archive, price/market/holders/network pollers, the whole HTTP API, SSE `/api/live`, 5 s response cache, rate limits, API-key gate |
-| `billing.js` | Accounts (`nk_` API keys, only SHA-256 stored), append-only `ledger`, prepaid credits, NOID top-ups, Stripe Checkout + webhook, free AI quota, plus checkout wiring for profiles and boosts |
+| `billing.js` | Accounts (`nk_` API keys, only SHA-256 stored), append-only `ledger`, prepaid credits bought with NOID only (Starter 5 / Pro 10 / Scale 20 NOID), free AI quota, plus checkout wiring for profiles and boosts |
 | `chat.js` | AI assistant (OpenRouter, default `qwen/qwen3.5-flash-02-23`), tool calls into the explorer's own routes. `forModel()` pre-formats every amount so the model never does unit math |
 | `assets.js` | Tokens, pools, trades and NFT collections for Explore (screener, token and collection pages, candles, order book). Empty until the node exposes `getAssetSnapshot`; `?demo=1` / `TOKENS_DEMO=1` shows an in-memory sample |
 | `intent.js` | Non-custodial native trades via Parano1d v2.1 intents (`prepareNativeIntent` → wallet signs → `submitTxIntent`). Off unless `SWAP_ENABLED=true`; activation height `NATIVE_ACTIVATION_HEIGHT` (default **279,370**, roughly 2 days after this handoff) |
@@ -45,7 +45,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
   - **The explorer:** `noid-scan.service`, user `noidscan`, code in `/opt/noid-scan`, port 8080.
   - **Caddy:** TLS; `parano1d-scan.com`, with `www` redirecting.
 - **Database:** `/var/lib/noid-scan/noid.db`. It holds the **only copy of pruned block bodies**, plus all accounts, credits, ledger and payments. Never delete it, reset it or "rebuild from scratch".
-- **Secrets:** only in `/etc/noid-scan.env` (root, chmod 600), loaded through `EnvironmentFile`. They include Stripe keys, `OPENROUTER_API_KEY`, `PAY_ADDRESS`, `ADMIN_TOKEN` and the USDC addresses/RPCs. Never put secrets in the repo, chat, GitHub or URLs, and never print them.
+- **Secrets:** only in `/etc/noid-scan.env` (root, chmod 600), loaded through `EnvironmentFile`. They include `OPENROUTER_API_KEY`, `PAY_ADDRESS`, `ADMIN_TOKEN` and the USDC addresses/RPCs. Never put secrets in the repo, chat, GitHub or URLs, and never print them.
 - **Sandboxing:** the service runs with `ProtectSystem=strict` + `PrivateTmp=true` + `SQLITE_TMPDIR=/var/lib/noid-scan`. The code also sets `pragma temp_store=memory`. History: big grouped queries once failed with "disk I/O error" because every temp directory was read-only (README has a section on this).
 - **Cloudflare:** DNS for the domain.
 - **How the owner deploys:** historically by pasting into the droplet console:
@@ -82,7 +82,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
   - Expired orders are kept; their dust stays reserved 7 days, and late payments credit the same account at the quoted rate.
   - Failures become `status='review'` in `noid_seen`.
   - New quotes pause if the live price is more than 15 min old.
-- **Stripe:** credits come only from the signed webhook (HMAC, 300 s tolerance, replay-safe via unique `ref`), from `amount_total` in USD, never from metadata or the redirect. Card buttons appear only when Stripe reports `card_payments: active`. Last known status was **pending approval**, so cards were hidden.
+- **Payments are NOID only.** Cards and Stripe were removed by decision (Nov 2026): no card rail, no webhook route, no card buttons. Credits come from an exact-amount match on `PAY_ADDRESS` (dust digits), settled by the chain watcher or by a pasted payment receipt.
 - **USDC (profiles and boosts):** exact base-unit amount match; one transaction settles one order; native Circle USDC only. These payments do **not** add API credits.
 - **API billing:** a keyed request counts only when it returns 200. Errors, 404s, `/live` and account routes are free. 1 credit = 1,000 requests; $1 = 1,000 credits; AI costs 5 credits per question, refunded if the model fails.
 - **Books check:** the read-only SQL in the README's "Checking the books" section must return nothing. Run it after any billing change.
@@ -124,7 +124,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 ## 9. Open items
 
 **Owner actions** (not code; remind them gently):
-1. **Stripe** card approval was still pending. Cards appear automatically once it is approved.
+1. Any `STRIPE_*` variables left in `/etc/noid-scan.env` are now ignored and can be deleted.
 2. **Cloudflare:** turn the proxy on (orange cloud) and set SSL mode to **Full (strict)**. The DigitalOcean firewall should allow 80/443 only from Cloudflare IPs, 9600 open, and 22 from the owner's IP. Status unknown.
 3. **OpenRouter:** set a monthly spend limit on the key.
 4. **`SUPPORT_EMAIL`:** add it to `/etc/noid-scan.env` so checkout shows a help contact.

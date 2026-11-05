@@ -2591,7 +2591,7 @@ function enhanceCard(d, demo) {
   const usdc = Number(d.enhance_usdc || 100);
   const note = demo
     ? '<p class="fine">Sample page. Payment is not taken.</p>'
-    : '<p class="fine">Log in with the API key from API &amp; Credits. USDC is watched on chain. Card and NOID also work. The profile stays hidden until an admin approves it.</p>';
+    : '<p class="fine">Log in with the API key from API &amp; Credits. USDC is watched on chain; NOID works too. The profile stays hidden until an admin approves it.</p>';
   return `<div class="card" id="enhform"><h2>Promoted listing <span aria-hidden="true">⚡</span> <small>${usdc} USD</small></h2>
     <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
     <p>A banner, an icon, a short description, and https links for a website and X. Unpaid profiles show none of these.</p>
@@ -2604,8 +2604,8 @@ function enhanceCard(d, demo) {
       <label>X<input name="twitter" inputmode="url" placeholder="https://x.com/name" autocomplete="off"></label>
       <label>Icon <span class="muted">PNG, JPG or WebP · 512×512 max · 256 KB</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp" required></label>
       <label>Banner <span class="muted">PNG, JPG or WebP · 1500×500 max · under 1 MB</span><input name="banner" type="file" accept="image/png,image/jpeg,image/webp" required></label>
-      <p class="fee">One-time ${usdc} USDC. Send the exact amount. Card and NOID also accepted.</p>
-      <div class="row"><button type="button" data-enh="usdc">Pay ${usdc} USDC</button><button type="button" data-enh="card">Card</button><button type="button" data-enh="noid">NOID</button></div>
+      <p class="fee">One-time ${usdc} USDC or the NOID equivalent. Send the exact amount.</p>
+      <div class="row"><button type="button" data-enh="usdc">Pay ${usdc} USDC</button><button type="button" data-enh="noid">NOID</button></div>
       <p id="enhmsg" class="muted"></p>
     </form></div>`;
 }
@@ -2628,7 +2628,6 @@ function wireEnhance(d, t, demo, page) {
         icon: await fileB64(icon), banner: await fileB64(banner),
       });
       const pay = await api('profile-pay', { id: made.id, method: b.dataset.enh, chain: form.chain?.value, page });
-      if (pay.url) { location.href = pay.url; return; }
       if (pay.method === 'usdc') {
         msg.innerHTML = `Send exactly <b>${esc(pay.amount_usdc)} USDC</b> on ${esc(pay.chain)} to <span class="mono">${esc(pay.address)}</span>. ${copyBtn(pay.amount_usdc)} Reference <b>${esc(pay.reference)}</b> is the last digits. A different amount is not matched. This page watches the transfer.`;
         clearInterval(usdcTimer);
@@ -3319,8 +3318,11 @@ const pages = {
           <tr><td>API requests</td><td>${n(120)} per minute with a free account key</td><td>${n(3000)} per minute · 1 credit per ${n(P.requests_per_credit)} requests</td></tr>
           <tr><td>AI assistant</td><td>${P.free_chats_per_day} questions per day</td><td>${P.chat_cost} credits per question</td></tr>
         </table>
-        <p class="muted">${n(P.credits_per_usd)} credits = $1. Credits never expire. Pay with ${[P.noid && 'NOID', P.card && 'card'].filter(Boolean).join(' or ') || '(payments not enabled yet)'}.
-        ${P.noid ? `NOID price used: $${esc(P.noid.usd_per_noid)} per NOID.` : ''}${P.noid_paused ? ` New NOID orders are paused: ${esc(P.noid_paused)}.` : ''}</p></div>
+        <h2 style="margin-top:14px">NOID plans</h2>
+        <table class="price"><tr><th>Plan</th><th>Price</th><th>Credits</th><th>API requests</th></tr>
+          ${(P.plans || []).map((p) => `<tr><td><b>${esc(p.label)}</b></td><td>${esc(p.noid)} NOID${p.usd_at_market ? ` <span class="muted">(≈ $${esc(p.usd_at_market)})</span>` : ''}</td><td>${n(p.credits)}</td><td>${n(p.requests)}</td></tr>`).join('')}
+        </table>
+        <p class="muted">Credits never expire and there is no subscription. Payable in NOID only, on chain, to this explorer's own address${P.noid ? ` <span class="mono">${esc(P.noid.address)}</span>` : ''}. Card payments are not accepted.</p></div>
       <div class="card" id="acct"></div>
       <div class="card"><h2>API reference</h2>
         <p>Base URL <code>${esc(location.origin)}/api</code>. Every request needs your key as the <code>x-api-key</code> header (or <code>?key=</code>); create one free above. Keys without credits get the free tier.</p>
@@ -3371,34 +3373,21 @@ const pages = {
       return;
     }
 
-    const pay = (m) => P.packs_usd.map((u) => `<button data-pay="${m}" data-usd="${u}">$${u} · ${n(u * P.credits_per_usd)} credits</button>`).join('');
+    const pay = () => (P.plans || []).map((p) => `<button data-plan="${esc(p.id)}">${esc(p.noid)} NOID · ${n(p.credits)} credits</button>`).join('');
     box.innerHTML = `<h2>Your account <small class="muted">${esc(me.id)}</small></h2>
       <div class="grid">
-        <div class="stat"><small>Credits</small><b>${n(me.credits)}</b><small class="muted">≈ ${usd(me.credits, P.credits_per_usd)}</small></div>
+        <div class="stat"><small>Credits</small><b>${n(me.credits)}</b><small class="muted">≈ ${n(me.credits * P.requests_per_credit)} API requests</small></div>
         <div class="stat"><small>AI questions left</small><b>${n(Math.floor(me.credits / P.chat_cost))}</b></div>
         <div class="stat"><small>API requests made</small><b>${n(me.requests)}</b></div>
         <div class="stat"><small>Tier</small><b>${me.credits > 0 ? 'Paid' : 'Free'}</b></div>
       </div>
-      ${new URLSearchParams(location.search).get('paid') === 'card' ? '<p id="cardwait">Thanks! Waiting for Stripe to confirm your card payment… this page updates itself.</p>' : ''}
-      <h2 style="margin-top:14px">Add credits</h2>
-      ${P.noid ? `<p class="row"><span class="muted">Pay with NOID:</span> ${pay('noid')}</p>` : ''}
-      ${P.card ? `<p class="row"><span class="muted">Pay by card:</span> ${pay('card')}</p>` : '<p class="muted">Card payments are coming soon. Pay with NOID from any wallet: you get an exact amount to send and credits land automatically.</p>'}
-      ${!P.card && !P.noid ? '<p class="muted">Payments are not enabled yet.</p>' : ''}
+      <h2 style="margin-top:14px">Add credits with NOID</h2>
+      ${P.noid ? `<p class="row">${pay()}</p><p class="muted">Pick a plan, send the exact NOID amount shown, and credits land automatically after ${esc(P.noid.confirmations)} block confirmations. One-off: no subscription, nothing to cancel.</p>` : '<p class="muted">NOID payments are not enabled right now.</p>'}
+      ${P.noid_paused ? `<p class="muted">New promoted-listing quotes are paused: ${esc(P.noid_paused)}. API plans are fixed in NOID and keep working.</p>` : ''}
       <div id="payout"></div>
       <h2 style="margin-top:14px">Usage (last 30 days)</h2>${rows(me.usage, ['day', 'requests', 'chats'])}
       <h2 style="margin-top:14px">History</h2>${rows(me.history.map((h) => ({ when: new Date(h.at).toLocaleString(), credits: (h.delta > 0 ? '+' : '') + n(h.delta), what: h.reason })), ['when', 'credits', 'what'])}
       <p class="row"><button id="copyk">Copy my key</button><button id="logout">Log out on this device</button></p>`;
-    if ($('cardwait')) {
-      const start = me.credits, t0 = Date.now();
-      const poll = async () => {
-        if (location.pathname !== '/account') return;
-        const now = await api('me').catch(() => null);
-        if (now && now.credits > start) { history.replaceState(null, '', '/account'); return pages.account(); }
-        if (Date.now() - t0 < 120_000) setTimeout(poll, 3000);
-        else $('cardwait').textContent = 'Stripe has not confirmed the payment yet. It can take a minute; refresh this page shortly. If credits never arrive, contact support with your card receipt.';
-      };
-      setTimeout(poll, 3000);
-    }
     $('copyk').onclick = () => navigator.clipboard?.writeText(key).then(() => ($('copyk').textContent = 'Copied'));
     $('logout').onclick = () => { saveKey(''); pages.account(); };
     const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
@@ -3417,7 +3406,7 @@ const pages = {
           <div class="body" style="grid-template-columns:1fr"><div class="kvl">
             <small>Status</small><span class="ok">✓ Paid and credited</span>
             <small>Paid</small><span>${esc(when(t.paid_at / 1000))}</span>
-            <small>Amount</small><span class="mono">${esc(t.amount_noid)} NOID <small class="muted">(≈ $${esc(t.usd.toFixed(2))} at $${esc(t.rate_usd_per_noid)} / NOID)</small></span>
+            <small>Amount</small><span class="mono">${esc(t.amount_noid)} NOID${t.usd_at_market ? ` <small class="muted">(≈ $${esc(t.usd_at_market)} at market)</small>` : ''}</span>
             <small>Credits added</small><span><b>${n0(t.credits_added ?? t.credits)}</b>${t.credits_added > t.credits ? ` <span class="muted">(${n0(t.credits)} for the pack + ${n0(t.credits_added - t.credits)} for the extra NOID sent)</span>` : ''}</span>
             <small>Your balance</small><span><b>${n0(t.balance)}</b> credits · ${esc(Math.floor(t.balance / P.chat_cost).toLocaleString())} AI questions or ${n0(t.balance * P.requests_per_credit)} API requests</span>
             <small>Chain reference</small><span class="mono" style="word-break:break-all">${esc(t.paid_ref)}</span></div>
@@ -3436,10 +3425,10 @@ const pages = {
         <div class="body">
           <div><div class="qr">${qrSvg(t.address) || '<small class="muted">QR unavailable</small>'}</div><p class="muted" style="font-size:12px;margin:8px 0 0">Scan the address with your NOID wallet, then enter the exact amount.</p></div>
           <div class="kvl">
-            <small>You get</small><span><b>${n0(t.credits)} credits</b> <span class="muted">($${esc(t.usd.toFixed(2))} pack · never expire)</span></span>
+            <small>You get</small><span><b>${n0(t.credits)} credits</b> <span class="muted">(${n0(t.requests)} API requests${t.plan ? ` · ${esc(t.plan.label)} plan` : ''} · never expire)</span></span>
             <small>Send exactly</small><span><span class="amt" id="amt">${esc(t.amount_noid)} NOID</span>${copyBtn(t.amount_noid)}<br><small class="muted" style="text-transform:none;letter-spacing:0">The last digits identify your payment. Sending more is fine: the extra is credited at the same rate.</small></span>
             <small>To address</small><span class="addr">${esc(t.address)}${copyBtn(t.address)}</span>
-            <small>Rate</small><span>$${esc(t.rate_usd_per_noid)} per NOID, locked for this order</span>
+            <small>Price</small><span>Fixed in NOID: a plan costs the same whatever the market does</span>
             <small>Quote valid</small><span id="cd">${mmss(left)}</span>
           </div></div>
         <div class="status">${statusLine}</div>
@@ -3454,11 +3443,10 @@ const pages = {
       if (location.pathname === '/account') setTimeout(() => checkout(id).catch(() => {}), 10_000);
     };
     const watch = checkout;
-    for (const b of document.querySelectorAll('[data-pay]')) b.onclick = async () => {
+    for (const b of document.querySelectorAll('[data-plan]')) b.onclick = async () => {
       b.disabled = true;
       try {
-        const r = await api('topup', { method: b.dataset.pay, usd: Number(b.dataset.usd) });
-        if (r.url) return (location.href = r.url); // Stripe Checkout
+        const r = await api('topup', { plan: b.dataset.plan });
         await watch(r.id);
       } catch (e) { $('payout').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
       b.disabled = false;
@@ -3522,7 +3510,7 @@ const pages = {
     if (livePromo) promoIds.add(t.id);
     const warns = (d.warnings || []).map((w) => `<p class="msg err">${esc(w.text)}</p>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
-      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.</p>` : '';
+      ? `<p class="msg">If the payment went through, the profile is in review and stays hidden until an admin approves it.</p>` : '';
     const where = t.pool ? `Pooled · ${fmtNoid(t.pool.reserve_noid_micronoid)}` : (t.curve ? `Launchpad · ${t.curve.progress}%` : (t.launch === 'direct' ? 'Direct issue' : 'Not published'));
     app.innerHTML = `${d.demo ? '<p class="demo-banner">Sample token for layout preview. Not on chain. Tokens coming with v2.1.</p>' : ''}${paidBack}
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
@@ -3815,7 +3803,7 @@ const pages = {
       <div class="traits">${(n.traits || []).map((t) => `<span>${esc(t.trait)} ${esc(t.value)}</span>`).join('')}</div>
       <div class="muted mono" style="font-size:12px">${n.owner ? `<a href="${walletHref(n.owner, '', demo)}" data-link>${esc(short(n.owner))}</a>` : '–'}</div></div>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'
-      ? `<p class="msg">If the card payment completed, the profile is in review and stays hidden until an admin approves it.</p>` : '';
+      ? `<p class="msg">If the payment went through, the profile is in review and stays hidden until an admin approves it.</p>` : '';
     const colPanel = (evs) => {
       const sales = (evs || []).filter((ev) => ev.kind === 'sale');
       const xf = (evs || []).filter((ev) => ev.kind === 'transfer');
@@ -4016,7 +4004,7 @@ const pages = {
   privacy() {
     app.innerHTML = `<div class="card"><h2>Privacy</h2>
       <p class="muted">DRAFT pending legal review.</p>
-      <p>An account is an API key. The server stores a hash of that key, not a name or an email. An enhanced-profile or promoted-slot order stores the account id, the amount, the chain, and, once it matches, the transaction id. Card payments are taken by Stripe. This page is not a finished privacy policy.</p>
+      <p>An account is an API key. The server stores a hash of that key, not a name or an email. An enhanced-profile or promoted-slot order stores the account id, the amount, the chain, and, once it matches, the transaction id. Payments are made on chain in NOID; no card processor is involved. This page is not a finished privacy policy.</p>
       <p><a href="/terms" data-link>Terms of Service</a></p></div>`;
   },
 
@@ -4254,10 +4242,10 @@ const pages = {
     const usd = Number(pricing.enhanced_profile_usdc || 100);
     const packs = promo.packs || [];
     const back = params.get('promote') === 'paid' || params.get('enhance') === 'paid'
-      ? '<p class="msg">If the card payment completed, your order is in review. Nothing shows until it is approved.</p>' : '';
+      ? '<p class="msg">If your payment went through, the order is in review. Nothing shows until it is approved.</p>' : '';
     app.innerHTML = `${back}<div class="card" id="promote"><h2>${verified ? 'Verified accounts' : 'Promote <span aria-hidden="true">⚡</span>'} <small>native tokens</small></h2>
       <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
-      ${verified ? '<p class="fine">A verified account puts a banner, an icon, a short description and your website and X links on the token page, plus the ⚡ mark next to the ticker. One-time fee, paid on chain in NOID, or by card when card payments are live. Shown as soon as the payment confirms; there is no waiting list.</p>' : ''}
+      ${verified ? '<p class="fine">A verified account puts a banner, an icon, a short description and your website and X links on the token page, plus the ⚡ mark next to the ticker. One-time fee, paid on chain in NOID. Shown as soon as the payment confirms; there is no waiting list.</p>' : ''}
       <p class="fine">Anyone can promote any token. Every order is reviewed before it goes live. A paid order unlocks a banner, a website and an X link on the token page; tokens without one show no banner at all.</p>
       <form id="promoform" autocomplete="off">
         <label>Token <span class="muted">ticker, name or id</span><input name="q" id="pmq" placeholder="Search tokens" spellcheck="false"></label>
@@ -4275,7 +4263,7 @@ const pages = {
         <label>Website<input name="website" inputmode="url" placeholder="https://example.com"></label>
         <label>X<input name="twitter" inputmode="url" placeholder="https://x.com/name"></label>
         <p class="fee" id="pmtotal"></p>
-        <div class="row pmpay"><button type="button" data-pay="noid">Pay with NOID</button><button type="button" data-pay="card"${pricing.card ? '' : ' disabled title="Card payments are not active yet"'}>Pay by card</button></div>
+        <div class="row pmpay"><button type="button" data-pay="noid">Pay with NOID</button><button type="button" data-pay="usdc">Pay with USDC</button></div>
         <p class="fine">${demo ? 'Sample page. Payment is not taken.' : myKey() ? 'Logged in with your API key.' : 'Log in on <a href="/account" data-link>API &amp; Credits</a> first; your key ties the order to you.'}</p>
         <div id="pmmsg" aria-live="polite"></div>
       </form></div>`;
@@ -4330,7 +4318,6 @@ const pages = {
         const pay = made.product === 'enhanced'
           ? await api('profile-pay', { id: made.id, method: b.dataset.pay, page: verified ? 'verified' : 'promote' })
           : await api('boost-pay', { id: made.id, method: b.dataset.pay, back: verified ? '/verified' : '/promote' });
-        if (pay.url) { location.href = pay.url; return; }
         msg.innerHTML = `<div class="kvl"><small>Send exactly</small><span><b>${esc(pay.amount_noid)} NOID</b> ${copyBtn(pay.amount_noid)}</span>
           <small>To</small><span class="mono ell" title="${esc(pay.address)}">${esc(short(pay.address, 10, 8))} ${copyBtn(pay.address)}</span>
           <small>Order</small><span class="mono">${esc(pay.id)}</span></div>

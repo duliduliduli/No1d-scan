@@ -1,7 +1,6 @@
-// Promote orders, NOID receipt settlement, Stripe boost webhook, profile extras, and native trade intents.
+// Promote orders, NOID receipt settlement, profile extras, and native trade intents.
 const test = require('node:test');
 const assert = require('node:assert');
-const { createHmac } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const images = require('./images.js');
 
@@ -9,8 +8,6 @@ const PAY = 'o1payqqqqqqqq';
 process.env.NODE_ENV = 'test';
 process.env.PAY_ADDRESS = PAY;
 process.env.USD_PER_NOID = '0.20';
-process.env.STRIPE_SECRET_KEY = 'sk_test_x';
-process.env.STRIPE_WEBHOOK_SECRET = 'whsec_p';
 // Most tests exercise the review queue; the auto-approve test clears this itself.
 process.env.ADMIN_TOKEN = 'admin-test';
 
@@ -70,18 +67,12 @@ test('receipt: underpaid, unconfirmed, replayed, and other account are refused',
   await assert.rejects(bill.routes['POST order-receipt'](acct, { order: q2.id, receipt: 'bb03' }), /already paid another order/);
 });
 
-test('stripe webhook marks a boost paid only for the exact amount', () => {
+test('a boost order cannot be paid twice and cards are not accepted', async () => {
   const { boosts, bill, acct } = setup();
   const b = boosts.create(acct, { kind: 'token', asset_id: 'tok1', pack: '1d' });
-  const hook = (amount) => {
-    const raw = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_' + amount, payment_status: 'paid', currency: 'usd', amount_total: amount, client_reference_id: acct.id, metadata: { kind: 'boost', boost_id: b.id } } } });
-    const t = Math.floor(Date.now() / 1000);
-    return bill.stripeWebhook(raw, `t=${t},v1=${createHmac('sha256', 'whsec_p').update(`${t}.${raw}`).digest('hex')}`);
-  };
-  hook(100);
+  assert.throws(() => bill.routes['POST boost-pay'](acct, { id: b.id, method: 'usdc', chain: 'nope' }), /USDC/);
+  assert.throws(() => bill.routes['POST boost-pay'](acct, { id: b.id, method: 'card' }), /method must be noid or usdc/);
   assert.strictEqual(boosts.view(acct, b.id).status, 'unpaid');
-  hook(4000);
-  assert.strictEqual(boosts.view(acct, b.id).status, 'pending', 'still needs admin approval');
 });
 
 test('native trade intent: gated, mocked before activation, never signs', async () => {

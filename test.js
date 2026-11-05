@@ -176,13 +176,17 @@ test('indexer + api', async (t) => {
   const credits = async () => (await get('me', { headers: K }))[1].credits;
   const mine = async (n) => { tip += n; await tick(); };
   // An output already on the address before the order was quoted can never pay it, even with matching digits.
-  paySlots = [{ slot_index: 8, value: '25001234', creation_id: 'c0' }];
+  paySlots = [{ slot_index: 8, value: '5001234', creation_id: 'c0' }];
   await tick();
-  const [, quote] = await post('topup', { method: 'noid', usd: 5 }, K);
+  const [, quote] = await post('topup', { plan: 'starter' }, K);
   const micro = Math.round(Number(quote.amount_noid) * 1e6);
-  assert.ok(micro > 25e6 && micro < 25.01e6 && quote.paid === false && quote.address === PAY_ADDR && quote.status === 'waiting');
-  assert.strictEqual((await post('topup', { method: 'noid', usd: 7 }, K))[0], 400, 'only fixed packs');
-  db.prepare('update noid_topups set amount = 25001234, dust = 1234 where id = ?').run(quote.id);
+  assert.ok(micro > 5e6 && micro < 5.01e6 && quote.paid === false && quote.address === PAY_ADDR && quote.status === 'waiting');
+  assert.strictEqual(quote.plan.id, 'starter');
+  assert.strictEqual(quote.credits, 1000);
+  assert.strictEqual(quote.requests, 1_000_000);
+  assert.strictEqual((await post('topup', { plan: 'megapack' }, K))[0], 400, 'only the published NOID plans');
+  assert.strictEqual((await post('topup', { usd: 5 }, K))[0], 400, 'dollar packs are gone: plans are NOID amounts');
+  db.prepare('update noid_topups set amount = 5001234, dust = 1234 where id = ?').run(quote.id);
   await mine(20);
   assert.strictEqual(await credits(), 0, 'pre-existing output did not pay the newer order');
   db.prepare('update noid_topups set amount = ?, dust = ? where id = ?').run(micro, micro % 10000, quote.id);
@@ -195,23 +199,23 @@ test('indexer + api', async (t) => {
   await mine(1);
   assert.strictEqual((await get(`topup/${quote.id}`, { headers: K }))[1].paid, true);
   await tick();
-  assert.strictEqual(await credits(), 5000, 'credited exactly once at depth 18');
+  assert.strictEqual(await credits(), 1000, 'credited exactly once at depth 18');
   // A payment that disappears (reorged out) before it is final never credits.
-  const [, q2] = await post('topup', { method: 'noid', usd: 5 }, K);
+  const [, q2] = await post('topup', { plan: 'starter' }, K);
   const micro2 = Math.round(Number(q2.amount_noid) * 1e6);
   paySlots = [{ slot_index: 10, value: String(micro2), creation_id: 'c2' }];
   await tick();
   paySlots = [];
   await mine(18);
-  assert.strictEqual(await credits(), 5000, 'reorged-out payment not credited');
+  assert.strictEqual(await credits(), 1000, 'reorged-out payment not credited');
   paySlots = [{ slot_index: 9, value: String(micro2), creation_id: 'c1' }];
   await mine(18);
-  assert.strictEqual(await credits(), 5000, 'an already-used slot cannot pay a second quote');
-  // Overpayment with the same last digits is credited at the quoted rate: +1 NOID on a 25 NOID pack = +200 credits.
+  assert.strictEqual(await credits(), 1000, 'an already-used slot cannot pay a second quote');
+  // Overpayment with the same last digits is credited at the quoted rate: +1 NOID on a 5 NOID plan = +200 credits.
   paySlots = [{ slot_index: 11, value: String(micro2 + 1_000_000), creation_id: 'c3' }];
   await tick(); await mine(18);
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 5000 + 5000 + 200, 'overpayment credited proportionally');
-  assert.strictEqual((await get(`topup/${q2.id}`, { headers: K }))[1].credits_added, 5200);
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 1000 + 1000 + 200, 'overpayment credited proportionally');
+  assert.strictEqual((await get(`topup/${q2.id}`, { headers: K }))[1].credits_added, 1200);
   assert.strictEqual((await get(`stats?key=${acct.key}`))[2].get('x-tier'), 'paid');
 
   // API gate: scripts need a key, our own pages and keyed clients don't; stats stays open for uptime monitors.
@@ -219,23 +223,18 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('txs', { bare: true, headers: K }))[0], 200);
   assert.strictEqual((await get('stats', { bare: true }))[0], 200);
 
-  // Stripe webhook: only correctly signed events credit, and replays are ignored.
-  const evt = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_1', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, currency: 'usd', metadata: { credits: '999999' } } } });
-  const sign = (body, ts = Math.floor(Date.now() / 1000)) => `t=${ts},v1=${require('node:crypto').createHmac('sha256', WHSEC).update(`${ts}.${body}`).digest('hex')}`;
-  assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': 't=1,v1=00' }))[0], 400);
-  assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt, 1000) }))[0], 400, 'old timestamp rejected');
-  assert.strictEqual((await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) }))[0], 200);
-  await post('stripe-webhook', evt, { 'stripe-signature': sign(evt) });
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 30200, 'webhook replay credits once; credits follow amount paid, not metadata');
-  const eur = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_2', payment_status: 'paid', client_reference_id: acct.id, amount_total: 2000, currency: 'eur' } } });
-  await post('stripe-webhook', eur, { 'stripe-signature': sign(eur) });
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 30200, 'non-USD session ignored');
+  // Cards are gone for good: there is no card rail and no webhook to forge.
+  const noHook = await post('stripe-webhook', {}, { 'stripe-signature': 't=1,v1=00' });
+  assert.ok(noHook[0] === 404 || noHook[0] === 405, 'no card webhook route, got ' + noHook[0]);
+  assert.strictEqual((await get('pricing'))[1].payment, 'noid');
+  assert.strictEqual((await get('pricing'))[1].card, undefined, 'no card flag');
+  assert.deepStrictEqual((await get('pricing'))[1].plans.map((p) => [p.id, p.noid, p.credits]), [['starter', 5, 1000], ['pro', 10, 3000], ['scale', 20, 8000]]);
 
   // Professional API behaviour: wrong key fails loudly, rate-limit and credit headers on every keyed call.
   const [badStatus, badBody] = await get('blocks', { bare: true, headers: { 'x-api-key': 'nk_' + 'f'.repeat(40) } });
   assert.strictEqual(badStatus, 401); assert.match(badBody.error, /unknown API key/);
   const [, , hdr] = await get('blocks', { bare: true, headers: K });
-  assert.strictEqual(hdr.get('x-tier'), 'paid'); assert.strictEqual(hdr.get('x-ratelimit-limit'), '3000'); assert.strictEqual(hdr.get('x-credits-remaining'), '30200');
+  assert.strictEqual(hdr.get('x-tier'), 'paid'); assert.strictEqual(hdr.get('x-ratelimit-limit'), '3000'); assert.strictEqual(hdr.get('x-credits-remaining'), '2200');
   assert.strictEqual((await get('me', { headers: K }))[1].tier, 'paid');
 
   // Chatbot: answers via tools from real routes; 3 free a day, then paid at 5 credits; refunded on model errors.
@@ -247,28 +246,29 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await ask())[0], 402, 'free quota used up');
   const [, a5] = await ask(K);
   assert.strictEqual(a5.paid, true);
-  assert.strictEqual(a5.credits, 30195);
+  assert.strictEqual(a5.credits, 2195);
   aiDown = true;
   assert.strictEqual((await ask(K))[0], 502);
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 30195, 'refunded when the model fails');
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 2195, 'refunded when the model fails');
   aiDown = false;
   const hist = (await get('me', { headers: K }))[1].history.map((h) => h.reason);
-  assert.ok(hist.includes('AI question') && hist.some((r) => r.startsWith('Card top-up')) && hist.some((r) => r.startsWith('NOID top-up')));
+  assert.ok(hist.includes('AI question') && hist.some((r) => r.startsWith('NOID top-up')));
+  assert.ok(!hist.some((r) => /card/i.test(r)), 'no card rail anywhere in the ledger');
 
   // Late payment: an expired order keeps its digits reserved, and a payment for it still goes to the same account.
-  const [, q3] = await post('topup', { method: 'noid', usd: 5 }, K);
+  const [, q3] = await post('topup', { plan: 'starter' }, K);
   const micro3 = Math.round(Number(q3.amount_noid) * 1e6);
   db.prepare('update noid_topups set created = ? where id = ?').run(Date.now() - 25 * 3600_000, q3.id);
   await tick();
   assert.strictEqual((await get(`topup/${q3.id}`, { headers: K }))[1].status, 'expired', 'expired orders are kept, not deleted');
-  assert.throws(() => db.prepare('insert into noid_topups (id, account, amount, credits, created, dust) values (?, ?, ?, ?, ?, ?)').run('x', acct.id, micro3, 5000, Date.now(), micro3 % 10000), /UNIQUE/, 'a newer order cannot take the held digits');
+  assert.throws(() => db.prepare('insert into noid_topups (id, account, amount, credits, created, dust) values (?, ?, ?, ?, ?, ?)').run('x', acct.id, micro3, 1000, Date.now(), micro3 % 10000), /UNIQUE/, 'a newer order cannot take the held digits');
   const before = await credits();
   paySlots = [{ slot_index: 12, value: String(micro3), creation_id: 'c4' }];
   await tick(); await mine(18);
-  assert.strictEqual(await credits(), before + 5000, 'late payment credited to the account that ordered it');
+  assert.strictEqual(await credits(), before + 1000, 'late payment credited to the account that ordered it');
   // Fault injection: if crediting fails, the order is not marked paid and no ledger row is written.
   const [, other] = await post('account', {});
-  const [, q4] = await post('topup', { method: 'noid', usd: 5 }, { 'x-api-key': other.key });
+  const [, q4] = await post('topup', { plan: 'starter' }, { 'x-api-key': other.key });
   db.prepare('update accounts set id = ? where id = ?').run('gone', other.id); // the order's account no longer exists
   paySlots = [{ slot_index: 13, value: String(Math.round(Number(q4.amount_noid) * 1e6)), creation_id: 'c5' }];
   await tick(); await mine(18);
@@ -277,15 +277,17 @@ test('indexer + api', async (t) => {
   assert.strictEqual(db.prepare("select status from noid_seen where ref = 'noid:c5'").get().status, 'review', 'flagged for a manual look');
   paySlots = [];
 
-  // Stale live price pauses new NOID quotes; a fixed price does not.
+  // A stale live price no longer stops API plan quotes: plans are fixed in NOID. Promote quotes still pause.
   const { price: px } = require('./server.js');
   delete process.env.USD_PER_NOID;
   px.now = { usd: 0.2, fetched_at: Date.now() - 16 * 60_000 };
-  assert.strictEqual((await post('topup', { method: 'noid', usd: 5 }, K))[0], 503, 'stale price: no new quotes');
-  assert.match((await get('pricing'))[1].noid_paused, /out of date/);
+  const [okStatus, fresh] = await post('topup', { plan: 'pro' }, K);
+  assert.strictEqual(okStatus, 200, 'a fixed-NOID plan still quotes while the USD feed is stale');
+  assert.strictEqual(fresh.plan.id, 'pro');
+  assert.strictEqual(fresh.credits, 3000);
+  assert.ok(Math.abs(Number(fresh.amount_noid) - 10) < 0.01);
+  assert.match((await get('pricing'))[1].noid_paused, /out of date/, 'the USD-based promoted quotes still report the pause');
   px.now.fetched_at = Date.now();
-  const [okStatus, fresh] = await post('topup', { method: 'noid', usd: 5 }, K);
-  assert.strictEqual(okStatus, 200); assert.ok(Math.abs(fresh.rate_usd_per_noid - 0.2) < 0.0001);
   process.env.USD_PER_NOID = '0.20';
 
   // Billing counts only requests that return data; cache keys ignore the key and unknown parameters.
@@ -1100,14 +1102,13 @@ test('indexer + api', async (t) => {
     assert.match(pub.headers.get('content-type'), /image\/png/);
     assert.strictEqual((await post('profile', profileBody({ description: 'again' }), K))[0], 400);
     const [, second] = await post('profile', profileBody({ token_id: 'live2', description: 'Second listing.', twitter: '' }), K);
-    const wrong = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_prof_bad', payment_status: 'paid', client_reference_id: acct.id, amount_total: 100, currency: 'usd', metadata: { kind: 'profile', profile_id: second.id } } } });
-    assert.strictEqual((await post('stripe-webhook', wrong, { 'stripe-signature': sign(wrong) }))[0], 200);
-    assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'unpaid');
-    assert.strictEqual(await credits(), creditsBefore, 'a short card payment does not buy the profile or credits');
-    const good = JSON.stringify({ type: 'checkout.session.completed', data: { object: { id: 'cs_prof', payment_status: 'paid', client_reference_id: acct.id, amount_total: 10000, currency: 'usd', metadata: { kind: 'profile', profile_id: second.id } } } });
-    assert.strictEqual((await post('stripe-webhook', good, { 'stripe-signature': sign(good) }))[0], 200);
+    assert.match((await post('profile-pay', { id: second.id, method: 'card' }, K))[1].error, /method must be noid or usdc/, 'no card rail for profiles either');
+    const [, pay2] = await post('profile-pay', { id: second.id, method: 'noid' }, K);
+    assert.strictEqual(pay2.kind, 'profile');
+    assert.ok(Number(pay2.amount_noid) > 0);
+    db.prepare("update token_profiles set status = 'pending', pay_ref = 'noid:testprof' where id = ?").run(second.id);
     assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'pending');
-    assert.strictEqual(await credits(), creditsBefore);
+    assert.strictEqual(await credits(), creditsBefore, 'promoting with NOID does not touch API credits');
     assert.strictEqual((await post('admin', { id: second.id, action: 'reject' }, { 'x-admin-token': 'adm-test' }))[1].status, 'rejected');
     assert.strictEqual((await get(`profile/${second.id}`, { headers: K }))[1].status, 'rejected');
     assert.ok(!(await get('admin', { headers: { 'x-admin-token': 'adm-test' } }))[1].pending.some((p) => p.id === second.id));
@@ -1314,7 +1315,7 @@ test('indexer + api', async (t) => {
     assert.strictEqual(madeBoost.status, 'unpaid');
     const [, colBoost] = await post('boost', { asset_id: 'col1', kind: 'collection', pack: '6h' }, K);
     assert.strictEqual(colBoost.kind, 'collection');
-    assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /Card payments are not available/);
+    assert.match((await post('boost-pay', { id: madeBoost.id, method: 'card' }, K))[1].error, /method must be noid or usdc/);
     assert.strictEqual((await get('boosts?kind=token&window=poly1'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 128);
     process.env.USDC_POLYGON_CONFIRMATIONS = '5';
     assert.strictEqual((await get('boosts?kind=token&window=poly2'))[1].usdc_chains.find((c) => c.id === 'polygon').confirmations, 5);

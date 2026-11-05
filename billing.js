@@ -1,10 +1,17 @@
 // Accounts and prepaid credits. An account *is* its API key: no email, no password.
 // Only the key's SHA-256 is stored, so a leaked database cannot be used to log in.
-// Credits come in by card (Stripe Checkout + signed webhook) or NOID (exact-amount match on chain).
-const { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } = require('node:crypto');
+// Credits are bought with NOID only: an exact amount on the site address, matched on chain. No cards, no Stripe anywhere.
+const { createHash, randomBytes, randomInt } = require('node:crypto');
 
-const CREDITS_PER_USD = 1000;
-const PACKS_USD = [5, 20, 100];
+// API plans are priced directly in NOID, so quoting a plan never depends on the USD price feed: payments keep
+// working while the feed is down. Credits never expire and there is no subscription.
+const PLANS = [
+  { id: 'starter', label: 'Starter', noid: 5, credits: 1000 },
+  { id: 'pro', label: 'Pro', noid: 10, credits: 3000 },
+  { id: 'scale', label: 'Scale', noid: 20, credits: 8000 },
+];
+const PLAN_BY_ID = new Map(PLANS.map((p) => [p.id, p]));
+const planMicronoid = (noid) => Math.round(noid * 1e6); // μNOID owed for a plan, before the unique dust digits
 const CHAT_COST = Number(process.env.CHAT_COST || 5); // credits per chatbot question
 const REQUESTS_PER_CREDIT = 1000; // keyed API requests
 const FREE_CHATS_PER_DAY = Number(process.env.FREE_CHATS_PER_DAY || 3);
@@ -37,19 +44,6 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     const p = priceNow();
     return process.env.PAY_ADDRESS && p.usd ? { address: process.env.PAY_ADDRESS, usdPerNoid: p.usd, live: p.live } : null;
   };
-  const STRIPE = process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET && { key: process.env.STRIPE_SECRET_KEY, whsec: process.env.STRIPE_WEBHOOK_SECRET };
-  const SITE = process.env.SITE_URL || 'https://parano1d-scan.com';
-  // Card buttons appear only once Stripe reports card payments active for this account; checked every 10 minutes.
-  let cardActive = false;
-  async function checkStripe() {
-    if (!STRIPE) return;
-    const r = await fetch('https://api.stripe.com/v1/account', { headers: { authorization: `Bearer ${STRIPE.key}` }, signal: AbortSignal.timeout(15_000) });
-    const a = await r.json();
-    cardActive = r.ok && a.capabilities?.card_payments === 'active';
-    if (r.ok && !cardActive) console.log(`stripe: card payments ${a.capabilities?.card_payments || 'not enabled'}; card buttons hidden`);
-  }
-  if (STRIPE && process.env.NODE_ENV !== 'test') { const run = () => checkStripe().catch((e) => console.error('stripe:', e.message)); run(); setInterval(run, 600_000).unref(); }
-
   db.exec(`
     create table if not exists accounts (id text primary key, key_hash text unique not null, credits integer not null default 0, requests integer not null default 0, created integer not null);
     create table if not exists ledger (id integer primary key, account text not null, delta integer not null, reason text not null, ref text unique, at integer not null);
@@ -67,7 +61,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
   try { db.exec('drop index if exists noid_topups_open; create unique index if not exists noid_topups_dust on noid_topups(dust) where paid_ref is null'); } catch {}
   // Expired orders are kept as records (expired_at). Their dust is cleared HOLD_MS later so the digits can be reused;
   // amount keeps the full quote. height = chain tip when quoted.
-  for (const col of ['expired_at integer', 'height integer', 'purpose text', 'subject text']) try { db.exec(`alter table noid_topups add column ${col}`); } catch {}
+  for (const col of ['expired_at integer', 'height integer', 'purpose text', 'subject text', 'plan text']) try { db.exec(`alter table noid_topups add column ${col}`); } catch {}
   // Every output ever seen on PAY_ADDRESS, with when and at which tip it first appeared. An output can only pay an
   // order quoted before it appeared, and only once it has CONFIRMATIONS blocks on top. On a fresh table, outputs
   // already sitting on the address are recorded as 'baseline' and never pay anything.
@@ -88,7 +82,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       on conflict (account, day) do update set requests = requests + excluded.requests, chats = chats + excluded.chats`),
     usage: db.prepare('select day, requests, chats from usage where account = ? order by day desc limit 30'),
     newTopup: db.prepare('insert into noid_topups (id, account, amount, credits, created, dust) values (?, ?, ?, ?, ?, ? % 10000)'),
-    topup: db.prepare('select id, account, amount, credits, created, paid_ref, expired_at from noid_topups where id = ?'),
+    topup: db.prepare('select id, account, amount, credits, created, paid_ref, expired_at, plan from noid_topups where id = ?'),
     paidAt: db.prepare('select at from ledger where ref = ?'),
     openTopups: db.prepare('select count(*) n from noid_topups where paid_ref is null and dust is not null'),
     expireTopups: db.prepare('update noid_topups set expired_at = ? where paid_ref is null and expired_at is null and created < ?'),
@@ -208,84 +202,9 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     baseline = false;
   }
 
-  async function stripeCheckout(acct, usd) {
-    const credits = usd * CREDITS_PER_USD;
-    const form = new URLSearchParams({
-      mode: 'payment',
-      'line_items[0][quantity]': '1',
-      'line_items[0][price_data][currency]': 'usd',
-      'line_items[0][price_data][unit_amount]': String(usd * 100),
-      'line_items[0][price_data][product_data][name]': `${credits.toLocaleString()} NOID Scan credits`,
-      client_reference_id: acct.id,
-      'metadata[credits]': String(credits),
-      success_url: `${SITE}/account?paid=card`,
-      cancel_url: `${SITE}/account`,
-    });
-    const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-      method: 'POST', body: form, signal: AbortSignal.timeout(15_000),
-      headers: { authorization: `Bearer ${STRIPE.key}`, 'content-type': 'application/x-www-form-urlencoded' },
-    });
-    const s = await r.json();
-    if (!r.ok) throw bad(`card payment unavailable: ${s.error?.message || r.status}`, 502);
-    return { url: s.url };
-  }
-
-  // Stripe signs every webhook: header `t=<unix>,v1=<hex hmac of "t.body">`. Never trust the browser redirect.
-  function stripeWebhook(raw, sigHeader) {
-    if (!STRIPE) throw bad('stripe not configured', 404);
-    const parts = String(sigHeader || '').split(',').map((p) => p.split('='));
-    const t = Number(parts.find(([k]) => k === 't')?.[1]);
-    const want = createHmac('sha256', STRIPE.whsec).update(`${t}.${raw}`).digest();
-    // Stripe may send several v1 signatures while a secret is being rotated; any valid one is enough.
-    const ok = Number.isFinite(t) && Math.abs(Date.now() / 1000 - t) <= 300
-      && parts.some(([k, v]) => k === 'v1' && Buffer.from(v || '', 'hex').length === want.length && timingSafeEqual(Buffer.from(v, 'hex'), want));
-    if (!ok) throw bad('bad signature', 400);
-    const evt = JSON.parse(raw);
-    const s = evt.data?.object;
-    if (s?.metadata?.kind === 'profile' && ['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s.payment_status === 'paid') {
-      const usd = profiles ? profiles.priceUsd() : 0;
-      if (s.currency === 'usd' && Number(s.amount_total) === usd * 100) profiles.markPaid(s.metadata.profile_id, `stripe:${s.id}`, s.client_reference_id);
-      return { received: true };
-    }
-    if (s?.metadata?.kind === 'boost' && ['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s.payment_status === 'paid') {
-      const row = boosts?.ownedUnpaid(s.client_reference_id, s.metadata.boost_id);
-      if (row && s.currency === 'usd' && Number(s.amount_total) === row.usdc * 100) boosts.markPaid(row.id, `stripe:${s.id}`, s.client_reference_id);
-      return { received: true };
-    }
-    // Credits come from what Stripe says was paid, never from anything the buyer could have touched.
-    const credits = s?.currency === 'usd' ? Math.round((Number(s.amount_total) / 100) * CREDITS_PER_USD) : 0;
-    if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(evt.type) && s?.payment_status === 'paid' && credits > 0 && q.byId.get(s.client_reference_id)) {
-      credit(s.client_reference_id, credits, `Card top-up ($${(s.amount_total / 100).toFixed(2)})`, `stripe:${s.id}`);
-    }
-    return { received: true };
-  }
-
   const orderMarkPaid = (purpose, subject, ref, account) => (purpose === 'boost' ? boosts?.markPaid(subject, ref, account) : profiles?.markPaid(subject, ref, account));
 
-  // Card checkout for a Promote order (profile or boost). Same Stripe account and key as credits; nothing in the
-  // Stripe dashboard changes. The signed webhook marks the order paid; it still waits for admin approval.
-  async function orderCheckout(acct, { kind, id, usd, name, back }) {
-    if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
-    const form = new URLSearchParams({
-      mode: 'payment',
-      'line_items[0][quantity]': '1',
-      'line_items[0][price_data][currency]': 'usd',
-      'line_items[0][price_data][unit_amount]': String(usd * 100),
-      'line_items[0][price_data][product_data][name]': name,
-      client_reference_id: acct.id,
-      'metadata[kind]': kind,
-      [`metadata[${kind}_id]`]: id,
-      success_url: `${SITE}${back}${back.includes('?') ? '&' : '?'}${kind === 'boost' ? 'promote' : 'enhance'}=paid`,
-      cancel_url: `${SITE}${back}`,
-    });
-    const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-      method: 'POST', body: form, signal: AbortSignal.timeout(15_000),
-      headers: { authorization: `Bearer ${STRIPE.key}`, 'content-type': 'application/x-www-form-urlencoded' },
-    });
-    const sess = await r.json();
-    if (!r.ok) throw bad(`card payment unavailable: ${sess.error?.message || r.status}`, 502);
-    return { url: sess.url, usd, [`${kind}_id`]: id };
-  }
+
 
   // NOID quote for a Promote order: a unique amount (last 4 digits) on PAY_ADDRESS, settled by the chain watcher
   // or at once by a pasted payment receipt (POST order-receipt).
@@ -339,12 +258,18 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     return { status: 'paid', order: t.id, kind: meta.purpose, txid: sum.txid, note: 'Paid. It stays hidden until an admin approves it.' };
   }
 
-  const pricing = () => ({
-    credits_per_usd: CREDITS_PER_USD, packs_usd: PACKS_USD, chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY,
-    requests_per_credit: REQUESTS_PER_CREDIT, enhanced_profile_usd: profiles ? profiles.priceUsd() : 100, enhanced_profile_usdc: profiles ? profiles.priceUsdc() : 100, usdc_chains: usdcPay.chains(), support: process.env.SUPPORT_EMAIL || null,
-    card: !!STRIPE && cardActive, noid: noid() && { address: noid().address, usd_per_noid: +noid().usdPerNoid.toFixed(6), live: noid().live, confirmations: CONFIRMATIONS },
-    noid_paused: process.env.PAY_ADDRESS && !noid() ? priceNow().paused : null,
-  });
+  const pricing = () => {
+    const px = priceNow();
+    const usd = px.usd || null;
+    return {
+      payment: 'noid',
+      plans: PLANS.map((p) => ({ id: p.id, label: p.label, noid: p.noid, micronoid: planMicronoid(p.noid), credits: p.credits, requests: p.credits * REQUESTS_PER_CREDIT, usd_at_market: usd ? +(p.noid * usd).toFixed(2) : null })),
+      chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY, requests_per_credit: REQUESTS_PER_CREDIT,
+      enhanced_profile_usd: profiles ? profiles.priceUsd() : 100, enhanced_profile_usdc: profiles ? profiles.priceUsdc() : 100, usdc_chains: usdcPay.chains(), support: process.env.SUPPORT_EMAIL || null,
+      noid: process.env.PAY_ADDRESS ? { address: process.env.PAY_ADDRESS, usd_per_noid: usd ? +usd.toFixed(6) : null, live: !!px.live, confirmations: CONFIRMATIONS } : null,
+      noid_paused: process.env.PAY_ADDRESS && !noid() ? priceNow().paused : null,
+    };
+  };
 
   // shortcut: in-memory, per process; enough to stop casual account spam.
   const signups = new Map();
@@ -389,45 +314,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (!row) return null;
       const usd = profiles.priceUsd();
       if (body.method === 'usdc') return usdcPay.quote(acct, row.id, null, body.chain);
-      if (body.method === 'card' && ['promote', 'verified'].includes(body.page)) return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/' + body.page });
-      if (body.method === 'noid' && ['promote', 'verified'].includes(body.page)) return noidOrder(acct, usd, 'profile', row.id);
-      if (body.method === 'card') {
-        if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
-        const form = new URLSearchParams({
-          mode: 'payment',
-          'line_items[0][quantity]': '1',
-          'line_items[0][price_data][currency]': 'usd',
-          'line_items[0][price_data][unit_amount]': String(usd * 100),
-          'line_items[0][price_data][product_data][name]': `Enhanced profile for ${row.token_id}`,
-          client_reference_id: acct.id,
-          'metadata[kind]': 'profile',
-          'metadata[profile_id]': row.id,
-          success_url: `${SITE}/${body.page === 'collection' ? 'collection' : 'token'}/${encodeURIComponent(row.token_id)}?enhance=paid`,
-          cancel_url: `${SITE}/${body.page === 'collection' ? 'collection' : 'token'}/${encodeURIComponent(row.token_id)}`,
-        });
-        const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-          method: 'POST', body: form, signal: AbortSignal.timeout(15_000),
-          headers: { authorization: `Bearer ${STRIPE.key}`, 'content-type': 'application/x-www-form-urlencoded' },
-        });
-        const s = await r.json();
-        if (!r.ok) throw bad(`card payment unavailable: ${s.error?.message || r.status}`, 502);
-        return { url: s.url, usd, profile_id: row.id };
-      }
-      const NOID = noid();
-      if (body.method !== 'noid') throw bad('method must be usdc, card, or noid');
-      if (!NOID) throw bad(process.env.PAY_ADDRESS ? `NOID payments are paused: ${priceNow().paused}. Try again in a few minutes.` : 'NOID payments are not enabled right now', 503);
-      if (q.openTopups.get().n >= 1000) throw bad('too many open payments, try again later', 503);
-      const base = Math.round((usd / NOID.usdPerNoid) * 1e6);
-      for (let i = 0; i < 5; i++) {
-        const id = randomBytes(6).toString('hex');
-        const amount = base + randomInt(1, 10_000);
-        try {
-          db.prepare('insert into noid_topups (id, account, amount, credits, created, dust, purpose, subject) values (?, ?, ?, 0, ?, ? % 10000, ?, ?)').run(id, acct.id, amount, Date.now(), amount, 'profile', row.id);
-        } catch { continue; }
-        db.prepare('update noid_topups set height = ? where id = ?').run(tipNow(), id);
-        return { ...routes['GET topup'](acct, null, id), profile_id: row.id, usd, kind: 'profile' };
-      }
-      throw bad('could not allocate a payment amount, try again', 503);
+      if (body.method !== 'noid') throw bad('method must be noid or usdc');
+      return noidOrder(acct, usd, 'profile', row.id);
     },
     'POST boost': (acct, body) => {
       if (!acct) throw bad('missing or unknown API key', 401);
@@ -438,9 +326,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       if (!acct) throw bad('missing or unknown API key', 401);
       const row = boosts?.ownedUnpaid(acct.id, body?.id);
       if (!row) return null;
-      if (body?.method === 'card') return orderCheckout(acct, { kind: 'boost', id: row.id, usd: row.usdc, name: `Promoted slot (${row.pack}) for ${row.asset_id}`, back: typeof body.back === 'string' && /^\/[A-Za-z0-9/_:%?=&.-]{0,200}$/.test(body.back) ? body.back : '/promote' });
       if (body?.method === 'noid') return noidOrder(acct, row.usdc, 'boost', row.id);
-      if (body?.method && body.method !== 'usdc') throw bad('method must be usdc, card, or noid');
+      if (body?.method && body.method !== 'usdc') throw bad('method must be noid or usdc');
       return usdcPay.quote(acct, row.id, row.usdc, body.chain);
     },
     'POST order-receipt': (acct, body) => orderReceipt(acct, body),
@@ -449,24 +336,16 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     'GET usdc-order': (acct, _, id) => usdcPay.view(acct, id),
     'POST topup': async (acct, body) => {
       if (!acct) throw bad('missing or unknown API key', 401);
-      const usd = Number(body.usd);
-      if (!PACKS_USD.includes(usd)) throw bad(`amount must be one of ${PACKS_USD.join(', ')} USD`);
-      if (body.method === 'card' && ['promote', 'verified'].includes(body.page)) return orderCheckout(acct, { kind: 'profile', id: row.id, usd, name: `Enhanced profile for ${row.token_id}`, back: '/' + body.page });
-      if (body.method === 'noid' && ['promote', 'verified'].includes(body.page)) return noidOrder(acct, usd, 'profile', row.id);
-      if (body.method === 'card') {
-        if (!STRIPE || !cardActive) throw bad('Card payments are not available yet. Please pay with NOID.', 404);
-        return stripeCheckout(acct, usd);
-      }
-      const NOID = noid();
-      if (body.method !== 'noid') throw bad('method must be noid or card');
-      if (!NOID) throw bad(process.env.PAY_ADDRESS ? `NOID payments are paused: ${priceNow().paused}. Try again in a few minutes.` : 'NOID payments are not enabled right now', 503);
+      const plan = PLAN_BY_ID.get(String(body?.plan || ''));
+      if (!plan) throw bad(`plan must be one of ${PLANS.map((p) => p.id).join(', ')}`);
+      if (!process.env.PAY_ADDRESS) throw bad('NOID payments are not enabled right now', 503);
       if (q.openTopups.get().n >= 1000) throw bad('too many open payments, try again later', 503);
-      const base = Math.round((usd / NOID.usdPerNoid) * 1e6);
+      const base = planMicronoid(plan.noid);
       for (let i = 0; i < 5; i++) {
         const id = randomBytes(6).toString('hex');
-        const amount = base + randomInt(1, 10_000);
-        try { q.newTopup.run(id, acct.id, amount, usd * CREDITS_PER_USD, Date.now(), amount); } catch { continue; } // dust taken by another open or held quote
-        db.prepare('update noid_topups set height = ? where id = ?').run(tipNow(), id);
+        const amount = base + randomInt(1, 10_000); // the last digits identify this order
+        try { q.newTopup.run(id, acct.id, amount, plan.credits, Date.now(), amount); } catch { continue; } // dust taken by another open or held quote
+        db.prepare('update noid_topups set height = ?, plan = ? where id = ?').run(tipNow(), plan.id, id);
         return routes['GET topup'](acct, null, id);
       }
       throw bad('could not allocate a payment amount, try again', 503);
@@ -474,13 +353,17 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     'GET topup': (acct, _, id) => {
       const t = q.topup.get(id);
       if (!t || !acct || t.account !== acct.id) return null;
-      const usd = t.credits / CREDITS_PER_USD;
       const seen = !t.paid_ref && q.seenFor.get(t.id);
+      const plan = PLAN_BY_ID.get(t.plan || '') || null;
+      const usd = priceNow().usd;
       return {
         status: t.paid_ref ? 'paid' : seen ? 'confirming' : t.expired_at ? 'expired' : 'waiting',
         confirmations: seen ? { have: Math.max(0, tipNow() - seen.height), need: CONFIRMATIONS } : null,
-        id: t.id, address: noid()?.address ?? process.env.PAY_ADDRESS, amount_noid: (t.amount / 1e6).toFixed(6), credits: t.credits, usd,
-        rate_usd_per_noid: +(usd / (t.amount / 1e6)).toFixed(6), created: t.created, expires: t.created + QUOTE_MS,
+        id: t.id, address: process.env.PAY_ADDRESS, amount_noid: (t.amount / 1e6).toFixed(6), credits: t.credits,
+        plan: plan ? { id: plan.id, label: plan.label, noid: plan.noid } : null,
+        requests: t.credits * REQUESTS_PER_CREDIT,
+        usd_at_market: usd ? +((t.amount / 1e6) * usd).toFixed(2) : null, rate_usd_per_noid: usd ? +usd.toFixed(6) : null,
+        created: t.created, expires: t.created + QUOTE_MS,
         paid: !!t.paid_ref, paid_at: t.paid_ref ? q.paidAt.get(t.paid_ref)?.at ?? null : null, paid_ref: t.paid_ref?.replace(/^noid:/, '') ?? null,
         credits_added: t.paid_ref ? db.prepare('select delta from ledger where ref = ?').get(t.paid_ref)?.delta ?? null : null,
         balance: q.byId.get(t.account)?.credits ?? null,
@@ -488,5 +371,5 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
   };
 
-  return { account, countRequest, chargeChat, settleNoid, stripeWebhook, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
+  return { account, countRequest, chargeChat, settleNoid, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
 };

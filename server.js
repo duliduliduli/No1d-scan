@@ -1434,8 +1434,7 @@ async function handle(req, res) {
     const name = parts[2];
     const id = parts[3] || '';
     const sub = parts[4] ? decodeURIComponent(parts[4]) : '';
-    // Account, payment and chat routes: never cached, may take a JSON body.
-    if (name === 'stripe-webhook' && req.method === 'POST') return send(200, bill.stripeWebhook(await readBody(req), req.headers['stripe-signature']));
+    // Account, payment and chat routes: never cached, may take a JSON body. Payments are NOID-only; no card webhooks.
     if (name === 'chat' && req.method === 'POST') {
       const body = parseJson(await readBody(req));
       const charge = bill.chargeChat(acct, ip);
