@@ -665,6 +665,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Screener/);
   assert.match(homeHtml, /Chart\+Txns/);
   assert.match(homeHtml, /class="gnsplit"/, "the globe and the country list sit side by side");
+  assert.match(homeHtml, /\.gnsplit \{[^}]*align-items:stretch[^}]*height:var\(--gnh/, "the globe frame and the country list are one row of equal height");
   assert.match(homeHtml, /class="mcalc"/, "the calculator fields are plain fields, not overlapping tiles");
   assert.match(homeHtml, /\.hudstats \{ grid-template-columns:repeat\(5, minmax\(0, 1fr\)\)/, "the five live tiles stay on one line");
   assert.match(homeHtml, /font-size:16px/, "fields are 16px so focus never zooms the page on iOS");
