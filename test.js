@@ -1681,6 +1681,7 @@ test('indexer + api', async (t) => {
     assert.strictEqual(order.noid, 1);
     assert.strictEqual(order.secs, 3600, '1 NOID buys an hour');
     assert.match(order.pay_address, /^o1[02-9ac-hj-np-z]{6,120}$/, 'the contract has a real o1 address to pay');
+    assert.strictEqual(order.payee, PAY_ADDR, 'the order records the address we collect to');
     assert.ok(order.deadline_height > tip);
     assert.strictEqual(lastObject.kind, 'refundable_payment');
     assert.strictEqual(lastObject.payer, payer, 'the contract names the buyer as the payer');
@@ -1881,6 +1882,7 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.match(html, /noidTierCard\('api', \{ payer: \(WalletDex\.identity\(\)\?\.address \|\| ''\) \}\)/);
   assert.match(html, /you can take the money back after it/, 'the page states the refund in plain words');
   assert.match(html, /wireNoidTierCard\('api'\)/);
+  assert.match(html, /o\.payee \|\| ''/, 'the card names the address we collect to');
   assert.doesNotMatch(html, /Paid promotion\. Not a recommendation[\s\S]{0,400}API time buys requests/, 'API time is not labelled a promotion');
   assert.match(w, /no1d_wallet_pending_v1/);
   assert.match(w, /PEND_MAX_WAIT_MS/);

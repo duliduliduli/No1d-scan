@@ -3087,7 +3087,7 @@ function noidOrderHtml(o) {
   if (done) return `<p class="msg">Finished ${esc(when(o.ends))}. Pay again to start another run.</p>`;
   if (gone) return `<p class="msg">The deadline passed before we collected, so the money is yours to take back from <span class="mono">${esc(o.pay_address)}</span>.</p>`;
   return `<p>Send <b>${o.noid} NOID</b> to <span class="mono">${esc(o.pay_address)}</span> ${copyBtn(o.pay_address)}. The order turns on by itself when the block carrying it lands, and this card updates without a reload.</p>
-    <p class="fine">Contract deadline: block ${esc(String(o.deadline_height))}. Before it we can collect; after it you can recover the NOID. Contract id ${esc(o.id)}.</p>`;
+    <p class="fine">Contract deadline: block ${esc(String(o.deadline_height))}. Before it we can collect those ${o.noid} NOID to <span class="mono">${esc(o.payee || '')}</span>; after it you can recover them. Contract id ${esc(o.id)}.</p>`;
 }
 function wireNoidTierCard(kind) {
   const card = $(kind === 'api' ? 'apitime' : 'noidpromo');

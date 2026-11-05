@@ -69,15 +69,17 @@ module.exports = function contracts(db, rpc, opts = {}) {
       payer text not null, opening_hex text not null, address text not null, code_id text,
       noid integer not null, micronoid integer not null, secs integer not null,
       deadline_height integer not null, status text not null, slot integer, creation_id integer,
-      created integer not null, funded integer, starts integer, ends integer);
+      created integer not null, funded integer, starts integer, ends integer, payee text);
     create index if not exists noid_contracts_open on noid_contracts(status, deadline_height);
     create index if not exists noid_contracts_watch on noid_contracts(status, created);
     create index if not exists noid_contracts_asset on noid_contracts(asset_id, status, ends);
   `);
+  // The table shipped without the payee; add it additively so an existing copy heals too.
+  try { db.exec('alter table noid_contracts add column payee text'); } catch { /* already there */ }
   const q = {
     insert: db.prepare(`insert into noid_contracts
-      (id, kind, asset_id, account, payer, opening_hex, address, code_id, noid, micronoid, secs, deadline_height, status, created)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting', ?)`),
+      (id, kind, asset_id, account, payer, opening_hex, address, code_id, noid, micronoid, secs, deadline_height, status, created, payee)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting', ?, ?)`),
     byId: db.prepare('select * from noid_contracts where id = ?'),
     awaiting: db.prepare("select * from noid_contracts where status = 'awaiting' order by created limit 20"),
     live: db.prepare("select * from noid_contracts where status = 'live'"),
@@ -110,7 +112,7 @@ module.exports = function contracts(db, rpc, opts = {}) {
     return {
       id: row.id, kind: row.kind, asset_id: row.asset_id || null, status: row.status,
       noid: row.noid, micronoid: row.micronoid, secs: row.secs, payer: row.payer,
-      pay_address: row.address, opening_hex: row.opening_hex, code_id: row.code_id,
+      pay_address: row.address, opening_hex: row.opening_hex, code_id: row.code_id, payee: row.payee || null,
       deadline_height: row.deadline_height, slot: row.slot, creation_id: row.creation_id,
       created: row.created, starts: row.starts, ends: row.ends, live,
       remaining_secs: live ? Math.max(0, Math.round((row.ends - now) / 1000)) : 0,
@@ -139,7 +141,7 @@ module.exports = function contracts(db, rpc, opts = {}) {
     const id = randomBytes(8).toString('hex');
     const account = body.account || (kind === 'api' ? byWallet(payer)?.id ?? null : null);
     q.insert.run(id, kind, asset, account, payer, info.opening_hex, info.address, info.code_id ?? null,
-      terms.noid, terms.micronoid, terms.secs, info.deadline_height ?? definition(kind, payer, terms.micronoid, terms.secs, height).expiry_height, Date.now());
+      terms.noid, terms.micronoid, terms.secs, info.deadline_height ?? definition(kind, payer, terms.micronoid, terms.secs, height).expiry_height, Date.now(), String(payeeFor(kind)));
     return { ...shape(q.byId.get(id)), terms: termsFor(kind) };
   }
 

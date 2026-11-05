@@ -393,6 +393,8 @@ NOID through a real Parano1d contract, not a fee address with dust digits.
 - **UI.** `noidTierCard('promo')` on `/promote` and `noidTierCard('api')` on `/account`, both wired by
   `wireNoidTierCard`, both polling `/api/noid-order` every 8 s and remembering the order in
   `localStorage['no1d_noid_order_promo' | 'no1d_noid_order_api']`.
+- **The order records the payee** (`noid_contracts.payee`, additive) and the card names it, so what the
+  buyer can see on the page is checkable against the object. `GET /api/noid-order` returns `payee`.
 - **Collecting.** Claiming our side is a wallet action on the machine that holds the payee key; a server
   cannot do it and must not pretend to. On the droplet that is the node's own wallet:
   `parano1d contracts call <object.json> <slot> <creation_id> --close --pay-to <address>`. **Set
