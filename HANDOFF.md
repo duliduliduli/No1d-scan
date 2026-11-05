@@ -334,6 +334,13 @@ quote/build path still needs `SWAP_ENABLED=true` plus its fee settings).
 The v2.1 intent flow pays no explorer fee: the native request has no fee output, so
 `SWAP_FEE_BPS` and `SWAP_FEE_ADDRESS` only apply to the old quote/build path.
 
+## 14a. Trading UI: what you can spend, and pending trades (added 2026-11-05)
+
+- **Available, Max and a slider.** The token page trade card and the wallet trade panel both open with a balance line: `Available 6.9902 NOID` when buying, `Available 53.994091 PCAT` when selling. `Max` fills the amount (a buy stops at the balance less `FEE_RESERVE_MICRO` = 0.02 NOID, so the fee is always covered; a sell stops at whole tokens, which is what the chain accepts). A range input under the amount is two-way: dragging sets the amount, typing moves the slider. The NOID figure comes from the explorer index (`/api/address/:a`), the token figure from the node (`/api/wallet/:a`), so a token you just bought appears even when the index lags.
+- **Pending until the block lands.** A trade is accepted by the node and settles in the next block (~30 s), so a wallet that just traded looks unchanged and reads as a failure. `public/wallet.js` now keeps the receipt in `localStorage` under `no1d_wallet_pending_v1` (`{address, token_id, ticker, side, units_before, minimum_output, gross_in, txid, at, status}`), writes it in `confirmTrade` (after capturing the pre-trade units), and renders a banner at the top of the portfolio: amber **Pending** with the txid while it waits, green **Confirmed** once it lands. `pollPending` re-reads `/api/wallet/:a` every 4 s and confirms when the token page moved the way the trade said (`settled()`: a buy needs `units_now >= units_before + minimum_output`, a sell `units_now <= units_before - gross_in`). After 150 s it stops and says **Still pending** rather than pretending. `readPending()` drops a confirmed record after 10 minutes and ignores one belonging to another address.
+- **The balance card says which block it is from** (`Explorer index as of block N`) and, while a trade is pending, that the index can lag a block.
+- **Disclaimer style.** The yellow-bordered bulleted risk box ("Before you confirm" / "Before you sign") is gone from both swap cards: one plain `.fine` line instead. No `.risk` markup remains in `public/index.html`.
+
 ## 15. Quick verification commands
 
 

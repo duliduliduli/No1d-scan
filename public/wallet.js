@@ -265,12 +265,21 @@
   }
 
   // Proves the reviewed trade on this device and submits it. Needs the wallet unlocked.
-  async function confirmTrade({ id } = {}) {
+  async function confirmTrade({ id, ticker = '' } = {}) {
     const t = TRADES.get(id);
     if (!t) throw new Error('that quote expired: review the trade again');
     if (locked()) throw new Error('unlock your wallet first');
     if (await addressAt(t.index) !== t.address) throw new Error('the unlocked wallet does not own the trading address');
     TRADES.delete(id);
+    // What this address held before the trade, so the chain view can be compared against it.
+    const rev = t.plan?.native_plan?.review || {};
+    const req = rev.request || {};
+    const tokenId = String(rev.asset_id || req.asset_id || '');
+    let heldBefore = '0';
+    try {
+      const before = await fetch(`/api/wallet/${t.address}`).then((r) => (r.ok ? r.json() : null));
+      heldBefore = unitsOf(before?.holdings, tokenId);
+    } catch {}
     const { intent } = await engineCall({ cmd: 'authorize', master: SESSION.master.slice(), index: t.index, plan: t.plan });
     const res = await fetch('/api/swap-submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signed: intent }) });
     const body = await res.json().catch(() => ({}));
@@ -279,7 +288,15 @@
       throw new Error(/state|parent|stale|changed/i.test(msg) ? `A new block arrived before the trade was sent, so the node refused it. Nothing was spent. Review it again. (${msg})` : msg);
     }
     const r = body.result;
-    return { txid: typeof r === 'string' ? r : (r?.txid || r?.intent_id || ''), result: r };
+    const txid = typeof r === 'string' ? r : (r?.txid || r?.intent_id || '');
+    // Pending from here: the next render shows it in yellow and watches for the block.
+    writePending({
+      v: 1, address: t.address, token_id: tokenId, ticker: String(ticker || ''),
+      side: req.buy === false ? 'sell' : 'buy', units_before: heldBefore,
+      minimum_output: String(rev.minimum_output || '0'), gross_in: String(req.gross_input || '0'),
+      txid, at: Date.now(), status: 'pending',
+    });
+    return { txid, result: r };
   }
 
   // The engine-checked review as label/value rows. Buy: NOID in, token units out. Sell: token units in, NOID out.
@@ -337,6 +354,53 @@
   };
   window.parano1d = provider;
 
+  // ------------------------------------------------------- pending trades ---
+  // A submitted trade is not in the chain view until the next block lands (~30 s), so a wallet
+  // that just bought looks unchanged and reads as if the money went nowhere. Keep the receipt in
+  // this browser, say pending in yellow, and watch the address until the node shows the trade.
+  const PEND_KEY = 'no1d_wallet_pending_v1';
+  const PEND_MAX_WAIT_MS = 150000;
+  const readPending = () => {
+    try {
+      const p = JSON.parse(localStorage.getItem(PEND_KEY) || 'null');
+      const id = readIdentity();
+      if (!p || !id || p.address !== id.address) return null;
+      if (p.status === 'confirmed' && Date.now() - (p.seen_at || 0) > 600000) return null;
+      return p;
+    } catch { return null; }
+  };
+  const writePending = (p) => { try { if (p) localStorage.setItem(PEND_KEY, JSON.stringify(p)); else localStorage.removeItem(PEND_KEY); } catch {} };
+  const unitsOf = (list, id) => { const h = (list || []).find((x) => (x.token_id || x.asset_id) === id); return h ? String(h.units || '0') : '0'; };
+  // Did the chain take the trade? Compare the token page with what the address held before it.
+  function settled(p, unitsNow) {
+    const before = BigInt(p.units_before || '0');
+    const now = BigInt(unitsNow || '0');
+    if (p.side === 'sell') {
+      const sold = BigInt(p.gross_in || '0');
+      return sold > 0n ? now <= before - sold : now < before;
+    }
+    const least = BigInt(p.minimum_output || '0');
+    return now >= before + (least > 0n ? least : 1n);
+  }
+  // Watches the address after a submit: yellow while it waits, then repaints once it lands.
+  async function pollPending(box, tries = 0) {
+    const p = readPending();
+    if (!p || p.status !== 'pending') return;
+    let seen = null;
+    try { seen = await fetch(`/api/wallet/${p.address}`).then((r) => (r.ok ? r.json() : null)); } catch {}
+    if (seen && settled(p, unitsOf(seen.holdings, p.token_id))) {
+      writePending({ ...p, status: 'confirmed', seen_at: Date.now() });
+      return render(box);
+    }
+    if (Date.now() - p.at > PEND_MAX_WAIT_MS) {
+      writePending({ ...p, status: 'waiting', checked_at: Date.now() });
+      return render(box);
+    }
+    const w = $('pwatch');
+    if (w) w.textContent = ` · checked ${tries + 1} time${tries ? 's' : ''}, still waiting for the block...`;
+    setTimeout(() => pollPending(box, tries + 1), 4000);
+  }
+
   // ------------------------------------------------------------------ view ---
   const fmtNoid = (micronoid) => {
     const n = BigInt(String(micronoid ?? '0'));
@@ -377,6 +441,14 @@
     const slots = account?.slots || [];
     const txs = account?.activity?.transactions || [];
     const holdings = positions?.holdings || [];
+    const pend = readPending();
+    const pendTx = pend && pend.txid ? ` <span class="mono">${esc(short(pend.txid, 12))}</span>` : '';
+    const pendWatch = '<small id="pwatch" class="muted"></small>';
+    const pendLine = !pend ? '' : pend.status === 'confirmed'
+      ? `<div class="pending ok"><b>Confirmed</b> &mdash; the block landed and the chain shows your ${esc(pend.side)}${pend.ticker ? ` of ${esc(pend.ticker)}` : ''}. The figures below are read straight from the node.${pendTx}${pendWatch}</div>`
+      : pend.status === 'waiting'
+      ? `<div class="pending"><b>Still pending</b> &mdash; the node accepted your ${esc(pend.side)} and it is queued for a block. Nothing is lost by leaving this page: open it again and this banner is still here.${pendTx}${pendWatch}</div>`
+      : `<div class="pending"><b>Pending</b> &mdash; your ${esc(pend.side)} was accepted and it settles in the next block, about 30 seconds. Your portfolio updates the moment it lands; this page is watching.${pendTx}${pendWatch}</div>`;
     const fmtUnits = (s) => { const v = Number(s); return Number.isFinite(v) ? v.toLocaleString('en-US', { maximumFractionDigits: 6 }) : String(s ?? ''); };
     const usd = (v) => (v == null || !Number.isFinite(Number(v)) ? '–' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
     const noidMicro = BigInt(String(account?.balance_micronoid ?? '0'));
@@ -402,6 +474,7 @@
         <h2>Balance <small class="muted">live from this explorer's node</small></h2>
         <div class="wbig">${esc(balance)}</div>
         <p class="muted">${slots.length} unspent output${slots.length === 1 ? '' : 's'}${account?.blocks_mined ? ` · ${account.blocks_mined} block${account.blocks_mined === 1 ? '' : 's'} mined` : ''}</p>
+        <p class="fine">Explorer index as of block ${esc(String(account?.activity?.tip_height == null ? '-' : account.activity.tip_height))}.${pend && pend.status !== 'confirmed' ? ' A trade is not in this index until the block carrying it is indexed, so this figure can lag a moment behind the portfolio below.' : ''}</p>
         <h3 class="wh3">Unspent outputs</h3>
         ${slots.length
           ? `<div class="wlist">${slots.slice(0, 12).map((s) => `<div><span class="mono">slot ${esc(String(s.slot_index))}</span><b>${esc(fmtNoid(s.value))}</b></div>`).join('')}</div>`
@@ -410,6 +483,7 @@
 
       <div class="card">
         <h2>Portfolio <small class="muted">quantities and prices straight from the chain</small></h2>
+        ${pendLine}
         <table class="price">
           <tr><th>Asset</th><th class="num">You hold</th><th class="num">Price</th><th class="num">Value</th><th></th></tr>
           <tr>
@@ -444,18 +518,25 @@
           <select id="tasset" aria-label="Token"></select>
           <button type="button" id="tsidebuy" class="on">Buy</button><button type="button" id="tsidesell">Sell</button>
         </div>
+        <p class="avail" id="tavail"></p>
         <div class="wrow">
           <input id="tamt" inputmode="decimal" placeholder="Amount in NOID" autocomplete="off">
+          <button type="button" id="tmax">Max</button>
+        </div>
+        <input id="trange" type="range" min="0" max="1000" value="0" step="1" aria-label="How much of your balance to use">
+        <div class="wrow">
           <input id="tslip" inputmode="decimal" value="1" size="3" aria-label="Slippage percent"> <span class="muted">% slippage</span>
           <button type="button" id="tquote">Get quote</button>
         </div>
         <div id="tres"></div>
+        <p class="fine">Trading is not investment advice: a token can go to zero and a sent trade cannot be reversed.</p>
       </div>
 
       <div class="card">
         <h2>Spending <small class="muted">what this build can and cannot do</small></h2>
-        <p>Parano1d has no signatures. Spending is authorized by a zero-knowledge proof that you know the secret behind the input address, and that proof has to run on your device. This build ships the address engine and the trade panel, not the prover yet, so nothing here can move funds and the panel will say so instead of pretending.</p>
-        <p class="fine">A quote from the trade panel is real: it is built by the node for your address and your amount. Sending NOID by hand is still off.</p>
+        <p>Parano1d has no signatures. Spending is authorized by a zero-knowledge proof that you know the secret behind the input address, and that proof runs here, on your device. The seed never leaves this browser.</p>
+        <p>Buying and selling tokens works in this build. The trade panel below asks the node for a plan for your address, checks that plan here before proving anything, proves it, and sends it. A sent trade shows as pending (yellow) until the next block lands, about 30 seconds.</p>
+        <p class="fine">Not built yet: sending plain NOID to another address by hand. That needs the same proof with a payment statement instead of a trade.</p>
       </div>
 
       <div class="card">
@@ -521,12 +602,64 @@
       if (id && !picks.some((p) => p.id === id)) picks.push({ id, label: tk.ticker || tk.name || short(id, 8) });
     }
     $('tasset').innerHTML = picks.length ? picks.map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('') : '<option value="">nothing listed yet</option>';
+    // Spendable now: NOID from the explorer index, the selected token's page read from the node.
+    const MICRO = 1000000n;
+    const FEE_RESERVE_MICRO = 20000n;
+    const dec = (micro) => {
+      const n = BigInt(micro || 0);
+      const w = (n / MICRO).toLocaleString('en-US');
+      const f = String(n % MICRO).padStart(6, '0').replace(/0+$/, '');
+      return `${w}${f ? '.' + f : ''}`;
+    };
+    const noidHeld = BigInt(String(account?.balance_micronoid || '0'));
+    const unitsHeld = (tokenId) => {
+      const h = holdings.find((x) => (x.token_id || x.asset_id) === tokenId);
+      return BigInt(String(h?.units || '0'));
+    };
     let side = 'buy';
+    const picked = () => $('tasset').value || '';
+    const availMax = () => (side === 'buy'
+      ? (noidHeld > FEE_RESERVE_MICRO ? noidHeld - FEE_RESERVE_MICRO : 0n)
+      : (unitsHeld(picked()) / MICRO) * MICRO); // a sell is whole tokens
+    function paintAvail() {
+      const el = $('tavail');
+      if (!el) return;
+      const id = picked();
+      el.innerHTML = side === 'buy'
+        ? `Available <b>${esc(dec(noidHeld))} NOID</b>`
+        : `Available <b>${esc(dec(unitsHeld(id)))} ${esc((holdings.find((x) => (x.token_id || x.asset_id) === id)?.ticker) || 'tokens')}</b>`;
+      $('tmax').disabled = availMax() <= 0n;
+    }
+    function syncSlider() {
+      const max = availMax();
+      const raw = $('tamt').value.trim();
+      if (max <= 0n || !/^\d+(\.\d+)?$/.test(raw)) { $('trange').value = '0'; return; }
+      const got = side === 'buy' ? BigInt(Math.round(Number(raw) * 1e6)) : BigInt(Math.floor(Number(raw))) * MICRO;
+      $('trange').value = got >= max ? '1000' : String(Number((got * 1000n) / max));
+    }
     const setSide = (s) => {
       side = s;
       $('tsidebuy').classList.toggle('on', s === 'buy');
       $('tsidesell').classList.toggle('on', s === 'sell');
       $('tamt').placeholder = s === 'buy' ? 'Amount in NOID' : 'Whole tokens';
+      $('tamt').value = '';
+      $('trange').value = '0';
+      $('tres').innerHTML = '';
+      paintAvail();
+    };
+    $('tamt').addEventListener('input', syncSlider);
+    $('trange').oninput = () => {
+      const max = availMax();
+      if (max <= 0n) return;
+      const part = (max * BigInt($('trange').value)) / 1000n;
+      $('tamt').value = side === 'buy' ? dec(part) : String(Number(part / MICRO));
+      $('tres').innerHTML = '';
+    };
+    $('tmax').onclick = () => {
+      const max = availMax();
+      if (max <= 0n) return;
+      $('tamt').value = side === 'buy' ? dec(max) : String(Number(max / MICRO));
+      $('trange').value = '1000';
       $('tres').innerHTML = '';
     };
     const openPane = (id) => {
@@ -547,7 +680,7 @@
     });
     $('tsidebuy').onclick = () => setSide('buy');
     $('tsidesell').onclick = () => setSide('sell');
-    $('tasset').onchange = () => { $('twhat').textContent = $('tasset').selectedOptions[0]?.textContent || ''; $('tres').innerHTML = ''; };
+    $('tasset').onchange = () => { $('twhat').textContent = $('tasset').selectedOptions[0]?.textContent || ''; $('tres').innerHTML = ''; paintAvail(); syncSlider(); };
     setSide('buy');
     $('tquote').onclick = async () => {
       const token = $('tasset').value, amount = $('tamt').value.trim(), slip = $('tslip').value.trim() || '1';
@@ -572,8 +705,9 @@
         note.className = 'fine';
         note.textContent = 'Approving on this device. This takes about 10 to 30 seconds…';
         try {
-          const res = await confirmTrade({ id: t.id });
-          note.innerHTML = `Sent${res.txid ? ` · <span class="mono">${esc(short(res.txid))}</span>` : ''}. It settles in the next block.`;
+          await confirmTrade({ id: t.id, ticker: tick });
+          // Repaint: the wallet view is what has to say pending, not the panel below it.
+          await render(box);
         } catch (err) {
           note.className = 'msg err';
           note.textContent = err.message;
@@ -581,6 +715,9 @@
         }
       };
     };
+
+    const watch = readPending();
+    if (watch && watch.status === 'pending') setTimeout(() => pollPending(box), 4000);
 
     $('wreset').onclick = () => {
       if (!confirm('Delete the encrypted seed from this browser? Without your written words the funds are unrecoverable.')) return;

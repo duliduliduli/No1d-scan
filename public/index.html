@@ -189,6 +189,12 @@
   .swap .risk { margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-left:3px solid var(--gold); border-radius:3px; font:12px/1.45 var(--mono); color:var(--fg) }
   .swap .risk b { display:block; margin-bottom:6px; color:var(--gold); letter-spacing:.06em; text-transform:uppercase; font-size:11px }
   .swap .risk ul { margin:0; padding-left:1.1em } .swap .risk li { margin:4px 0 }
+  .avail { margin:10px 0 0; font:12px var(--mono); color:var(--muted) }
+  .avail b { color:var(--fg) }
+  .amrow { display:flex; gap:8px; align-items:center }
+  .amrow input { flex:1; min-width:0 }
+  .amrow button { white-space:nowrap }
+  input[type="range"] { width:100%; margin:10px 0 0; padding:0; accent-color:var(--accent); background:transparent }
   .swap.off p { margin:0 0 8px } .swap.off p:last-child { margin:0 }
   .pill { display:inline-block; padding:2px 8px; border:1px solid var(--line); border-radius:999px; font:600 11px system-ui, sans-serif; letter-spacing:.02em; color:var(--muted) }
   .pill.enh { color:var(--gold); border-color:var(--gold); margin-left:6px; vertical-align:1px }
@@ -578,6 +584,12 @@
   .wfield b { font:13px var(--mono); word-break:break-all }
   .wfield .copy { padding:3px 8px }
   .wbig { font:700 26px var(--mono); color:var(--accent); margin:6px 0 }
+  .pending { margin:0 0 12px; padding:10px 12px; border:1px solid var(--gold); border-left:3px solid var(--gold); border-radius:3px; background:var(--gold-soft); color:var(--fg); font:13px/1.5 var(--ui) }
+  .pending b { color:var(--gold); text-transform:uppercase; letter-spacing:.06em }
+  .pending .mono { word-break:break-all; color:var(--muted) }
+  .pending.ok { border-color:var(--up); border-left-color:var(--up); background:rgba(79,216,165,.10) }
+  .pending.ok b { color:var(--up) }
+  .pending small { display:block; margin-top:4px; color:var(--muted); font:11px var(--mono) }
   .wlist { display:flex; flex-direction:column; gap:4px; margin:8px 0 }
   .wlist > div { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid var(--line); padding:6px 0; font:12px var(--mono) }
   .wseed { display:grid; grid-template-columns:repeat(auto-fill,minmax(94px,1fr)); gap:8px; margin:12px 0 }
@@ -2641,12 +2653,7 @@ async function mountSwap(d, id) {
         <input id="swsender" placeholder="Your o1… address" aria-label="Your wallet address" autocomplete="off" spellcheck="false">
         <button type="button" id="swbuild" style="margin-top:8px;width:100%">Build unsigned intent</button>
         <div id="swintentout" aria-live="polite"></div></div>` : ''}
-      <div class="risk" role="note"><b>Before you sign</b><ul>
-        <li>You can lose the full amount. A token price can go to zero.</li>
-        <li>The fee and the total above are the amounts you are agreeing to. This site cannot reverse a trade.</li>
-        <li>NOID Scan never holds your wallet, keys, or funds. You sign in your own wallet, or not at all.</li>
-        <li>This is not investment, financial, or trading advice.</li>
-      </ul></div>
+      <p class="fine">The fee and the total above are exactly what you agree to: a sent trade cannot be reversed and a token price can go to zero. NOID Scan never holds your wallet, keys or funds, and this is not investment advice.</p>
       <p class="fine">Non-custodial. Fee ${esc(feePct)}% is disclosed with the total before signing.${paidTo} <a href="/terms" data-link>Terms</a></p></div>`;
   let side = 'buy', q = null;
   const slipValue = () => {
@@ -2770,32 +2777,95 @@ function mountTrade(d, id) {
   const ticker = d.token.ticker || 'tokens';
   box.innerHTML = `<div class="card swap"><h2>Trade</h2>
       <div class="tabs" data-tabs="side"><button type="button" data-v="buy" class="on">Buy</button><button type="button" data-v="sell">Sell</button></div>
-      <label class="muted" id="trlab" for="tramt" style="display:block;margin-top:12px">You pay (NOID)</label>
-      <input id="tramt" inputmode="decimal" placeholder="0.0" aria-label="Amount" autocomplete="off">
+      <p class="avail" id="travail">Checking this wallet&rsquo;s balance&hellip;</p>
+      <label class="muted" id="trlab" for="tramt" style="display:block;margin-top:6px">You pay (NOID)</label>
+      <div class="amrow"><input id="tramt" inputmode="decimal" placeholder="0.0" aria-label="Amount" autocomplete="off"><button type="button" id="trmax">Max</button></div>
+      <input id="trrange" type="range" min="0" max="1000" value="0" step="1" aria-label="How much of your balance to use">
       <label class="muted" for="trslip" style="display:block;margin-top:10px">Slippage</label>
       <div class="row" style="flex-wrap:nowrap"><div class="tabs" data-tabs="trslip">${['0.5', '1', '3'].map((v) => `<button type="button" data-v="${v}" class="${v === '1' ? 'on' : ''}">${v}%</button>`).join('')}</div>
         <input id="trslip" inputmode="decimal" value="1" aria-label="Slippage percent" autocomplete="off" style="max-width:80px"></div>
       <button type="button" id="trreview" class="primary" style="margin-top:12px;width:100%">Review trade</button>
       <div id="trout" aria-live="polite" style="margin-top:12px"></div>
-      <div class="risk" role="note"><b>Before you confirm</b><ul>
-        <li>You can lose the full amount. A token price can go to zero.</li>
-        <li>A sent trade cannot be reversed.</li>
-        <li>Your wallet stays in this browser. NOID Scan never holds your keys or funds.</li>
-        <li>This is not investment, financial, or trading advice.</li>
-      </ul></div></div>`;
+      <p class="fine">Trading is not investment advice: a token can go to zero and a sent trade cannot be reversed. Your wallet stays in this browser, and NOID Scan never holds your keys or funds.</p>
+    </div>`;
   let side = 'buy', plan = null;
   const out = $('trout');
   const reset = () => { plan = null; out.innerHTML = ''; };
   onTabs('side', (v) => {
     side = v; reset();
     $('trlab').textContent = side === 'buy' ? 'You pay (NOID)' : `You sell (${ticker}, whole tokens)`;
+    $('tramt').value = '';
+    $('tramt').placeholder = side === 'buy' ? '0.0' : 'whole tokens';
+    $('trrange').value = '0';
+    paintAvail();
   });
   onTabs('trslip', (v) => { $('trslip').value = v; reset(); });
-  $('tramt').addEventListener('input', reset);
+  $('tramt').addEventListener('input', () => { syncSlider(); reset(); });
   $('trslip').addEventListener('input', () => {
     for (const b of document.querySelectorAll('[data-tabs="trslip"] button')) b.classList.toggle('on', b.dataset.v === $('trslip').value.trim());
     reset();
   });
+  // What this wallet can spend: NOID comes from the explorer index, the token from the node.
+  const MICRO = 1000000n;
+  const FEE_RESERVE_MICRO = 20000n; // the chain's fee floor, plus room for a normal fee
+  const dec = (micro) => {
+    const n = BigInt(micro || 0);
+    const w = (n / MICRO).toLocaleString('en-US');
+    const f = String(n % MICRO).padStart(6, '0').replace(/0+$/, '');
+    return `${w}${f ? '.' + f : ''}`;
+  };
+  let avail = { noid: 0n, units: 0n, ready: false };
+  const maxBuyMicro = () => (avail.noid > FEE_RESERVE_MICRO ? avail.noid - FEE_RESERVE_MICRO : 0n);
+  const maxSellWhole = () => avail.units / MICRO; // a sell is whole tokens
+  const availMax = () => (side === 'buy' ? maxBuyMicro() : maxSellWhole() * MICRO);
+  function paintAvail() {
+    const el = $('travail');
+    if (!el) return;
+    if (!avail.ready) { el.innerHTML = '<span class="muted">Balance unavailable right now.</span>'; return; }
+    el.innerHTML = side === 'buy'
+      ? `Available <b>${esc(dec(avail.noid))} NOID</b>${avail.noid > 0n ? '' : ' <span class="muted">&mdash; send NOID here first</span>'}`
+      : `Available <b>${esc(dec(avail.units))} ${esc(ticker)}</b>${avail.units >= MICRO ? '' : ' <span class="muted">&mdash; nothing to sell yet</span>'}`;
+    $('trmax').disabled = availMax() <= 0n;
+  }
+  function syncSlider() {
+    const max = availMax();
+    const raw = $('tramt').value.trim();
+    if (max <= 0n || !/^\d+(\.\d+)?$/.test(raw)) { $('trrange').value = '0'; return; }
+    const got = side === 'buy' ? BigInt(Math.round(Number(raw) * 1e6)) : BigInt(Math.floor(Number(raw))) * MICRO;
+    $('trrange').value = got >= max ? '1000' : String(Number((got * 1000n) / max));
+  }
+  $('trrange').oninput = () => {
+    const max = availMax();
+    if (max <= 0n) return;
+    const v = BigInt($('trrange').value);
+    const part = (max * v) / 1000n;
+    $('tramt').value = side === 'buy' ? dec(part) : String(Number(part / MICRO));
+    reset();
+  };
+  $('trmax').onclick = () => {
+    const max = availMax();
+    if (max <= 0n) return;
+    $('tramt').value = side === 'buy' ? dec(max) : String(Number(max / MICRO));
+    $('trrange').value = '1000';
+    reset();
+  };
+  async function loadAvail() {
+    let addr = '';
+    try { addr = W?.identity()?.address || ''; } catch {}
+    if (!addr) { $('travail').innerHTML = '<span class="muted">No wallet in this browser yet.</span>'; return; }
+    const [acct, pos] = await Promise.all([
+      fetch(`/api/address/${addr}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`/api/wallet/${addr}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    const h = (pos?.holdings || []).find((x) => (x.token_id || x.asset_id) === id);
+    avail = { noid: BigInt(String(acct?.balance_micronoid || '0')), units: BigInt(String(h?.units || '0')), ready: true };
+    paintAvail();
+    syncSlider();
+  }
+  // A trade is not in the index until its block is indexed, so keep asking for a couple of minutes.
+  const watchAvail = (tries = 0) => setTimeout(async () => { await loadAvail(); if (tries < 24) watchAvail(tries + 1); }, 5000);
+  loadAvail();
+
   const fail = (m) => { out.innerHTML = `<p class="msg err">${esc(m)}</p>`; };
   // A wallet script left over from before this panel existed has none of these methods.
   // Calling one threw before the try block below, so the button looked dead: say so instead.
@@ -2829,9 +2899,10 @@ function mountTrade(d, id) {
           }
           note.className = 'fine';
           note.textContent = 'Approving on this device. This takes about 10 to 30 seconds…';
-          const res = await W.confirmTrade({ id: plan.id });
+          const res = await W.confirmTrade({ id: plan.id, ticker });
+          watchAvail();
           plan = null;
-          out.innerHTML = `<p class="msg">Trade sent${res.txid ? ` · <span class="mono">${esc(short(res.txid))}</span> ${copyBtn(res.txid)}` : ''}. It settles in the next block.</p>`;
+          out.innerHTML = `<div class="pending"><b>Pending</b> &mdash; your ${side === 'buy' ? 'buy' : 'sell'} was accepted and it settles in the next block, about 30 seconds.${res.txid ? ` <span class="mono">${esc(short(res.txid, 12))}</span> ${copyBtn(res.txid)}` : ''}<small>Nothing is lost by leaving this page. <a href="/wallet" data-link>Your wallet</a> keeps watching and turns this into confirmed when the block lands.</small></div>`;
         } catch (e) {
           note.className = 'msg err';
           note.textContent = e.message;

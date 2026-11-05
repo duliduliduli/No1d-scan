@@ -590,7 +590,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /1W/);
   assert.match(homeHtml, /tokenchart/);
   assert.match(homeHtml, /Total you pay/);
-  assert.match(homeHtml, /Before you sign/);
+  assert.match(homeHtml, /Trading is not investment advice/); // one plain line where the bulleted risk box used to be
   assert.match(homeHtml, /never holds your wallet/);
   assert.match(homeHtml, /open here soon/);
   assert.match(homeHtml, /aria-label="Paid promotion">⚡/);
@@ -1688,4 +1688,23 @@ test('a μNOID string with a trailing .0 still renders', () => {
   assert.strictEqual(noid('16000000'), '16 NOID');
   assert.strictEqual(noid(16000000), '16 NOID');
   assert.doesNotThrow(() => noid('not-a-number'));
+});
+
+test('trading shows what you can spend, a max and a slider, and says pending until the block lands', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'public/index.html'), 'utf8');
+  const w = fs.readFileSync(path.join(__dirname, 'public/wallet.js'), 'utf8');
+  // The token trade card: available NOID when buying, available tokens when selling, Max, slider.
+  for (const id of ['travail', 'trmax', 'trrange']) assert.match(html, new RegExp(`id="${id}"`), `the trade card has #${id}`);
+  for (const id of ['tavail', 'tmax', 'trange']) assert.match(w, new RegExp(`id="${id}"`), `the wallet panel has #${id}`);
+  assert.match(html, /const maxBuyMicro = \(\) => \(avail\.noid > FEE_RESERVE_MICRO/, 'a buy is capped at the NOID balance less the fee reserve');
+  assert.match(html, /const maxSellWhole = \(\) => avail\.units \/ MICRO/, 'a sell is capped at whole tokens');
+  assert.match(w, /const availMax = \(\) => \(side === 'buy'/, 'the wallet panel caps the same way');
+  // The yellow-bordered bullet disclaimer is gone: one plain small line instead.
+  assert.doesNotMatch(html, /class="risk"/);
+  assert.match(html, /<p class="fine">Trading is not investment advice/);
+  // A submitted trade is kept in this browser and said out loud until the chain shows it.
+  assert.match(w, /no1d_wallet_pending_v1/);
+  assert.match(w, /PEND_MAX_WAIT_MS/);
+  assert.match(w, /function settled\(p, unitsNow\)/);
+  assert.match(w, /pending ok/);
 });
