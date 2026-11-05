@@ -1770,6 +1770,14 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.match(w, /function paintEst\(\)/);
   assert.match(w, /\?quote=1/, 'the wallet asks the server for the sale offer, not just the mark price');
   assert.match(w, /chainTxidOf/, 'the banner shows the chain txid once the block lands');
+  // The wallet total is stated in NOID: the spendable balance plus every token position, and separately what a sale
+  // would pay, because the curve does not pay the mark price.
+  assert.match(w, /id="walltotal"/);
+  assert.match(w, /const totalNoidMicro = noidMicro \+ heldMicro/);
+  assert.match(w, /const totalSoldMicro = noidMicro \+ soldMicro/);
+  assert.match(w, /if all sold now/);
+  assert.match(html, /\.wtotal \{/, 'the total line has its own style');
+  assert.match(html, /<small>Wallet total<\/small><b>\$\{esc\(fmtNoid\(/, 'the account card states the total in NOID too');
   assert.match(w, /no1d_wallet_pending_v1/);
   assert.match(w, /PEND_MAX_WAIT_MS/);
   assert.match(w, /function settled\(p, unitsNow\)/);

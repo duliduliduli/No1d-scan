@@ -468,6 +468,16 @@
     const noidValueUsd = noidUsd ? (Number(noidMicro) / 1e6) * noidUsd : null;
     const tokenUsdTotal = holdings.reduce((s, h) => s + (h.value_usd || 0), 0);
     const totalUsd = noidValueUsd == null && !holdings.length ? null : (noidValueUsd || 0) + tokenUsdTotal;
+    // The wallet's total is stated in NOID, because that is what the chain and the trades are denominated in: the
+    // spendable balance plus every token position at the price shown, and separately what the whole thing would pay
+    // if the tokens were sold now (server-quoted), since the curve does not pay the mark price.
+    const microOf = (v) => { try { return BigInt(String(v ?? '0')); } catch { return 0n; } };
+    const heldMicro = holdings.reduce((s, h) => s + microOf(h.value_micronoid), 0n);
+    const soldMicro = holdings.reduce((s, h) => s + microOf(h.sell_now ? h.sell_now.net_micronoid : h.value_micronoid), 0n);
+    const totalNoidMicro = noidMicro + heldMicro;
+    const totalSoldMicro = noidMicro + soldMicro;
+    const anyQuoted = holdings.some((h) => h.sell_now && h.sell_now.net_micronoid);
+    const sellDiffers = totalSoldMicro !== totalNoidMicro;
 
     box.innerHTML = `
       <div class="card">
@@ -486,6 +496,8 @@
         <h2>Balance <small class="muted">live from this explorer's node</small></h2>
         <div class="wbig">${esc(balance)}</div>
         <p class="muted">${slots.length} unspent output${slots.length === 1 ? '' : 's'}${account?.blocks_mined ? ` · ${account.blocks_mined} block${account.blocks_mined === 1 ? '' : 's'} mined` : ''}</p>
+        <p class="wtotal">Total <b id="walltotal">${esc(fmtNoid(totalNoidMicro))}</b> <span class="muted">&mdash; this balance${holdings.length ? ` plus ${holdings.length} token position${holdings.length === 1 ? '' : 's'} at the prices below` : ' and no token positions'}${totalUsd != null ? `, about ${esc(usd(totalUsd))}` : ''}</span></p>
+        ${anyQuoted && sellDiffers ? `<p class="fine">If the tokens were sold now: <b>${esc(fmtNoid(totalSoldMicro))}</b> (the curve pays less than the last traded price; see the portfolio below).</p>` : ''}
         <p class="fine">Explorer index as of block ${esc(String(account?.activity?.tip_height == null ? '-' : account.activity.tip_height))}.${pend && pend.status !== 'confirmed' ? ' A trade is not in this index until the block carrying it is indexed, so this figure can lag a moment behind the portfolio below.' : ''}</p>
         <h3 class="wh3">Unspent outputs</h3>
         ${slots.length
@@ -522,7 +534,7 @@
           }).join('')}
           ${holdings.length ? '' : '<tr><td colspan="5" class="muted">No native tokens held by this address right now. The NOID balance above is spendable.</td></tr>'}
         </table>
-        <p class="fine"><b id="wtotal">Total ${esc(usd(totalUsd))}</b>${positions?.pnl ? ` · ${positions.pnl.txns || 0} trades · bought ${esc(fmtNoid(positions.pnl.bought_noid_micronoid))} · sold ${esc(fmtNoid(positions.pnl.sold_noid_micronoid))}` : ''}${book?.tokens?.length ? '' : ''}</p>
+        <p class="fine"><b id="wtotal">Total ${esc(fmtNoid(totalNoidMicro))}</b>${anyQuoted && sellDiffers ? ` · <span class="muted">${esc(fmtNoid(totalSoldMicro))} if all sold now</span>` : ''} · ${esc(usd(totalUsd))}${positions?.pnl ? ` · ${positions.pnl.txns || 0} trades · bought ${esc(fmtNoid(positions.pnl.bought_noid_micronoid))} · sold ${esc(fmtNoid(positions.pnl.sold_noid_micronoid))}` : ''}${book?.tokens?.length ? '' : ''}</p>
         <p class="fine">Tap a token to open its page, ⧉ copies its id (the contract address trades are addressed to), Trade opens the panel below.</p>
       </div>
 

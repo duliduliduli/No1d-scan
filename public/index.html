@@ -585,6 +585,8 @@
   .wfield b { font:13px var(--mono); word-break:break-all }
   .wfield .copy { padding:3px 8px }
   .wbig { font:700 26px var(--mono); color:var(--accent); margin:6px 0 }
+  .wtotal { margin:10px 0 0; padding:8px 10px; border:1px solid var(--line); border-radius:var(--r); font:13px var(--mono) }
+  .wtotal b { color:var(--accent); font-size:15px }
   .pending { margin:0 0 12px; padding:10px 12px; border:1px solid var(--gold); border-left:3px solid var(--gold); border-radius:3px; background:var(--gold-soft); color:var(--fg); font:13px/1.5 var(--ui) }
   .pending b { color:var(--gold); text-transform:uppercase; letter-spacing:.06em }
   .pending .mono { word-break:break-all; color:var(--muted) }
@@ -3835,7 +3837,7 @@ const pages = {
         <div class="grid">
           <div class="stat"><small>NOID</small><b>${esc(fmtNoid(String(noidMicro)))}</b><small class="muted">${esc(money(noidUsd))}</small></div>
           <div class="stat"><small>Tokens held</small><b>${held.length}</b><small class="muted">${esc(money(tokenUsd))}</small></div>
-          <div class="stat"><small>Wallet total</small><b>${esc(money((noidUsd || 0) + tokenUsd))}</b></div>
+          <div class="stat"><small>Wallet total</small><b>${esc(fmtNoid(BigInt(String(noidMicro)) + held.reduce((s, h) => s + BigInt(String(h.value_micronoid ?? '0')), 0n)))}</b><small class="muted">${esc(money((noidUsd || 0) + tokenUsd))}</small></div>
           <div class="stat"><small>Receive index</small><b>${esc(String(onchain.index))}</b></div>
         </div>
         ${held.length ? `<table class="price"><tr><th>Token</th><th class="num">You hold</th><th class="num">Value</th><th class="num">Price</th><th></th></tr>
