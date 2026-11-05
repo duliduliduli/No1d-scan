@@ -560,11 +560,15 @@ module.exports = function assets(db, rpc, priceNow) {
       return view;
     });
     if (preset === 'graduating') rows = rows.filter((r) => !r.graduated && r.curve);
-    if (preset === 'watch') {
-      const raw = params.get('ids') || '';
-      if (raw.length > 8000) throw bad('ids is too long');
-      const ids = new Set(raw.split(',').map((s) => s.trim()).filter((s) => ID.test(s)).slice(0, 200));
+    // ids is the favorites list: honor it whenever it is sent, not only under preset=watch, so a caller can ask for
+    // exactly the tokens it holds. (Before, ?ids= without the preset silently returned the whole catalog.)
+    const rawIds = params.get('ids') || '';
+    if (rawIds) {
+      if (rawIds.length > 8000) throw bad('ids is too long');
+      const ids = new Set(rawIds.split(',').map((s) => s.trim()).filter((s) => ID.test(s)).slice(0, 200));
       rows = rows.filter((r) => ids.has(r.id));
+    } else if (preset === 'watch') {
+      rows = []; // a favorites request with no ids means nothing is saved yet, not "show me everything"
     }
     if (qtext) rows = rows.filter((r) => `${r.name} ${r.ticker} ${r.id}`.toLowerCase().includes(qtext));
     rows = rows.filter((r) => inRange(bi(r.liquidity_micronoid), ...filters.liq)

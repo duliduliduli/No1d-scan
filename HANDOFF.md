@@ -216,7 +216,31 @@ Still off: `SWAP_ENABLED` is not set on the droplet, so the panel answers
 "trading is off" in production until the operator turns it on. The prover is
 still the one thing between a quote and a real trade.
 
-## 12. Quick verification commands
+## 12. Favorites (added 2026-11-05)
+
+One list, one page, one vocabulary. Before this there were two systems: stars
+(tokens and collections, synced to the account) and a browser-only
+`noid-addr-watch` list for addresses that nothing could display. Addresses are
+now stars too, stored as `addr:o1…` in the same table, and
+`migrateAddrWatch()` folds the old key into stars once at boot and deletes it.
+
+- `pages.favorites` (`/favorites`, in the header nav, the ☰ menu and the mobile
+  dock, all with a live count badge) shows a token table — price, 24h, volume,
+  mcap, Open — then an address list with balance, blocks mined, Open and remove.
+  Empty state points at the ☆ Save button.
+- `starBtn(id, name, { label: true })` renders `☆ Save` / `★ Saved` instead of
+  the bare glyph; it is used in the token page header row (no longer desktop
+  only), on address and wallet pages where the old `☆ Watch` button used to be,
+  and repainted by `paintStars`, which also updates every `.favcount` badge.
+- Adding and removing is one tap anywhere: screener row, token page, mobile
+  action bar, address page, wallet portfolio row (`wallet.js` calls the page's
+  global `starBtn`). Removing a favorite on `/favorites` re-renders the list.
+- **Bug this exposed:** `/api/tokens` only honored `ids` when
+  `preset=watch` was also present, so the old watchlist tab listed the entire
+  catalog. `ids` now filters on its own; `preset=watch` with no `ids` returns an
+  empty list, which is the honest answer.
+
+## 13. Quick verification commands
 
 
 Local:

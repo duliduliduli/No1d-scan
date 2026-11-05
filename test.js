@@ -549,7 +549,12 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual([...new Uint8Array((await engine.arrayBuffer()).slice(0, 4))], [0x00, 0x61, 0x73, 0x6d], 'wasm magic');
   assert.strictEqual((await fetch(base + '/wallet')).status, 200, 'the wallet page is the app page');
   const homeHtml = await (await fetch(base + '/')).text();
-  assert.match(homeHtml, /Watchlist/);
+  assert.match(homeHtml, /href="\/favorites"/, 'favorites are a page of their own, not a hidden tab');
+  assert.match(homeHtml, /data-dock="fav"/, 'favorites sit in the mobile dock');
+  assert.match(homeHtml, /data-label="1"/, 'a star can render as a labelled Save button');
+  assert.match(homeHtml, /ADDR_STAR/, 'addresses are favorites too');
+  assert.match(homeHtml, /migrateAddrWatch\(\)/, 'the old browser-only address list folds into favorites at boot');
+  assert.doesNotMatch(homeHtml, /id="addrwatch"/, 'the second, unlistable address list is gone');
   assert.match(homeHtml, /class="alertbtn"/);
   assert.match(homeHtml, /safe-area-inset-bottom/);
   assert.match(homeHtml, /axisDoubleClickReset/);
@@ -629,7 +634,8 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /'NOID SCAN'/);
   assert.match(homeHtml, /id="pxspark"/);
   assert.match(homeHtml, /Balance over time/);
-  assert.match(homeHtml, /aria-label="Watch"/);
+  assert.match(homeHtml, /aria-label="\$\{on \? 'Remove' : 'Add'\} \$\{esc\(name \|\| id\)\} \$\{on \? 'from' : 'to'\} favorites"/, 'stars speak favorites, not a second watchlist');
+  assert.match(homeHtml, /starBtn\(ADDR_STAR\(a\.address\), 'this address', \{ label: true \}\)/, 'every address page can save itself');
   assert.match(homeHtml, /id="addrchart"/);
   assert.match(homeHtml, /id="balchart"/);
   assert.match(homeHtml, /aria-label="Account balance over time"/);
@@ -819,6 +825,13 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual(mergedStars.ids.sort(), ['gcat', 'nbus']);
   assert.deepStrictEqual((await post('stars', { id: 'gcat', on: false }, K))[1].ids, ['nbus']);
   assert.strictEqual((await post('stars', { id: 'bad id' }, K))[0], 400);
+  // Favorites hold addresses as well as tokens: one list, one account, one page.
+  const favAddr = 'addr:o1acdefghjkmnpqr';
+  assert.ok((await post('stars', { id: favAddr, on: true }, K))[1].ids.includes(favAddr), 'an address can be saved');
+  assert.ok((await post('stars', { ids: ['gcat', favAddr] }, K))[1].ids.includes('gcat'), 'a mixed batch of tokens and addresses is fine');
+  const afterFav = (await post('stars', { id: favAddr, on: false }, K))[1].ids;
+  assert.ok(!afterFav.includes(favAddr), 'unstarring an address removes just it');
+  assert.ok(afterFav.includes('nbus'), 'and leaves the other favorites alone');
   assert.ok((await get('tokens/gcat/trades?demo=1'))[1].trades.length >= 1);
   assert.strictEqual((await get('tokens/gcat/candles?demo=1&tf=nope'))[0], 400);
   assert.strictEqual((await get('tokens/missing/trades?demo=1'))[0], 404);
@@ -923,6 +936,11 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual([...new Set(seenKinds)].sort(), ['collections', 'markets', 'nft_listings']);
   const nat = db.prepare('select * from tokens where id = ?').get('ab'.repeat(32));
   assert.ok(nat && nat.supply === '100000' && nat.ticker === 'ABABABAB', 'a native market is stored from the second catalogue page');
+  // ?ids= is the favorites list itself, so it has to filter on its own: before, the favorites page listed every token.
+  const onlyOne = await get(`tokens?ids=${TRADE_ASSET}`);
+  assert.strictEqual(onlyOne[1].tokens.length, 1, 'ids filters the catalog with no preset attached');
+  assert.strictEqual(onlyOne[1].tokens[0].id, TRADE_ASSET);
+  assert.strictEqual((await get('tokens?ids=' + 'z'.repeat(9000)))[0], 400, 'a runaway ids list is refused');
   db.prepare('delete from tokens').run();
   // an empty catalogue still shows the curated fallback rows
   node.getNativeCatalog = ({ kind }) => ({ kind, height: 1, items: [], next: null });

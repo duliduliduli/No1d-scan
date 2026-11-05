@@ -312,7 +312,7 @@
               <td class="num">${esc(fmtUnits(h.balance ?? '0'))}</td>
               <td class="num">${esc(per)}</td>
               <td class="num">${value}</td>
-              <td><span class="row"><button type="button" data-trade="${esc(id)}">Trade</button><button type="button" class="copy" data-copy="${esc(id)}" title="Copy the token's id" aria-label="Copy token id">⧉</button></span></td>
+              <td><span class="row"><button type="button" data-trade="${esc(id)}">Trade</button><button type="button" class="copy" data-copy="${esc(id)}" title="Copy the token's id" aria-label="Copy token id">⧉</button>${typeof starBtn === 'function' ? starBtn(id, label) : ''}</span></td>
             </tr>`;
           }).join('')}
           ${holdings.length ? '' : '<tr><td colspan="5" class="muted">No native tokens held by this address right now. The NOID balance above is spendable.</td></tr>'}

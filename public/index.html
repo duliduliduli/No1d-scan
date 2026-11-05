@@ -154,6 +154,16 @@
   .tfs button.on { background:var(--accent); color:var(--bg) }
   button.star { padding:2px 7px; margin-left:6px; letter-spacing:0; text-transform:none; font-size:16px; line-height:1; color:var(--muted); border-color:var(--line); vertical-align:1px }
   button.star.on { color:var(--gold); border-color:var(--gold) }
+  button.star.lbl { padding:5px 10px; font-size:13px; letter-spacing:.02em; text-transform:none; vertical-align:0 }
+  button.star.lbl.on { color:var(--gold); border-color:var(--gold) }
+  a.favlink { padding:8px 12px; border:1px solid var(--line); border-radius:3px; font:700 12px var(--mono); letter-spacing:.12em; text-transform:uppercase; white-space:nowrap }
+  a.favlink:hover { border-color:var(--gold); color:var(--gold) }
+  .favcount { display:inline-block; min-width:16px; margin-left:5px; padding:0 4px; border-radius:8px; background:var(--gold); color:var(--bg); font:700 10px/16px var(--mono); text-align:center; vertical-align:1px }
+  .favcount[hidden] { display:none }
+  .favrow { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); flex-wrap:wrap }
+  .favrow .grow { flex:1 1 12ch; min-width:0 }
+  .favrow .mono { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .favrow .acts { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap }
   .mcard .px button.star { margin:0 0 4px; display:inline-block }
   .tape td.side { font-weight:700 }
   .statrow { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(108px, 100%), 1fr)); gap:8px; margin-top:12px }
@@ -659,12 +669,14 @@
 <header>
   <h1><a href="/" data-link>NOID Scan</a></h1>
   <a class="explore" href="/explore" data-link>Explore</a>
+  <a class="favlink" href="/favorites" data-link>Favorites<span class="favcount" hidden></span></a>
   <a class="walletbtn" href="/wallet" data-link>Wallet</a>
   <form id="search"><input name="q" placeholder="Search blocks, txs, addresses…" aria-label="Search" autocomplete="off"></form>
   <div class="menu" id="menu">
     <button type="button" id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="menunav">☰</button>
     <nav id="menunav">
       <a href="/explore" data-link>Explore tokens</a>
+      <a href="/favorites" data-link>Favorites</a>
       <a href="/wallet" data-link>Wallet</a>
       <a href="/promote" data-link>Promote <span aria-hidden="true">⚡</span></a>
       <a href="/verified" data-link>Verified <span aria-hidden="true">✓</span></a>
@@ -686,7 +698,7 @@
 <nav class="dock mob flex" aria-label="Mobile">
   <a href="/explore" data-link data-dock="screener">Screener</a>
   <button type="button" id="docksearch">Search</button>
-  <a href="/explore?preset=watch" data-link data-dock="watch">Watchlist</a>
+  <a href="/favorites" data-link data-dock="fav">Favorites<span class="favcount" hidden></span></a>
   <a href="/alerts" data-link data-dock="alerts">Alerts</a>
   <button type="button" id="dockmenu">Menu</button>
 </nav>
@@ -1933,9 +1945,13 @@ function paintStars() {
     const on = set.has(b.dataset.star);
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    b.textContent = on ? '★' : '☆';
-    const name = b.getAttribute('aria-label')?.replace(/^(Add|Remove) /, '').replace(/ (to|from) watchlist$/, '') || b.dataset.star;
-    b.setAttribute('aria-label', `${on ? 'Remove' : 'Add'} ${name} ${on ? 'from' : 'to'} watchlist`);
+    b.textContent = b.dataset.label ? (on ? '★ Saved' : '☆ Save') : (on ? '★' : '☆');
+    const name = b.getAttribute('aria-label')?.replace(/^(Add|Remove) /, '').replace(/ (to|from) (watchlist|favorites)$/, '') || b.dataset.star;
+    b.setAttribute('aria-label', `${on ? 'Remove' : 'Add'} ${name} ${on ? 'from' : 'to'} favorites`);
+  }
+  for (const c of document.querySelectorAll('.favcount')) {
+    c.textContent = String(set.size);
+    c.hidden = !set.size;
   }
   paintWatch();
 }
@@ -1974,6 +1990,7 @@ async function toggleStar(id) {
     catch (e) { if (e.status === 401) saveKey(''); }
   }
   if (new URLSearchParams(location.search).get('preset') === 'watch' && $('exlist')) fillExplore().catch(showExErr);
+  if (location.pathname === '/favorites') pages.favorites().catch(() => {});
 }
 addEventListener('click', (e) => {
   const b = e.target.closest?.('button.star');
@@ -1982,24 +1999,24 @@ addEventListener('click', (e) => {
   e.stopPropagation();
   toggleStar(b.dataset.star);
 }, true);
-const ADDR_WATCH = 'noid-addr-watch';
-function addrWatched(id) {
-  try { return new Set(JSON.parse(localStorage.getItem(ADDR_WATCH) || '[]')).has(id); } catch { return false; }
+// Addresses used to live in their own browser-only list (noid-addr-watch) that nothing could show. Fold them into
+// favorites once, then forget the old key so there is a single list, saved on the account like everything else.
+function migrateAddrWatch() {
+  let old = [];
+  try { old = JSON.parse(localStorage.getItem('noid-addr-watch') || '[]'); } catch { old = []; }
+  if (!Array.isArray(old) || !old.length) return;
+  const ids = [...new Set([...localStars(), ...old.filter((a) => typeof a === 'string' && /^o1[02-9ac-hj-np-z]{6,120}$/.test(a)).map(ADDR_STAR)])];
+  writeStars(ids);
+  try { localStorage.removeItem('noid-addr-watch'); } catch {}
 }
-function toggleAddrWatch(id, btn) {
-  let set;
-  try { set = new Set(JSON.parse(localStorage.getItem(ADDR_WATCH) || '[]')); } catch { set = new Set(); }
-  if (set.has(id)) set.delete(id); else set.add(id);
-  try { localStorage.setItem(ADDR_WATCH, JSON.stringify([...set])); } catch {}
-  const on = set.has(id);
-  btn.classList.toggle('on', on);
-  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  btn.textContent = on ? '★ Watching' : '☆ Watch';
-}
-function starBtn(id, name) {
+function starBtn(id, name, opts) {
   const on = starSet().has(id);
-  return `<button type="button" class="star${on ? ' on' : ''}" data-star="${esc(id)}" aria-pressed="${on ? 'true' : 'false'}" aria-label="${on ? 'Remove' : 'Add'} ${esc(name || id)} ${on ? 'from' : 'to'} watchlist">${on ? '★' : '☆'}</button>`;
+  const lbl = opts && opts.label;
+  return `<button type="button" class="star${lbl ? ' lbl' : ''}${on ? ' on' : ''}" data-star="${esc(id)}"${lbl ? ' data-label="1"' : ''} aria-pressed="${on ? 'true' : 'false'}" aria-label="${on ? 'Remove' : 'Add'} ${esc(name || id)} ${on ? 'from' : 'to'} favorites">${on ? (lbl ? '★ Saved' : '★') : (lbl ? '☆ Save' : '☆')}</button>`;
 }
+// Addresses are favorites too, in the same list and the same account row: the id carries a prefix so one table holds both.
+const ADDR_STAR = (a) => 'addr:' + a;
+const isAddrStar = (id) => String(id).startsWith('addr:');
 let promoIds = new Set();
 const PAID = 'Paid promotion. Not a recommendation or endorsement by NOID Scan.';
 // Paid placements carry one lightning bolt and nothing else; the disclosure is in the tooltip and /terms.
@@ -2037,7 +2054,7 @@ function winBox(t, key) {
 }
 function pairActions(id) {
   const on = starSet().has(id);
-  return `<div class="pairactions mob grid"><button type="button" id="watchjump" data-id="${esc(id)}">${on ? 'Watching' : 'Watchlist'}</button><a class="alertbtn" href="${demoHref('/alerts')}" data-link>Alerts</a><button type="button" id="tradejump" class="tradebtn">Trade</button></div>`;
+  return `<div class="pairactions mob grid"><button type="button" id="watchjump" data-id="${esc(id)}">${on ? '★ Saved' : '☆ Save'}</button><a class="alertbtn" href="${demoHref('/alerts')}" data-link>Alerts</a><button type="button" id="tradejump" class="tradebtn">Trade</button></div>`;
 }
 function pairNav() {
   return `<nav class="pairnav mob flex" aria-label="Pair sections"><button type="button" data-pane-btn="info" class="on">Info</button><button type="button" data-pane-btn="both">Chart+Txns</button><button type="button" data-pane-btn="chart">Chart</button><button type="button" data-pane-btn="tx">Txns</button></nav>`;
@@ -2047,7 +2064,7 @@ function paintWatch() {
   if (!b) return;
   const on = starSet().has(b.dataset.id);
   b.classList.toggle('on', on);
-  b.textContent = on ? 'Watching' : 'Watchlist';
+  b.textContent = on ? '★ Saved' : '☆ Save';
 }
 function wirePair(redraw) {
   document.body.dataset.pane = 'info';
@@ -2158,7 +2175,7 @@ function exploreShell(tab, params) {
             <button type="button" data-v="new">New</button>
             <button type="button" data-v="volume">Top volume</button>
           </div>
-          ${tabs('preset', tab === 'nfts' ? [['', 'All'], ['watch', 'Watchlist']] : [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Watchlist']], params.get('preset') || '')}
+          ${tabs('preset', tab === 'nfts' ? [['', 'All'], ['watch', 'Favorites']] : [['', 'All'], ['trending', 'Trending'], ['gainers', 'Top gainers'], ['new', 'New pairs'], ['graduating', 'Graduating soon'], ['watch', 'Favorites']], params.get('preset') || '')}
           <div class="barrow">
             <input id="exq" value="${esc(params.get('q') || '')}" placeholder="${tab === 'nfts' ? 'Collection name or id' : 'Name, ticker or token id'}" aria-label="Search listings" autocomplete="off">
             <select id="exsort" aria-label="Sort">${sorts.flatMap(([k]) => [['desc', '↓'], ['asc', '↑']].map(([d, arrow]) => `<option value="${k}:${d}"${sort === k && dir === d ? ' selected' : ''}>${sorts.find((s) => s[0] === k)[1]} ${arrow}</option>`)).join('')}</select>
@@ -2257,7 +2274,7 @@ async function fillExplore() {
     if (!ids.length) {
       $('listbar').hidden = false;
       $('exlist').removeAttribute('aria-busy');
-      $('exlist').innerHTML = `<div class="empty"><b>Nothing starred</b><p class="muted">Star a token or collection to pin it here. ${myKey() ? 'Stars are saved on your account.' : 'They stay in this browser until you log in, then they save to your account.'}</p></div>`;
+      $('exlist').innerHTML = `<div class="empty"><b>No favorites yet</b><p class="muted">Tap ☆ Save on any token, collection or address to keep it here. ${myKey() ? 'Favorites are saved on your account.' : 'They stay in this browser until you log in, then they save to your account.'}</p></div>`;
       return;
     }
     req.set('ids', ids.join(','));
@@ -3054,6 +3071,39 @@ function statHead(t) {
   </div>`;
 }
 const pages = {
+  async favorites() {
+    await ensureStars();
+    const ids = [...starSet()];
+    const tokenIds = ids.filter((id) => !isAddrStar(id));
+    const addrIds = ids.filter(isAddrStar).map((id) => id.slice(5));
+    const [tok, ...addrs] = await Promise.all([
+      tokenIds.length ? part('tokens?ids=' + encodeURIComponent(tokenIds.join(','))) : Promise.resolve({ tokens: [] }),
+      ...addrIds.slice(0, 24).map((a) => part('address/' + encodeURIComponent(a))),
+    ]);
+    const tokens = (tok && tok.tokens) || [];
+    const rows = tokens.map((t) => `<tr>
+      <td>${starBtn(t.id, t.name)}</td>
+      <td><a class="who" href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>${logoHtml(t)}<span><b>${esc(t.ticker || t.name)}</b> <small class="muted">${esc(t.name)}</small></span></a></td>
+      <td>${esc(compactNoid(t.price_micronoid))}<br><small class="muted">${esc(t.price_usd == null ? '–' : usd4(t.price_usd))}</small></td>
+      <td>${chgHtml(t.change && t.change['24h'])}</td>
+      ${numCell(t.volume_micronoid)}${numCell(t.mcap_micronoid)}
+      <td><a href="${demoHref('/token/' + encodeURIComponent(t.id))}" data-link>Open</a></td></tr>`).join('');
+    const addrRows = addrs.map((r, i) => {
+      const a = addrIds[i];
+      const acts = `<span class="acts"><a href="/address/${encodeURIComponent(a)}" data-link>Open</a>${starBtn(ADDR_STAR(a), 'this address')}</span>`;
+      if (!r || r._err) return `<div class="favrow"><span class="grow mono" title="${esc(a)}">${esc(short(a))}</span><span class="muted">unavailable</span>${acts}</div>`;
+      return `<div class="favrow"><span class="grow mono" title="${esc(a)}"><a href="/address/${encodeURIComponent(a)}" data-link>${esc(short(a))}</a></span>
+        <span>${esc(noid(r.balance_micronoid))}</span><span class="muted">${n0(r.blocks_mined)} blocks</span>${acts}</div>`;
+    }).join('');
+    const empty = !ids.length;
+    app.innerHTML = `<div class="card"><h2>Favorites <small>${ids.length ? `${ids.length} saved` : ''}</small></h2>
+      <p class="fine">${myKey() ? 'Saved on your account, so they follow your key to any browser.' : 'Saved in this browser. Create a key on the account page and they save to it.'}</p>
+      ${empty ? `<div class="empty"><b>Nothing saved yet</b><p class="muted">Tap <b>☆ Save</b> on any token, collection or address and it lands here. The star is on every token row, on each token page and on every address page.</p><p><a href="/explore" data-link>Browse tokens →</a></p></div>` : ''}
+      ${tokens.length ? `<div class="wide scroller"><table class="list tok"><thead><tr><th></th><th>Token</th><th>Price</th><th>24h</th><th>Volume</th><th>MCap</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+      ${addrIds.length ? `<h3>Addresses</h3>${addrRows}` : ''}
+      ${!empty && !tokens.length && !addrIds.length ? '<p class="muted">Those favorites are no longer listed on this chain.</p>' : ''}
+    </div>`;
+  },
   async wallet(id) {
     if (id) return pages.addressWallet(id);
     app.innerHTML = `<div class="card"><h2>No1d Wallet</h2>
@@ -3590,7 +3640,7 @@ const pages = {
       ${e?.banner ? `<img class="banner" alt="" src="${esc(e.banner)}">` : ''}
       <p class="pairtools"><a href="${demoHref('/explore')}" data-link>← Tokens</a>
         <b class="pairname mob">${esc(t.name)}</b>
-        <span class="deskbit">${starBtn(t.id, t.name)}</span>
+        ${starBtn(t.id, t.name, { label: true })}
         <button type="button" id="sharebtn">Share</button>
         <span class="deskbit"><button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy address">Copy address</button></span>
         <details class="more mob"><summary aria-label="More">⋯</summary><div>${starBtn(t.id, t.name)}<button type="button" class="copy" data-copy="${esc(t.id)}" aria-label="Copy address">Copy address</button></div></details></p>
@@ -3820,7 +3870,7 @@ const pages = {
     const back = token
       ? `<a href="${demoHref('/token/' + encodeURIComponent(token))}" data-link>← Token</a>`
       : `<a href="${demoHref('/explore')}" data-link>← Tokens</a>`;
-    const watching = addrWatched(w.address);
+    const watching = starSet().has(ADDR_STAR(w.address));
     const donut = donutLegend((w.holdings || []).map((h) => ({
       label: h.ticker || h.name || h.token_id,
       n: h.value_usd > 0 ? Number(h.value_usd) : Number(h.balance) || 0,
@@ -3833,7 +3883,7 @@ const pages = {
           <span class="mono clip" title="${esc(w.address)}">${esc(short(w.address))}</span>
           ${copyBtn(w.address)}
           <a href="/address/${encodeURIComponent(w.address)}" data-link>Chain</a>
-          <button type="button" class="watch${watching ? ' on' : ''}" id="addrwatch" aria-pressed="${watching ? 'true' : 'false'}" aria-label="Watch">${watching ? '★ Watching' : '☆ Watch'}</button>
+          ${starBtn(ADDR_STAR(w.address), 'this wallet', { label: true })}
         </div>
         <div class="tiles">
           <div class="stat"><small>PnL${token ? ` · ${esc(token)}` : ''}</small><b class="${(pnl.pnl_usd || 0) < 0 ? 'down' : 'up'}">${esc(pnlUsd)}</b></div>
@@ -3852,8 +3902,7 @@ const pages = {
       ${donut ? `<div class="card"><h2>Token holdings</h2>${donut}</div>` : ''}
       ${w.trades?.length ? `<div class="card"><h2>Trades <small>${token ? esc(token) : 'all indexed'}</small></h2>${tradeTable(w.trades, w.demo, token || null, true)}</div>` : ''}`;
     if (balPts.length > 1) wireBal('balrange', balPts);
-    const watchBtn = $('addrwatch');
-    if (watchBtn) watchBtn.onclick = () => toggleAddrWatch(w.address, watchBtn);
+
   },
   async collection(id) {
     await ensureStars();
@@ -4096,7 +4145,7 @@ const pages = {
     const px = s0._err ? null : s0.price?.usd;
     const balN = noidNum(a.balance_micronoid);
     const usdLine = px != null && balN != null ? `≈ ${money(balN * px, 2)} USD` : '';
-    const watching = addrWatched(a.address);
+    const watching = starSet().has(ADDR_STAR(a.address));
     const chainPts = balPoints(a.usd_points);
     const balPts = chainPts.length > 1 ? chainPts : (demo && !w0._err ? balPoints(w0.usd_points) : []);
     const balNote = chainPts.length > 1
@@ -4161,7 +4210,7 @@ const pages = {
           <span class="mono clip" title="${esc(a.address)}">${esc(short(a.address))}</span>
           ${copyBtn(a.address)}
           <button type="button" id="addrqrbtn" aria-label="Show QR code">QR</button>
-          <button type="button" class="watch${watching ? ' on' : ''}" id="addrwatch" aria-pressed="${watching ? 'true' : 'false'}" aria-label="Watch">${watching ? '★ Watching' : '☆ Watch'}</button>
+          ${starBtn(ADDR_STAR(a.address), 'this address', { label: true })}
         </div>
         <div id="addrqr" hidden></div>
         ${seen}
@@ -4197,8 +4246,7 @@ const pages = {
       const rows = $('addrtab')?.tBodies?.[0]?.rows;
       for (const tr of rows || []) tr.hidden = v !== 'all' && tr.dataset.dir !== v;
     });
-    const watchBtn = $('addrwatch');
-    if (watchBtn) watchBtn.onclick = () => toggleAddrWatch(a.address, watchBtn);
+
     const qrBtn = $('addrqrbtn');
     if (qrBtn) qrBtn.onclick = async () => {
       const box = $('addrqr');
@@ -4531,7 +4579,7 @@ async function render() {
   alerts?.classList.toggle('on', type === 'alerts');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    const named = ['api-access', 'account', 'wallet', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'verified'];
+    const named = ['api-access', 'account', 'favorites', 'wallet', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'verified'];
     document.body.classList.toggle('pair', type === 'token' || type === 'collection');
     if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
     await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
@@ -4598,6 +4646,7 @@ document.getElementById('search').addEventListener('submit', async (e) => {
   catch { app.innerHTML = `<div class="card"><h2>No match</h2><p class="muted">Nothing found for ${esc(q)}.</p></div>`; }
 });
 addEventListener('popstate', render);
+migrateAddrWatch();
 render();
 </script>
 </body>
