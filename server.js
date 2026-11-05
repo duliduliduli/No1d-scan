@@ -1118,6 +1118,9 @@ const routes = {
       economics: { ...econ, fee_floor: feeFloor, burned_micronoid: burned.n ? String(burned.s) : null, allocation_until: ALLOCATION_END },
       donate: process.env.DONATE_ADDRESS || null,
       metadata: meta.status,
+      // A paid promotion is only collectable if the payee key lives on this machine's node.
+      // Expose the payee so a wrong setting is visible instead of discovered at the deadline.
+      contracts: { payee: contracts.payee('promo') || null, api_payee: contracts.payee('api') || null, accepting: !!contracts.payee('promo') },
     };
   },
 

@@ -1682,6 +1682,8 @@ test('indexer + api', async (t) => {
     assert.strictEqual(order.secs, 3600, '1 NOID buys an hour');
     assert.match(order.pay_address, /^o1[02-9ac-hj-np-z]{6,120}$/, 'the contract has a real o1 address to pay');
     assert.strictEqual(order.payee, PAY_ADDR, 'the order records the address we collect to');
+    const [, stx] = await get('stats');
+    assert.strictEqual(stx.contracts.payee, PAY_ADDR, 'stats names the collection address, so a wrong one is visible');
     assert.ok(order.deadline_height > tip);
     assert.strictEqual(lastObject.kind, 'refundable_payment');
     assert.strictEqual(lastObject.payer, payer, 'the contract names the buyer as the payer');
