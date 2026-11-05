@@ -402,6 +402,20 @@ test('indexer + api', async (t) => {
   assert.deepStrictEqual((await get(`search?q=${hash(5)}`))[1], { type: 'block', id: hash(5) }, 'any block hash is searchable');
   const [, bl] = await get('blocks?limit=3');
   assert.strictEqual(bl.blocks[0].txs, 1, 'tx count from captured body');
+  // The block list's filters answer from this explorer's own header index, so a search reaches every
+  // header it kept. A plain list has no `filter` and no `matched`: it is still the node-backed page.
+  assert.strictEqual(bl.filter, undefined, 'an unfiltered list is still the node-backed page');
+  const [, fq] = await get('blocks?q=3&limit=5');
+  assert.strictEqual(typeof fq.matched, 'number', 'a filtered list reports how many blocks match');
+  assert.ok(fq.blocks.every((b) => b.height === 3), 'a height search returns that height only');
+  const [, ftx] = await get('blocks?min_txs=0&limit=5');
+  assert.strictEqual(ftx.filter.min_txs, 0, 'the transaction range is echoed back');
+  assert.ok(ftx.blocks.every((b) => b.txs == null || b.txs >= 0));
+  const [, fwin] = await get('blocks?window=7d&limit=5');
+  assert.ok(Array.isArray(fwin.blocks), 'a window filter answers with a list');
+  assert.strictEqual(fwin.filter.window, '7d', 'the window is echoed back');
+  assert.strictEqual((await get('blocks?max_txs=2&limit=3'))[1].filter.max_txs, 2, 'the range is applied');
+  assert.strictEqual((await get('blocks?miner=' + PAY_ADDR + '&limit=3'))[1].filter.miner, PAY_ADDR, 'a miner address is a filter, not a height');
   // A block body is the only trade feed a v2.1 node has: the fill lands in token_trades and rolls into a candle.
   const fill = db.prepare('select * from token_trades').get();
   assert.ok(fill && fill.token_id === TRADE_ASSET, 'a fill embedded in a block is indexed');
@@ -609,7 +623,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /\$\{href\}#trade/, 'a favorite token links straight to its trade panel');
   assert.match(homeHtml, /const missing = tokenIds\.filter/, 'an id the catalogue missed is asked for one by one');
   assert.doesNotMatch(homeHtml, /id="addrwatch"/, 'the second, unlistable address list is gone');
-  assert.match(homeHtml, /class="alertbtn"/);
+  assert.doesNotMatch(homeHtml, /class="alertbtn"|data-dock="alerts"|Price alerts are not on this explorer yet/, "the Alerts page is gone, from the page and the dock");
   assert.match(homeHtml, /safe-area-inset-bottom/);
   assert.match(homeHtml, /axisDoubleClickReset/);
   assert.match(homeHtml, /\/wallet\.js/, 'the app page loads the wallet module');
@@ -635,11 +649,12 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /pill enh|>Enhanced<|Duli Media/);
   assert.match(homeHtml, /async promote\(/);
   assert.match(homeHtml, /href="\/promote" data-link/);
-  assert.match(homeHtml, /data-enh="usdc"/);
+  assert.match(homeHtml, /id="nprange"/, "the promotion price is a slider");
+  assert.doesNotMatch(homeHtml, /data-enh="usdc"|data-pay="usdc"/, "no USDC price path is left on the paid cards");
   assert.match(homeHtml, /id="book"/);
   assert.match(homeHtml, /Derived from pool reserves/);
   assert.match(homeHtml, /Open orders/);
-  assert.match(homeHtml, /id="enhform"/);
+  assert.doesNotMatch(homeHtml, /id="enhform"|id="boostform"/, "the card-priced promoted listing is gone");
   assert.match(homeHtml, /Profile review/);
   assert.match(homeHtml, /Sample page\. Payment is not taken/);
   assert.match(homeHtml, /My trades/);
@@ -649,7 +664,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="sharebtn"/);
   assert.match(homeHtml, /Screener/);
   assert.match(homeHtml, /Chart\+Txns/);
-  assert.match(homeHtml, /Price alerts are not on this explorer yet/);
+  assert.match(homeHtml, /class="gnsplit"/, "the globe and the country list sit side by side");
+  assert.match(homeHtml, /class="mcalc"/, "the calculator fields are plain fields, not overlapping tiles");
+  assert.match(homeHtml, /\.hudstats \{ grid-template-columns:repeat\(5, minmax\(0, 1fr\)\)/, "the five live tiles stay on one line");
+  assert.match(homeHtml, /font-size:16px/, "fields are 16px so focus never zooms the page on iOS");
   assert.match(homeHtml, /₀₁₂₃₄₅₆₇₈₉/);
   {
     const fn = homeHtml.match(/function subUsd\(x\) \{\n[\s\S]*?\n\}/);
@@ -675,7 +693,7 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /\bendorsed\b/i);
   assert.match(homeHtml, /Promoted/);
   assert.match(homeHtml, /Paid promotion\. Not a recommendation or endorsement by NOID Scan\./);
-  assert.match(homeHtml, /data-boost=/);
+  assert.doesNotMatch(homeHtml, /data-boost=/, "the USDC boost buttons are gone; promotions are bought with NOID");
   assert.match(homeHtml, /id="promotion"/);
   assert.match(homeHtml, /aria-label="Promoted"/);
   assert.doesNotMatch(homeHtml, /@keyframes promocrwl/, 'the Promoted strip is a static label, not a scrolling ticker');
@@ -707,11 +725,9 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /mined more than half/);
   assert.doesNotMatch(homeHtml, /Countries of peers connected to this explorer's node/);
   assert.match(homeHtml, /prefers-reduced-motion: reduce/);
-  assert.match(homeHtml, /Get verified ✓/);
+  assert.doesNotMatch(homeHtml, /Get verified|href="\/verified"/, "there is no verified page or link");
   assert.match(homeHtml, /id="sortpop"/);
   assert.match(homeHtml, /id="listbar"/);
-  assert.match(homeHtml, /aria-label="USDC chain"/);
-  assert.match(homeHtml, /native USDC on the chain you pick/);
   assert.match(homeHtml, /href="\/privacy"/);
   assert.match(homeHtml, /DRAFT pending legal review/);
   assert.doesNotMatch(homeHtml, /Duli Media LLC/);
@@ -1672,7 +1688,14 @@ test('indexer + api', async (t) => {
   // order on; and after the deadline the money is the buyer's again. The suite checks all four facts.
   {
     const payer = 'o1acdefghjkmnpqr'; // the wallet linked to K
-    assert.strictEqual((await post('promo-contract', { noid: 4, asset_id: 'live1', payer }))[0], 400, 'only the published tiers are for sale');
+    // Any whole NOID from 1 to the top tier is for sale, and the time between the published points is
+    // interpolated, so a slider can name an amount the price list does not: 2 NOID is 3.5 hours.
+    const [twoStatus, two] = await post('promo-contract', { noid: 2, asset_id: 'live1', payer });
+    assert.strictEqual(twoStatus, 200, 'an interpolated amount is for sale');
+    assert.strictEqual(two.secs, 12600, '2 NOID buys 3.5 hours, between 1 hour and 6 hours');
+    assert.strictEqual((await post('promo-contract', { noid: 25, asset_id: 'live1', payer }))[1].secs, 4 * 86400, 'a published point is exact');
+    assert.strictEqual((await post('promo-contract', { noid: 0, asset_id: 'live1', payer }))[0], 400, 'nothing under 1 NOID');
+    assert.strictEqual((await post('promo-contract', { noid: 101, asset_id: 'live1', payer }))[0], 400, 'nothing over the top tier');
     assert.strictEqual((await post('promo-contract', { noid: 1, asset_id: 'live1', payer: 'nope' }))[0], 400);
     assert.strictEqual((await post('promo-contract', { noid: 1, asset_id: 'no-such-token', payer }))[0], 400);
     const [cStatus, order] = await post('promo-contract', { noid: 1, asset_id: 'live1', payer });
@@ -1880,9 +1903,12 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.doesNotMatch(html, /Writing the seed down is the whole backup/);
   // Paid promotions and API time: the pages carry the contract cards and state the terms.
   assert.match(html, /function noidTierCard\(kind, opts = \{\}\) \{/);
-  assert.match(html, /noidTierCard\('promo', \{ payer: walletId \}\)/);
+  assert.match(html, /noidTierCard\('promo', scoped\)/, "the promote page builds the card for the token in the url if there is one");
+  assert.match(html, /id="npratio"/, "the slider says what the amount buys");
+  assert.match(html, /Start the contract/, "one button starts the contract");
+  assert.match(html, /Choose a token/, "the token is picked from a searchable list, not typed as an id");
   assert.match(html, /noidTierCard\('api', \{ payer: \(WalletDex\.identity\(\)\?\.address \|\| ''\) \}\)/);
-  assert.match(html, /you can take the money back after it/, 'the page states the refund in plain words');
+  assert.match(html, /you can take it back after it/, 'the page states the refund in plain words');
   assert.match(html, /wireNoidTierCard\('api'\)/);
   assert.match(html, /o\.payee \|\| ''/, 'the card names the address we collect to');
   assert.doesNotMatch(html, /Paid promotion\. Not a recommendation[\s\S]{0,400}API time buys requests/, 'API time is not labelled a promotion');

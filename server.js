@@ -1088,6 +1088,27 @@ const CONTRACT_TEMPLATES = [
 ];
 
 const RECEIPT_HEX = /^[0-9a-fA-F]+$/;
+const BLOCK_WINDOWS = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
+// A block-list query: a height, a hash prefix or a miner address in `q`, plus a time window and a
+// transaction-count range. Anything set means the list comes from this explorer's own header index.
+function blockFilters(params, before) {
+  const str = (k) => String(params.get(k) || '').trim();
+  const num = (v) => (/^\d{1,9}$/.test(v) ? Number(v) : null);
+  const q = str('q');
+  const miner = str('miner');
+  const window = str('window');
+  const f = {
+    q,
+    height: RE.height.test(q) ? Number(q) : null,
+    hash: /^[0-9a-fA-F]{6,64}$/.test(q) ? q.toLowerCase() : null,
+    miner: RE.address.test(q) ? q : (RE.address.test(miner) ? miner : null),
+    window: Object.hasOwn(BLOCK_WINDOWS, window) ? window : '',
+    min_txs: num(str('min_txs')),
+    max_txs: num(str('max_txs')),
+  };
+  f.used = f.height != null || !!f.hash || !!f.miner || !!f.window || f.min_txs != null || f.max_txs != null;
+  return f;
+}
 async function verifyPostedReceipt(body) {
   const hex = typeof body?.receipt === 'string' ? body.receipt.replace(/\s+/g, '') : '';
   if (!hex || !RECEIPT_HEX.test(hex) || hex.length % 2) throw Object.assign(new Error('paste the receipt as hex'), { status: 400 });
@@ -1173,6 +1194,32 @@ const routes = {
     const tip = await rpc('blockCount');
     const before = RE.height.test(params.get('before') || '') ? Math.min(Number(params.get('before')), tip) : tip;
     const limit = Math.min(Math.max(Number(params.get('limit')) || 20, 1), 50);
+    // Any filter at all is answered from the explorer's own header index, so a search covers every
+    // header this explorer has kept instead of the handful the node still holds. A plain list (no
+    // filter) keeps the original node-backed path.
+    const f = blockFilters(params, before);
+    if (f.used) {
+      const where = ['h.height <= :before'];
+      const args = { before, limit };
+      if (f.height != null) { where.push('h.height = :height'); args.height = f.height; }
+      if (f.hash) { where.push('lower(hex(h.hash)) like :hash'); args.hash = f.hash + '%'; }
+      if (f.miner) { where.push('h.miner = :miner'); args.miner = f.miner; }
+      if (f.window) { where.push('h.ts >= :from_ts'); args.from_ts = Math.floor(Date.now() / 1000) - BLOCK_WINDOWS[f.window]; }
+      if (f.min_txs != null) { where.push('b.txs >= :min_txs'); args.min_txs = f.min_txs; }
+      if (f.max_txs != null) { where.push('b.txs <= :max_txs'); args.max_txs = f.max_txs; }
+      const sql = where.join(' and ');
+      const join = 'from headers h left join blocks b on b.height = h.height';
+      // node:sqlite refuses a named parameter the statement does not mention, so the count gets its own.
+      const countArgs = { ...args };
+      delete countArgs.limit;
+      const matched = db.prepare(`select count(*) n ${join} where ${sql}`).get(countArgs).n;
+      const list = db.prepare(`select h.height, lower(hex(h.hash)) hash, h.ts timestamp, h.miner, b.txs, b.reward reward_micronoid, b.fees total_fees_micronoid ${join} where ${sql} order by h.height desc limit :limit`).all(args);
+      return {
+        tip, matched,
+        filter: { q: f.q || null, miner: f.miner, window: f.window || null, min_txs: f.min_txs, max_txs: f.max_txs },
+        blocks: list.map((r) => ({ ...r, indexed: r.txs != null, reward_micronoid: r.reward_micronoid ?? null, total_fees_micronoid: r.total_fees_micronoid ?? null })),
+      };
+    }
     const heights = [];
     for (let h = before; h >= 0 && heights.length < limit; h--) heights.push(h);
     const headers = heights.length ? await rpcBatch(heights.map((h) => ['getBlockHeader', [h]])) : [];
@@ -1420,7 +1467,7 @@ const cache = new Map();
 const inflight = new Map();
 const PARAMS = ['min_out', 'before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids', 'asset',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
-  'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners', 'quote'];
+  'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners', 'quote', 'miner', 'min_txs', 'max_txs'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
 setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
 
@@ -1584,6 +1631,9 @@ async function handle(req, res) {
     // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
     if (!acct && !ownPage && name !== 'stats' && name !== 'health') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
+    // An API token bought as API time is void once its time runs out. Our own pages are exempt, so the
+    // account page can still show the order and offer a reload.
+    if (acct && !ownPage && bill.expired(acct)) return send(402, { error: bill.expiredMessage(acct) });
     if (url.pathname === '/api/live') return live(req, res, ip);
     // No key required, same as /api/stats: uptime checks hit this directly. 503 when the db check fails or indexing is stalled.
     if (name === 'health') {

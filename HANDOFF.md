@@ -404,6 +404,38 @@ NOID through a real Parano1d contract, not a fee address with dust digits.
   send a plain NOID payment. Funding the object address is an ordinary send, so the day the send screen
   lands, this flow becomes one-click from the site.
 
+## 14e. Promotions and API time are bought with a slider, not a menu (added 2026-11-05)
+
+- **One card, one button.** `noidTierCard(kind, {asset})` is the whole purchase UI for a promotion and
+  for API time: a slider for the amount, the time it buys printed underneath, and `Start the contract`.
+  The wallet in this browser is the payer, so there is no address to type.
+- **Any whole NOID from 1 to 100** is for sale. `contracts.js` interpolates the seconds between the six
+  published points (1 = 1 hour, 100 = 20 days for a promotion; 1 = 1 day, 100 = 140 days for API time),
+  so the published points stay exact and nothing between them is cheaper per NOID. The suite pins
+  2 NOID = 3.5 hours and 25 NOID = 4 days.
+- **A promotion is chosen, not typed.** `Choose a token` opens a searchable list of the catalogue
+  (`tokens?q=`), which needs no token-id paste.
+- **API time is a token with a life.** `api_until` is the key's own lifetime: once it passes, keyed
+  requests answer 402 with the date and the key is void until it is reloaded with more NOID on
+  /account (the grant extends from `max(now, api_until)`, so a reload adds time rather than replacing
+  it). A key that never bought time keeps running on credits exactly as before. Our own pages are
+  exempt so the card can still offer the reload.
+- **Removed:** the Alerts page and its dock/action links, the Verified page and menu entry, the
+  `$100` promoted-listing form, and the USDC pack buttons. The server-side USDC/profile rails are
+  still in place but nothing links to them.
+- **The last mile is honest.** A contract is funded by a NOID payment from the buyer's wallet. The
+  browser wallet can prove a trade today but has no send screen for a plain payment, so the pay button
+  says exactly that in one line and the contract address is shown for any Parano1d wallet. This is the
+  one piece of the paid flow that is not live; see the note at the end of §14d.
+- **The block list grew its filters.** `/blocks` takes `q` (height, hash prefix or miner address),
+  `window` (1h/6h/24h/7d/30d), `min_txs`/`max_txs` and `before`, answered from this explorer's own
+  `headers` table with a `matched` count, so a search covers every header it kept rather than the page
+  the node holds. A list with no filter still comes from the node. New params are in `PARAMS`.
+- **Density and mobile fixes.** The five live tiles are one row; the globe sits left with the country
+  list scrolling beside it (callouts fall back to the country code past 12 characters); the mining
+  calculator's three fields are plain fields, not bordered tiles that ran into each other; and every
+  field is 16px so iOS does not zoom the page when one is focused.
+
 ## 15. Quick verification commands
 
 

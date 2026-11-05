@@ -145,6 +145,19 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     const row = q.byId.get(acct.id);
     return !!(row && row.api_until > Date.now());
   }
+  // A key that bought API time is void the moment that time ends: keyed requests stop answering until
+  // the same key is reloaded with more NOID. A key that never bought time is untouched, so existing
+  // credit customers keep working exactly as before.
+  function expired(acct) {
+    const row = acct && q.byId.get(acct.id);
+    return !!(row && row.api_until && Number(row.api_until) <= Date.now());
+  }
+  function expiredMessage(acct) {
+    const row = acct && q.byId.get(acct.id);
+    const on = new Date(Number(row?.api_until) || 0).toISOString().slice(0, 10);
+    return `API time ended on ${on}, so this key is void. Reload it with NOID at /account and the same key answers again.`;
+  }
+
   // API time is granted from the chain, not from a webhook: `ref` is the contract order id, so a
   // second pass over the same paid contract is a no-op.
   function grantTime(account, secs, ref) {
@@ -322,7 +335,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     'GET me': (acct) => {
       if (!acct) throw bad('missing or unknown API key', 401);
       const time = Number(q.byId.get(acct.id)?.api_until) || 0;
-      return { ...acct, tier: acct.credits > 0 || time > Date.now() ? 'paid' : 'free', api_until: time || null, rate_limit_per_min: paid(acct) ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
+      return { ...acct, tier: acct.credits > 0 || time > Date.now() ? 'paid' : 'free', api_until: time || null, api_expired: expired(acct), rate_limit_per_min: paid(acct) ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
     },
     'GET pricing': () => pricing(),
     // Wallet-as-account: the browser wallet's o1… address is the public half of the login. Linking stores the address
@@ -406,5 +419,5 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
   };
 
-  return { account, countRequest, paid, grantTime, settleNoid, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
+  return { account, countRequest, paid, expired, expiredMessage, grantTime, settleNoid, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
 };

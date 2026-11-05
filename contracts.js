@@ -42,22 +42,44 @@ const API_TIERS = [
   { noid: 100, days: 140 },
 ];
 
-function promoTerms(noid) {
-  const tier = PROMO_TIERS.find((t) => t.noid === noid);
-  if (!tier) return null;
+// Any whole NOID from 1 to the top tier is a legal order: the time between two published tiers is
+// interpolated, so a slider can name a number the price list does not. The published points are
+// exact (1 NOID is 1 hour, 100 NOID is 20 days) and nothing between them is cheaper per NOID.
+const MIN_NOID = 1;
+const MAX_NOID = PROMO_TIERS[PROMO_TIERS.length - 1].noid;
+const PROMO_POINTS = PROMO_TIERS.map((t) => [t.noid, t.secs]);
+const API_POINTS = API_TIERS.map((t) => [t.noid, t.days * 86400]);
+
+function between(points, x) {
+  if (x <= points[0][0]) return Math.round((points[0][1] * x) / points[0][0]);
+  for (let i = 1; i < points.length; i += 1) {
+    const [x0, y0] = points[i - 1];
+    const [x1, y1] = points[i];
+    if (x <= x1) return Math.round(y0 + ((y1 - y0) * (x - x0)) / (x1 - x0));
+  }
+  return null;
+}
+function duration(secs) {
+  const d = Math.floor(secs / 86400);
+  const h = Math.round((secs % 86400) / 3600);
+  if (d && h) return `${d} day${d === 1 ? '' : 's'} ${h} hour${h === 1 ? '' : 's'}`;
+  if (d) return `${d} day${d === 1 ? '' : 's'}`;
+  if (h) return `${h} hour${h === 1 ? '' : 's'}`;
+  const m = Math.max(1, Math.round(secs / 60));
+  return `${m} minute${m === 1 ? '' : 's'}`;
+}
+function termFor(kind, noid) {
+  const n = Math.round(Number(noid));
+  if (!Number.isFinite(n) || n < MIN_NOID || n > MAX_NOID) return null;
+  const secs = between(kind === 'api' ? API_POINTS : PROMO_POINTS, n);
+  if (!secs) return null;
   return {
-    kind: 'promo', noid: tier.noid, micronoid: tier.noid * 1_000_000, secs: tier.secs,
-    label: tier.label, unit: 'of promotion',
+    kind, noid: n, micronoid: n * 1_000_000, secs,
+    label: duration(secs), unit: kind === 'api' ? 'of API time' : 'of promotion',
   };
 }
-function apiTerms(noid) {
-  const tier = API_TIERS.find((t) => t.noid === noid);
-  if (!tier) return null;
-  return {
-    kind: 'api', noid: tier.noid, micronoid: tier.noid * 1_000_000, secs: tier.days * 86400,
-    label: `${tier.days} day${tier.days === 1 ? '' : 's'}`, unit: 'of API time',
-  };
-}
+const promoTerms = (noid) => termFor('promo', noid);
+const apiTerms = (noid) => termFor('api', noid);
 
 module.exports = function contracts(db, rpc, opts = {}) {
   const { payee = null, apiPayee = null, tip = () => null, lookupAsset = () => null, byWallet = () => null, onApiTime = () => {} } = opts;
@@ -122,7 +144,7 @@ module.exports = function contracts(db, rpc, opts = {}) {
   async function create(kind, body = {}) {
     if (kind !== 'promo' && kind !== 'api') throw bad('kind must be promo or api');
     const terms = kind === 'api' ? apiTerms(Number(body.noid)) : promoTerms(Number(body.noid));
-    if (!terms) throw bad(`noid must be one of ${(kind === 'api' ? API_TIERS : PROMO_TIERS).map((t) => t.noid).join(', ')}`);
+    if (!terms) throw bad(`noid must be a whole number from ${MIN_NOID} to ${MAX_NOID}`);
     if (!payeeFor(kind)) throw bad('promotions are not accepting payment right now', 503);
     const payer = String(body.payer || '').trim();
     if (!ADDR.test(payer)) throw bad('expected the o1 address you will pay from');
@@ -146,8 +168,9 @@ module.exports = function contracts(db, rpc, opts = {}) {
   }
 
   function termsFor(kind) {
-    if (kind === 'api') return API_TIERS.map((t) => ({ noid: t.noid, label: `${t.days} day${t.days === 1 ? '' : 's'}` }));
-    return PROMO_TIERS.map((t) => ({ noid: t.noid, label: t.label }));
+    const points = kind === 'api' ? API_TIERS.map((t) => ({ noid: t.noid, label: `${t.days} day${t.days === 1 ? '' : 's'}` }))
+      : PROMO_TIERS.map((t) => ({ noid: t.noid, label: t.label }));
+    return { min: MIN_NOID, max: MAX_NOID, points };
   }
 
   // A funded instance is the whole proof that someone paid: the object address
@@ -207,13 +230,18 @@ module.exports = function contracts(db, rpc, opts = {}) {
   }
   // A promotion someone paid for must be visible on the token page too, with the same words.
   function tierLabel(noid) {
-    const t = PROMO_TIERS.find((x) => x.noid === Number(noid));
+    const t = termFor('promo', noid);
     return t ? t.label : `${noid} NOID`;
+  }
+  // The ratio the page shows under the slider: what one NOID buys at this point on the curve.
+  function rateAt(kind, noid) {
+    const t = termFor(kind, noid);
+    return t ? { noid: t.noid, secs: t.secs, label: t.label, secs_per_noid: Math.round(t.secs / t.noid) } : null;
   }
 
   return {
-    create, watch, status, statuses, mine, promotions, isPromoted, tierLabel,
-    terms: termsFor, tiers: { promo: PROMO_TIERS, api: API_TIERS },
+    create, watch, status, statuses, mine, promotions, isPromoted, tierLabel, rateAt,
+    terms: termsFor, tiers: { promo: PROMO_TIERS, api: API_TIERS }, min: MIN_NOID, max: MAX_NOID,
     disclaimer: 'Paid promotion. Not a recommendation or endorsement by NOID Scan.',
     payee: payeeFor,
   };
