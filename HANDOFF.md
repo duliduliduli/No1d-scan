@@ -341,6 +341,15 @@ The v2.1 intent flow pays no explorer fee: the native request has no fee output,
 - **The balance card says which block it is from** (`Explorer index as of block N`) and, while a trade is pending, that the index can lag a block.
 - **Disclaimer style.** The yellow-bordered bulleted risk box ("Before you confirm" / "Before you sign") is gone from both swap cards: one plain `.fine` line instead. No `.risk` markup remains in `public/index.html`.
 
+## 14b. PnL has to value what you still hold (added 2026-11-05)
+
+- Drew bought 3 NOID of PCAT. His address page read **PnL -$0.87**, i.e. the whole stake gone, on a trade that was fine. The API showed why: `pnl_micronoid: "-3000000"` - exactly minus the NOID spent, with no credit for the 53.994091 PCAT still in the wallet.
+- Cause: `pnlOf(trades, priceMicro, usd)` in `assets.js` took **one** price and only for a *focused* token, and `walletView` passed `focus ? findPresented(focus) : null`. The address view has no focused token, so the price was `null`, the remaining bag was valued at zero, and every buy on an address page read as a total loss. One price was also simply wrong for an address holding several tokens.
+- Fix: `pnlOf(trades, priceFor, usd)` now takes a `priceFor(token_id)` lookup, tracks bought/sold per token, and values each token's remainder at **its own** price - the same price the screener quotes (last trade, then the stored column, one shared `realTokens(now)` pass for holdings and PnL alike). New fields: `held_micronoid` (what the bag is worth) and `unpriced_token` (held tokens with no quoted price, counted rather than silently dropped).
+- Same numbers now: spent 3,000,000 uNOID, bag 53 x 55,561 = 2,944,733, PnL -55,267 uNOID (-0.055 NOID, about -$0.016) - the fee and the curve impact, not the stake.
+- Limit worth knowing: the indexer stores `token_amount` as **whole tokens floored** (`assets.js` ~line 1469), so a bag computed from indexed trades understates a fractional holding by well under 1%. Cost basis and bag both come from the indexed trades on purpose, so the two sides stay consistent.
+- Test: `test.js` covers it - a buy with a newer fill setting the price must give `held_micronoid` for the remainder and a PnL that is **not** just `-bought_noid_micronoid`, in both the address view and the focused view.
+
 ## 15. Quick verification commands
 
 

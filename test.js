@@ -1323,6 +1323,32 @@ test('indexer + api', async (t) => {
   assert.strictEqual(rp.price_micronoid, '1235', 'the last trade prices a token the column left empty');
   assert.strictEqual(rp.value_micronoid, '494000', '400 whole tokens at 1235');
   db.prepare('delete from token_trades where txid = ?').run('pagepx01');
+  // A buy must never read as a total loss. The address view has no focused token, so the remaining bag has to be
+  // priced per token; before this, the price was null there and every buy showed as -100% of what was spent.
+  const BAGTOK = 'cd'.repeat(32);
+  const BAGADDR = 'o1acdefghjkmnpqrstuvwxyz';
+  db.prepare('insert or replace into tokens (id, name, ticker, supply, reserve_micronoid, price_micronoid) values (?, ?, ?, ?, ?, ?)')
+    .run(BAGTOK, 'Bag Coin', 'BAG', '1000', '1000000', '2500'); // 2500 micronoid per whole token
+  db.prepare(`insert or replace into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid, trader, venue, price_micronoid)
+    values ('bagbuy01', ?, ?, 61, 'buy', '40', '120000', ?, 'curve', '3000')`).run(BAGTOK, Math.floor(Date.now() / 1000) - 5, BAGADDR);
+  // A newer fill by someone else moves the price the screener quotes, and the bag follows it.
+  db.prepare(`insert or replace into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid, trader, venue, price_micronoid)
+    values ('bagpx02', ?, ?, 62, 'sell', '10', '25000', 'o1acdefghjkmnpqrstuvwx', 'curve', '2500')`).run(BAGTOK, Math.floor(Date.now() / 1000) - 2);
+  const [, bagwal] = await get('wallet/' + BAGADDR);
+  assert.strictEqual(bagwal.pnl.bought_noid_micronoid, '120000', 'the buy is the cost basis');
+  assert.strictEqual(bagwal.pnl.held_micronoid, '100000', '40 whole tokens still held, priced at the live 2500');
+  assert.strictEqual(bagwal.pnl.pnl_micronoid, '-20000', 'the bag is credited: 100000 sold/value minus 120000 spent');
+  assert.notStrictEqual(bagwal.pnl.pnl_micronoid, '-' + bagwal.pnl.bought_noid_micronoid, 'a buy is not the whole stake lost');
+  assert.strictEqual(bagwal.pnl.unpriced_token, '0');
+  assert.ok(bagwal.pnl.pnl_usd < 0 && bagwal.pnl.pnl_usd > -1, 'a small loss in USD, not the whole stake');
+  // Focused on the token, the same bag is priced the same way.
+  const [, focusedBag] = await get('wallet/' + BAGADDR + '?token=' + BAGTOK);
+  assert.strictEqual(focusedBag.pnl.held_micronoid, '100000', 'the focused view prices the bag too');
+  assert.strictEqual(focusedBag.pnl.pnl_micronoid, '-20000');
+  db.prepare('delete from token_trades where txid = ?').run('bagbuy01');
+  db.prepare('delete from token_trades where txid = ?').run('bagpx02');
+  db.prepare('delete from tokens where id = ?').run(BAGTOK);
+
   // A node without the method is the refusal case, and a different address keeps the response cache out of it.
   delete node.getNativeHoldings;
   await tick();

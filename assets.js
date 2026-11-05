@@ -759,24 +759,37 @@ module.exports = function assets(db, rpc, priceNow) {
     return { demo, trades };
   }
   // shortcut: top traders and wallet PnL use the newest 400 indexed fills, not the wallet's full history.
-  function pnlOf(trades, priceMicro, usd) {
+  // PnL is NOID from sells, minus NOID spent on buys, plus what is still held, priced per token.
+  // One price for every trade is wrong twice over: an address holding two tokens needs two prices, and the address
+  // view has no focused token at all - so a single price was null and the whole bag was counted as a total loss.
+  // priceFor(token_id) returns micro-NOID per whole token, or null when that token has no quoted price yet.
+  function pnlOf(trades, priceFor, usd) {
     let boughtNoid = 0n, soldNoid = 0n, boughtTok = 0n, soldTok = 0n, buys = 0, sells = 0, first = null, last = null;
+    const boughtBy = new Map(), soldBy = new Map();
     for (const t of trades) {
       const noid = bi(t.noid_micronoid) || bi(t.noid) || 0n;
       const tok = bi(t.token_amount) || 0n;
-      if (t.side === 'sell') { sells++; soldNoid += noid; soldTok += tok; }
-      else { buys++; boughtNoid += noid; boughtTok += tok; }
+      const id = t.token_id || '';
+      if (t.side === 'sell') { sells++; soldNoid += noid; soldTok += tok; soldBy.set(id, (soldBy.get(id) || 0n) + tok); }
+      else { buys++; boughtNoid += noid; boughtTok += tok; boughtBy.set(id, (boughtBy.get(id) || 0n) + tok); }
       const ts = Number(t.ts);
       if (first == null || ts < first) first = ts;
       if (last == null || ts > last) last = ts;
     }
+    let bag = 0n, unpricedTok = 0n;
+    for (const id of new Set([...boughtBy.keys(), ...soldBy.keys()])) {
+      const held = (boughtBy.get(id) || 0n) - (soldBy.get(id) || 0n);
+      if (held <= 0n) continue;
+      const price = priceFor ? priceFor(id) : null;
+      if (price == null) unpricedTok += held; else bag += held * price;
+    }
     const remain = boughtTok - soldTok;
-    const bag = remain > 0n && priceMicro != null ? remain * priceMicro : 0n;
     const pnl = soldNoid - boughtNoid + bag;
     return {
       buys, sells, txns: buys + sells, first_ts: first, last_ts: last,
       bought_noid_micronoid: boughtNoid.toString(), sold_noid_micronoid: soldNoid.toString(),
       bought_token: boughtTok.toString(), sold_token: soldTok.toString(), remaining_token: remain.toString(),
+      held_micronoid: bag.toString(), unpriced_token: unpricedTok.toString(),
       pnl_micronoid: pnl.toString(), pnl_usd: usdOf(pnl < 0n ? -pnl : pnl, usd) == null ? null : (pnl < 0n ? -usdOf(-pnl, usd) : usdOf(pnl, usd)),
     };
   }
@@ -800,7 +813,7 @@ module.exports = function assets(db, rpc, priceNow) {
     const usd = noidUsd();
     const traders = [...by.entries()].map(([address, list]) => {
       const vol = list.reduce((s, t) => s + (bi(t.noid_micronoid) || bi(t.noid) || 0n), 0n);
-      return { address, ...pnlOf(list, price, usd), volume_micronoid: vol.toString(), volume_usd: usdOf(vol, usd) };
+      return { address, ...pnlOf(list, () => price, usd), volume_micronoid: vol.toString(), volume_usd: usdOf(vol, usd) };
     });
     traders.sort((a, b) => (BigInt(b.volume_micronoid) > BigInt(a.volume_micronoid) ? 1 : BigInt(b.volume_micronoid) < BigInt(a.volume_micronoid) ? -1 : 0));
     return { demo, token_id: id, label: 'Indexed trades', traders: traders.slice(0, 20) };
@@ -874,6 +887,11 @@ module.exports = function assets(db, rpc, priceNow) {
     if (focus && !ID.test(focus)) throw bad('expected a token id');
     const now = Math.floor(Date.now() / 1000);
     const usd = noidUsd();
+    // One screener pass serves the holdings and the PnL alike. The stored price column is often empty because the
+    // node quotes a curve price only while it is asked, so the screener's quoted price is both the price we show
+    // and the price the remaining bag is valued at.
+    let rowsCache = null;
+    const rows = () => (rowsCache || (rowsCache = (() => { try { return realTokens(now); } catch { return []; } })()));
     let holdings, trades;
     if (demo) {
       holdings = [];
@@ -893,7 +911,7 @@ module.exports = function assets(db, rpc, priceNow) {
         // Price the way the screener does: the stored column can be empty (the node quotes a curve price only while
         // it is asked), so the last trade wins and the column is the fallback. Built once for every holding.
         let shown = new Map();
-        if (onchain.size) { try { shown = new Map(realTokens(now).map((r) => [r.id, r])); } catch { shown = new Map(); } }
+        if (onchain.size) shown = new Map(rows().map((r) => [r.id, r]));
         holdings = [...onchain].map(([id, units]) => {
           const t = q.token.get(id);
           return { token_id: id, name: t?.name || `Token ${id.slice(0, 8)}`, ticker: t?.ticker || '', logo: t?.logo || null,
@@ -910,7 +928,16 @@ module.exports = function assets(db, rpc, priceNow) {
     holdings.sort((a, b) => ((bi(b.balance) || 0n) > (bi(a.balance) || 0n) ? 1 : -1));
     const focused = focus ? trades.filter((t) => t.token_id === focus) : trades;
     const presented = focus ? findPresented(focus, demo, now) : null;
-    const pnl = pnlOf(focused, presented ? bi(presented.price_micronoid) : null, usd);
+    // The bag needs a price per token: the screener's quoted price when it has one, the stored column otherwise.
+    const quoted = new Map(rows().map((r) => [r.id, bi(r.price_micronoid)]));
+    const priceOf = (id) => {
+      if (focus) return presented ? bi(presented.price_micronoid) : null;
+      const p = quoted.get(id);
+      if (p != null) return p;
+      const t = q.token.get(id);
+      return t?.price_micronoid != null ? bi(t.price_micronoid) : null;
+    };
+    const pnl = pnlOf(focused, priceOf, usd);
     return {
       demo, address, token_id: focus || null,
       holdings: holdings.map((h) => {
