@@ -1421,8 +1421,24 @@ async function handle(req, res) {
   try {
     const url = new URL(req.url, 'http://x');
     if (STATIC[url.pathname]) {
-      res.writeHead(200, { 'content-type': STATIC[url.pathname], 'cache-control': url.pathname.startsWith('/fonts/') ? 'public, max-age=31536000, immutable' : 'public, max-age=86400' });
-      return res.end(fs.readFileSync(path.join(__dirname, 'public', url.pathname)));
+      const type = STATIC[url.pathname];
+      const file = path.join(__dirname, 'public', url.pathname);
+      if (url.pathname.startsWith('/fonts/')) {
+        // Fonts are content addressed by name and never change: cache them hard.
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=31536000, immutable' });
+        return res.end(fs.readFileSync(file));
+      }
+      // Everything else here is code or an icon that changes when we deploy. A day-long
+      // cache is what left a browser running a wallet.js from before the trade panel, so
+      // these revalidate on every load and answer 304 when the bytes are unchanged.
+      const buf = fs.readFileSync(file);
+      const etag = `"${crypto.createHash('sha256').update(buf).digest('hex').slice(0, 20)}"`;
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { etag, 'cache-control': 'no-cache' });
+        return res.end();
+      }
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache', etag, 'x-content-type-options': 'nosniff' });
+      return res.end(buf);
     }
     if (!url.pathname.startsWith('/api/')) return req.method === 'GET' ? send(200, fs.readFileSync(INDEX)) : send(405, { error: 'GET only' });
     if (req.method === 'OPTIONS') return send(204, '', { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-api-key, x-admin-token' });

@@ -210,7 +210,7 @@
   // One fresh worker per call, terminated afterwards, so a key never outlives the trade.
   function engineCall(msg) {
     return new Promise((resolve, reject) => {
-      const w = new Worker('/trade-worker.js?v=1');
+      const w = new Worker('/trade-worker.js?v=2');
       const done = (fn, v) => { w.terminate(); fn(v); };
       w.onmessage = ({ data }) => (data.ok ? done(resolve, data) : done(reject, new Error(data.error)));
       w.onerror = (e) => { e.preventDefault?.(); done(reject, new Error(e.message || 'the trade engine could not start')); };

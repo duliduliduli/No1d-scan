@@ -842,7 +842,7 @@
   <button type="button" id="dockmenu">Menu</button>
 </nav>
 <footer id="foot">Live State + recent history from a Parano1d node. Block bodies are pruned after ~42 blocks; older bodies appear here only if this explorer captured them. <a href="/terms" data-link>Terms</a> · <a href="/privacy" data-link>Privacy</a></footer>
-<script src="/wallet.js?v=1"></script>
+<script src="/wallet.js?v=2"></script>
 <script>
 const app = document.getElementById('app');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -2797,8 +2797,14 @@ function mountTrade(d, id) {
     reset();
   });
   const fail = (m) => { out.innerHTML = `<p class="msg err">${esc(m)}</p>`; };
+  // A wallet script left over from before this panel existed has none of these methods.
+  // Calling one threw before the try block below, so the button looked dead: say so instead.
+  const WNEED = ['hasWallet', 'identity', 'prepareTrade', 'tradeRows', 'isUnlocked', 'unlock', 'confirmTrade'];
   $('trreview').onclick = async () => {
     if (!W) return fail('The wallet did not load. Reload the page.');
+    if (WNEED.some((k) => typeof W[k] !== 'function')) {
+      return fail('This browser is running an old copy of the wallet script, so trading cannot start. Reload the page (on a phone, pull down to refresh) and try again.');
+    }
     if (!W.hasWallet() || !W.identity()) {
       out.innerHTML = '<p class="fine">Trading uses the wallet in this browser. <a href="/wallet" data-link>Create or restore a wallet</a>, then come back to this token.</p>';
       return;
@@ -2832,7 +2838,13 @@ function mountTrade(d, id) {
           $('trconfirm').disabled = false;
         }
       };
-    } catch (e) { fail(e.message); }
+    } catch (e) {
+      const msg = String(e.message || e);
+      const addr = (() => { try { return W.identity()?.address || ''; } catch { return ''; } })();
+      fail(/insufficient NOID/i.test(msg)
+        ? `${msg}. This wallet holds no NOID yet, so there is nothing to trade with. Send NOID to ${addr || 'the wallet address'} first.`
+        : msg);
+    }
     $('trreview').disabled = false;
   };
 }

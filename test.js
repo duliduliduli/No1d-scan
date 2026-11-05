@@ -546,6 +546,14 @@ test('indexer + api', async (t) => {
   const tradeEngine = await fetch(base + '/noid-trade.wasm');
   assert.strictEqual(tradeEngine.headers.get('content-type'), 'application/wasm', 'the trade engine is served');
   assert.match((await fetch(base + '/trade-worker.js')).headers.get('content-type'), /javascript/, 'the trade worker is served');
+  // A code asset must not be trusted for a day: a browser holding a wallet.js from before
+  // the trade panel rendered a Review button that threw on its first line and looked dead.
+  const tag = wallet.headers.get('etag');
+  assert.ok(tag, 'code assets carry an etag');
+  assert.match(wallet.headers.get('cache-control') || '', /no-cache/, 'code assets revalidate');
+  const again = await fetch(base + '/wallet.js', { headers: { 'if-none-match': tag } });
+  assert.strictEqual(again.status, 304, 'an unchanged asset answers 304');
+  assert.match((await fetch(base + '/fonts/plex-sans-400.woff2')).headers.get('cache-control') || '', /immutable/, 'fonts stay immutable');
   const engine = await fetch(base + '/noid-wallet.wasm');
   assert.strictEqual(engine.status, 200);
   assert.strictEqual(engine.headers.get('content-type'), 'application/wasm');
@@ -556,6 +564,11 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /class="explore"[^>]*>Explore<\/a>\s*<a class="favlink" href="\/favorites"/, 'Favorites sits beside Explore in the header');
   assert.doesNotMatch(homeHtml, /data-dock="fav"/, 'Favorites is not a dock tab any more');
   assert.match(homeHtml, /data-label="1"/, 'a star can render as a labelled Save button');
+  // A wallet script too old to have these methods must produce a sentence, not a dead button.
+  assert.match(homeHtml, /wallet\.js\?v=2/, 'the page asks for the current wallet script, not a cached one');
+  assert.match(homeHtml, /WNEED\.some\(\(k\) => typeof W\[k\] !== 'function'\)/, 'the trade panel checks the wallet API before using it');
+  assert.match(homeHtml, /running an old copy of the wallet script/, 'and says so when it is stale');
+  assert.match(homeHtml, /This wallet holds no NOID yet/, 'an empty wallet gets a sentence a person can act on');
   assert.match(homeHtml, /ADDR_STAR/, 'addresses are favorites too');
   assert.match(homeHtml, /migrateAddrWatch\(\)/, 'the old browser-only address list folds into favorites at boot');
   assert.doesNotMatch(homeHtml, /id="addrwatch"/, 'the second, unlistable address list is gone');
