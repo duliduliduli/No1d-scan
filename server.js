@@ -1440,7 +1440,9 @@ async function handle(req, res) {
       res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache', etag, 'x-content-type-options': 'nosniff' });
       return res.end(buf);
     }
-    if (!url.pathname.startsWith('/api/')) return req.method === 'GET' ? send(200, fs.readFileSync(INDEX)) : send(405, { error: 'GET only' });
+    // The app page carries the inline script, so a stale copy is as bad as a stale wallet.js:
+    // it must be revalidated rather than heuristically cached.
+    if (!url.pathname.startsWith('/api/')) return req.method === 'GET' ? send(200, fs.readFileSync(INDEX), { 'cache-control': 'no-cache' }) : send(405, { error: 'GET only' });
     if (req.method === 'OPTIONS') return send(204, '', { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-api-key, x-admin-token' });
 
     // Behind Cloudflare the real client IP is in cf-connecting-ip; lock the droplet firewall to Cloudflare IPs so it cannot be spoofed.

@@ -569,6 +569,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /WNEED\.some\(\(k\) => typeof W\[k\] !== 'function'\)/, 'the trade panel checks the wallet API before using it');
   assert.match(homeHtml, /running an old copy of the wallet script/, 'and says so when it is stale');
   assert.match(homeHtml, /This wallet holds no NOID yet/, 'an empty wallet gets a sentence a person can act on');
+  assert.match((await fetch(base + '/')).headers.get('cache-control') || '', /no-cache/, 'the app page revalidates too');
   assert.match(homeHtml, /ADDR_STAR/, 'addresses are favorites too');
   assert.match(homeHtml, /migrateAddrWatch\(\)/, 'the old browser-only address list folds into favorites at boot');
   assert.doesNotMatch(homeHtml, /id="addrwatch"/, 'the second, unlistable address list is gone');
