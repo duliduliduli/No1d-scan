@@ -37,5 +37,17 @@
   "reserve_micronoid": "1169397472",
   "launch": "launchpad",
   "graduated": false
+ },
+ {
+  "id": "d1b9bae28312b21eee83c461e11ca265725ac9d1cc522faa81e1abad05903ca4",
+  "name": "O1",
+  "ticker": "O1",
+  "supply": "100000",
+  "reserve_micronoid": "105125000",
+  "creator": "o1qredvs9u3hjvdmvu8x7zvgutrpm9yw99sp05vdap28397whkplasd3heax",
+  "logo": "https://noidium.com/media/0a82e39e2f2112868c2a266bc478dde71ceea29dbef922f2a625be9435afc7df.png",
+  "launch": "launchpad",
+  "created_height": 282521,
+  "graduated": false
  }
 ]
