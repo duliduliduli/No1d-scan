@@ -303,7 +303,32 @@ needs a create-transaction lookup (the launch definition, kind 48) — not
 attempted here. `NOIDCAT` has no published manifest, so its name comes from the
 curated file.
 
-## 14. Quick verification commands
+## 14. Trading with the built-in wallet (added 2026-11-05)
+
+The missing prover is now bundled. `public/noid-trade.wasm` is built from
+`wasm/noid-trade` (source, provenance and build steps in its README), on top of the
+official Parano1d SDK, whose vendored code is Core v2.1.0 byte for byte plus its
+browser proving adapter.
+
+Flow: `No1dWallet.prepareTrade` builds the request from the user's inputs, gets the
+node's plan from `/api/swap/intent`, and has the engine check it (mainnet chain,
+parent, plan ID, exact request, slippage minimum, fee cap, output to the owner).
+`confirmTrade` derives the spend secret for the identity's index, proves and verifies
+in a fresh worker (`public/trade-worker.js`, about 7 s in desktop Chromium) and posts
+the intent to `/api/swap-submit`. The token page's Trade card (`mountTrade`) and the
+wallet page's panel both use it; the passphrase can be entered on the token page.
+
+Verified: addresses match `noid-wallet.wasm` (1,050 random seed/index pairs, and in
+`npm test`); a full owner proof passes the chain verifier in Node and in Chromium;
+malformed plans are refused before proving. Not yet verified: one real plan from the
+live node through `authorize` and `submitTxIntent`. Native trades are on by default;
+`SWAP_ENABLED=false` in `/etc/noid-scan.env` on the droplet switches them off (the old
+quote/build path still needs `SWAP_ENABLED=true` plus its fee settings).
+
+The v2.1 intent flow pays no explorer fee: the native request has no fee output, so
+`SWAP_FEE_BPS` and `SWAP_FEE_ADDRESS` only apply to the old quote/build path.
+
+## 15. Quick verification commands
 
 
 Local:
@@ -366,28 +391,3 @@ systemctl restart noid-scan && sleep 4 && systemctl is-active noid-scan
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/admin   # 401 = token loaded (404 = still unset)
 grep '^ADMIN_TOKEN=' /etc/noid-scan.env   # paste that into https://parano1d-scan.com/admin
 ```
-
-## 13. Trading with the built-in wallet (added 2026-11-05)
-
-The missing prover is now bundled. `public/noid-trade.wasm` is built from
-`wasm/noid-trade` (source, provenance and build steps in its README), on top of the
-official Parano1d SDK, whose vendored code is Core v2.1.0 byte for byte plus its
-browser proving adapter.
-
-Flow: `No1dWallet.prepareTrade` builds the request from the user's inputs, gets the
-node's plan from `/api/swap/intent`, and has the engine check it (mainnet chain,
-parent, plan ID, exact request, slippage minimum, fee cap, output to the owner).
-`confirmTrade` derives the spend secret for the identity's index, proves and verifies
-in a fresh worker (`public/trade-worker.js`, about 7 s in desktop Chromium) and posts
-the intent to `/api/swap-submit`. The token page's Trade card (`mountTrade`) and the
-wallet page's panel both use it; the passphrase can be entered on the token page.
-
-Verified: addresses match `noid-wallet.wasm` (1,050 random seed/index pairs, and in
-`npm test`); a full owner proof passes the chain verifier in Node and in Chromium;
-malformed plans are refused before proving. Not yet verified: one real plan from the
-live node through `authorize` and `submitTxIntent`. Native trades are on by default;
-`SWAP_ENABLED=false` in `/etc/noid-scan.env` on the droplet switches them off (the old
-quote/build path still needs `SWAP_ENABLED=true` plus its fee settings).
-
-The v2.1 intent flow pays no explorer fee: the native request has no fee output, so
-`SWAP_FEE_BPS` and `SWAP_FEE_ADDRESS` only apply to the old quote/build path.
