@@ -543,6 +543,9 @@ test('indexer + api', async (t) => {
   assert.match(await wallet.text(), /No1dWallet/);
   const words = await (await fetch(base + '/bip39.txt')).text();
   assert.strictEqual(words.trim().split('\n').length, 2048, 'the word list is complete');
+  const tradeEngine = await fetch(base + '/noid-trade.wasm');
+  assert.strictEqual(tradeEngine.headers.get('content-type'), 'application/wasm', 'the trade engine is served');
+  assert.match((await fetch(base + '/trade-worker.js')).headers.get('content-type'), /javascript/, 'the trade worker is served');
   const engine = await fetch(base + '/noid-wallet.wasm');
   assert.strictEqual(engine.status, 200);
   assert.strictEqual(engine.headers.get('content-type'), 'application/wasm');
@@ -900,6 +903,11 @@ test('indexer + api', async (t) => {
   const [, relayed] = await post('swap-submit', { signed: 'deadbeef' });
   assert.strictEqual(relayed.submitted, true, 'already-signed bytes are relayed');
   assert.strictEqual(relayed.result.accepted, 4);
+  // A proven intent carries a ~77 KB authorization bundle; one well past that size still relays.
+  const proven = '4e4f4944544f3231' + 'ab'.repeat(400_000);
+  const [bigStatus, bigRelayed] = await post('swap-submit', { signed: proven });
+  assert.strictEqual(bigStatus, 200, 'a full-size proven intent fits the submit limits');
+  assert.strictEqual(bigRelayed.result.accepted, proven.length / 2);
   delete node.submitTxIntent;
   delete node.prepareNativeIntent;
   delete process.env.SWAP_ENABLED;
@@ -1599,6 +1607,47 @@ test('migrates a text-hash archive and backups round-trip', () => {
   const snap = new DatabaseSync(path.join(backups, out[0]), { readOnly: true });
   assert.strictEqual(snap.prepare('select txs from blocks where height = 80').get().txs, 1);
   snap.close();
+});
+
+test('the trade engine matches the wallet engine and proves on this machine', async () => {
+  const load = async (file, env) => (await WebAssembly.instantiate(fs.readFileSync(path.join(__dirname, 'public', file)), { env })).instance.exports;
+  let T;
+  T = await load('noid-trade.wasm', { noid_random: (p, n) => crypto.getRandomValues(new Uint8Array(T.memory.buffer, p, n)) });
+  const O = await load('noid-wallet.wasm', {});
+  const result = (ptr) => {
+    const v = new DataView(T.memory.buffer);
+    const status = v.getUint32(ptr, true), n = v.getUint32(ptr + 4, true);
+    const text = new TextDecoder().decode(new Uint8Array(T.memory.buffer, ptr + 8, n).slice());
+    T.noid_free(ptr, 8 + n);
+    return { status, text };
+  };
+  // Same 32-byte seed, same index -> same o1 address in both engines.
+  const seed = Uint8Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 255);
+  for (const index of [0, 1, 13, 199]) {
+    const a = O.noid_alloc(32), o = O.noid_alloc(128);
+    new Uint8Array(O.memory.buffer, a, 32).set(seed);
+    const len = O.noid_wallet_address_text(a, index, o);
+    const old = new TextDecoder().decode(new Uint8Array(O.memory.buffer, o, len).slice());
+    const t = T.noid_alloc(32);
+    new Uint8Array(T.memory.buffer, t, 32).set(seed);
+    const fresh = result(T.noid_trade_address(t, index));
+    assert.strictEqual(fresh.status, 0);
+    assert.strictEqual(fresh.text, old, `address ${index} matches the wallet engine`);
+  }
+  // A full owner proof for a throwaway key passes the chain verifier inside the engine.
+  const st = result(T.noid_trade_selftest());
+  assert.strictEqual(st.status, 0, st.text);
+  assert.strictEqual(JSON.parse(st.text).ok, true);
+  // A plan that is not a real node plan is refused before anything is proven.
+  const bad = new TextEncoder().encode('{"native_plan":{}}');
+  const p = T.noid_alloc(bad.length);
+  new Uint8Array(T.memory.buffer, p, bad.length).set(bad);
+  const refused = result(T.noid_trade_review(p, bad.length));
+  assert.strictEqual(refused.status, 1);
+  assert.match(refused.text, /invalid trade plan/);
+  const w = fs.readFileSync(path.join(__dirname, 'public/wallet.js'), 'utf8');
+  assert.match(w, /MAINNET_CHAIN = '860e70453390bf815718e933aa4927167a13d098b0151391eefd722ee1add610'/, 'the wallet pins mainnet (genesis hash)');
+  assert.doesNotMatch(w, /prover is not bundled/);
 });
 
 test('the phone menu stays open when the hamburger is the click target', () => {

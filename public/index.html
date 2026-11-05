@@ -2762,6 +2762,80 @@ async function mountSwap(d, id) {
   }
   refresh();
 }
+// Native v2.1 trades with the built-in wallet: the node plans the trade for the wallet's own address, the wallet's
+// trade engine checks the plan against these inputs, proves it on this device and sends the finished intent.
+function mountTrade(d, id) {
+  const box = $('swappane');
+  const W = window.No1dWallet;
+  const ticker = d.token.ticker || 'tokens';
+  box.innerHTML = `<div class="card swap"><h2>Trade</h2>
+      <div class="tabs" data-tabs="side"><button type="button" data-v="buy" class="on">Buy</button><button type="button" data-v="sell">Sell</button></div>
+      <label class="muted" id="trlab" for="tramt" style="display:block;margin-top:12px">You pay (NOID)</label>
+      <input id="tramt" inputmode="decimal" placeholder="0.0" aria-label="Amount" autocomplete="off">
+      <label class="muted" for="trslip" style="display:block;margin-top:10px">Slippage</label>
+      <div class="row" style="flex-wrap:nowrap"><div class="tabs" data-tabs="trslip">${['0.5', '1', '3'].map((v) => `<button type="button" data-v="${v}" class="${v === '1' ? 'on' : ''}">${v}%</button>`).join('')}</div>
+        <input id="trslip" inputmode="decimal" value="1" aria-label="Slippage percent" autocomplete="off" style="max-width:80px"></div>
+      <button type="button" id="trreview" class="primary" style="margin-top:12px;width:100%">Review trade</button>
+      <div id="trout" aria-live="polite" style="margin-top:12px"></div>
+      <div class="risk" role="note"><b>Before you confirm</b><ul>
+        <li>You can lose the full amount. A token price can go to zero.</li>
+        <li>A sent trade cannot be reversed.</li>
+        <li>Your wallet stays in this browser. NOID Scan never holds your keys or funds.</li>
+        <li>This is not investment, financial, or trading advice.</li>
+      </ul></div></div>`;
+  let side = 'buy', plan = null;
+  const out = $('trout');
+  const reset = () => { plan = null; out.innerHTML = ''; };
+  onTabs('side', (v) => {
+    side = v; reset();
+    $('trlab').textContent = side === 'buy' ? 'You pay (NOID)' : `You sell (${ticker}, whole tokens)`;
+  });
+  onTabs('trslip', (v) => { $('trslip').value = v; reset(); });
+  $('tramt').addEventListener('input', reset);
+  $('trslip').addEventListener('input', () => {
+    for (const b of document.querySelectorAll('[data-tabs="trslip"] button')) b.classList.toggle('on', b.dataset.v === $('trslip').value.trim());
+    reset();
+  });
+  const fail = (m) => { out.innerHTML = `<p class="msg err">${esc(m)}</p>`; };
+  $('trreview').onclick = async () => {
+    if (!W) return fail('The wallet did not load. Reload the page.');
+    if (!W.hasWallet() || !W.identity()) {
+      out.innerHTML = '<p class="fine">Trading uses the wallet in this browser. <a href="/wallet" data-link>Create or restore a wallet</a>, then come back to this token.</p>';
+      return;
+    }
+    $('trreview').disabled = true;
+    out.innerHTML = '<p class="muted">Getting a plan from the node and checking it on this device…</p>';
+    try {
+      plan = await W.prepareTrade({ token: id, side, amount: $('tramt').value, slippage: $('trslip').value.trim() || '1' });
+      const rows = W.tradeRows(plan.review, { side, ticker });
+      out.innerHTML = `<div class="kvl">${rows.map(([k, v]) => `<small>${esc(k)}</small><span>${esc(v)}</span>`).join('')}
+          <small>From</small><span class="mono ell">${esc(short(plan.address))}</span></div>
+        ${W.isUnlocked() ? '' : '<input type="password" id="trpass" placeholder="Wallet passphrase" autocomplete="current-password" style="width:100%;margin-top:12px">'}
+        <button type="button" id="trconfirm" class="primary" style="margin-top:12px;width:100%">Confirm ${side === 'buy' ? 'buy' : 'sell'}</button>
+        <p class="fine" id="trnote">Checked on this device: the amount, your slippage limit, the fee cap and that the ${side === 'buy' ? 'tokens' : 'NOID'} come back to your own address.</p>`;
+      $('trconfirm').onclick = async () => {
+        const note = $('trnote');
+        $('trconfirm').disabled = true;
+        try {
+          if (!W.isUnlocked()) {
+            note.textContent = 'Opening the wallet…';
+            await W.unlock($('trpass')?.value || '');
+          }
+          note.className = 'fine';
+          note.textContent = 'Approving on this device. This takes about 10 to 30 seconds…';
+          const res = await W.confirmTrade({ id: plan.id });
+          plan = null;
+          out.innerHTML = `<p class="msg">Trade sent${res.txid ? ` · <span class="mono">${esc(short(res.txid))}</span> ${copyBtn(res.txid)}` : ''}. It settles in the next block.</p>`;
+        } catch (e) {
+          note.className = 'msg err';
+          note.textContent = e.message;
+          $('trconfirm').disabled = false;
+        }
+      };
+    } catch (e) { fail(e.message); }
+    $('trreview').disabled = false;
+  };
+}
 function fileB64(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -3954,7 +4028,7 @@ const pages = {
     if (fitBtn) fitBtn.onclick = () => tokenChart?.fit?.();
     onTabs('tf', (tf) => { openTokenChart(id, demo, tf).catch((e) => { if ($('tv')) $('tv').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }); });
     await openTokenChart(id, demo, '15m');
-    if (tradeOn && $('swappane')) mountSwap(d, id);
+    if (tradeOn && $('swappane')) (!d.demo && d.swap?.intent?.enabled ? mountTrade : mountSwap)(d, id);
     wireEnhance(d, t, demo);
     wireBoost('token', t.id, demo);
     const paintBook = async () => {

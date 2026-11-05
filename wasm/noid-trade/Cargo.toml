@@ -1,0 +1,29 @@
+[package]
+name = "noid-trade"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "In-browser authorization for Parano1d native trades: verifies the node's plan and proves ownership on the user's device."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The official Parano1d SDK, pinned to one commit. Its vendor/ tree is Core v2.1.0
+# (848209d) plus the SDK's browser proving adapter; see README.md here.
+[dependencies]
+parano1d-authorization = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
+noid_core = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
+noid_poseidon2b = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
+noid_gkr = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
+serde_json = "1"
+hex = "0.4"
+zeroize = "1.8"
+getrandom = { version = "0.2", features = ["custom"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

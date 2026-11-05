@@ -1388,6 +1388,9 @@ const STATIC = {
   '/wallet.js': 'text/javascript; charset=utf-8',
   '/bip39.txt': 'text/plain; charset=utf-8',
   '/noid-wallet.wasm': 'application/wasm',
+  // The trade engine (built from wasm/noid-trade) and the worker that runs it off the page's main thread.
+  '/noid-trade.wasm': 'application/wasm',
+  '/trade-worker.js': 'text/javascript; charset=utf-8',
   // IBM Plex (SIL Open Font License), served from here so visitors never call a font CDN.
   '/fonts/plex-sans-400.woff2': 'font/woff2', '/fonts/plex-sans-500.woff2': 'font/woff2', '/fonts/plex-sans-600.woff2': 'font/woff2',
   '/fonts/plex-mono-400.woff2': 'font/woff2', '/fonts/plex-mono-500.woff2': 'font/woff2',
@@ -1458,7 +1461,7 @@ async function handle(req, res) {
       const made = boosts.create(acct, { kind: 'token', asset_id: body.token_id, pack: body.pack }, profiles.extras(body));
       return send(200, { product: 'boost', ...made }, { 'cache-control': 'no-store' });
     }
-    if (name === 'swap-submit' && req.method === 'POST') return send(200, await intents.submit(parseJson(await readBody(req, 300_000))), { 'cache-control': 'no-store' });
+    if (name === 'swap-submit' && req.method === 'POST') return send(200, await intents.submit(parseJson(await readBody(req, 4_200_000))), { 'cache-control': 'no-store' });
     if (name === 'profile' && req.method === 'POST') {
       if (!acct) return send(401, { error: 'missing or unknown API key' });
       return send(200, profiles.create(acct, parseJson(await readBody(req, 3_000_000))), { 'cache-control': 'no-store' });

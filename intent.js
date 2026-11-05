@@ -78,7 +78,7 @@ module.exports = function intents(rpc, tipNow = () => null) {
   async function submit(body) {
     if (!enabled()) throw bad('trading is off', 403);
     const hex = typeof body?.signed === 'string' ? body.signed.replace(/\s+/g, '') : '';
-    if (!hex || !/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 || hex.length > 262144) throw bad('paste the signed intent as hex');
+    if (!hex || !/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 || hex.length > 4_000_000) throw bad('paste the signed intent as hex');
     try {
       return { submitted: true, result: await rpc('submitTxIntent', { hex }, 30_000) };
     } catch (e) {

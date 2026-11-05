@@ -2,3 +2,4 @@ noid.db*
 node_modules/
 cold/
 backups/
+wasm/*/target/

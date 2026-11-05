@@ -11,10 +11,16 @@
 //   * offers itself to this site as `window.parano1d`, the same provider
 //     interface a browser extension would expose
 //
+//   * trades native tokens. Parano1d is signatureless: a spend carries a
+//     zero-knowledge proof that you own the address. The node prepares an
+//     unsigned plan; the trade engine (noid-trade.wasm, built from the official
+//     Parano1d SDK, source in wasm/noid-trade) checks the plan against what you
+//     asked for, then proves and verifies it in a worker on this device. Only
+//     the finished intent leaves the browser.
+//
 // What it does not do yet
-//   * spend. Parano1d is signatureless: a payment carries a zero-knowledge
-//     authorization proof, and this wallet build does not ship the prover yet.
-//     Buttons that would spend say so instead of pretending.
+//   * plain NOID payments to another address (the engine supports them; the
+//     send screen is not built).
 //
 // The seed is the wallet. Anyone with the 24 words (or the daemon key file it
 // writes) controls the funds; this page cannot recover them for you.
@@ -195,9 +201,118 @@
     return 200;
   }
 
+  // ---------------------------------------------------------------- trades ---
+  // Mainnet identity: Core's native_chain_id() is the hash of the genesis header, i.e. block 0's hash.
+  // A plan for any other chain is refused by the engine.
+  const MAINNET_CHAIN = '860e70453390bf815718e933aa4927167a13d098b0151391eefd722ee1add610';
+  const TRADES = new Map(); // review id -> { plan, address, index }
+
+  // One fresh worker per call, terminated afterwards, so a key never outlives the trade.
+  function engineCall(msg) {
+    return new Promise((resolve, reject) => {
+      const w = new Worker('/trade-worker.js?v=1');
+      const done = (fn, v) => { w.terminate(); fn(v); };
+      w.onmessage = ({ data }) => (data.ok ? done(resolve, data) : done(reject, new Error(data.error)));
+      w.onerror = (e) => { e.preventDefault?.(); done(reject, new Error(e.message || 'the trade engine could not start')); };
+      w.postMessage(msg, msg.master ? [msg.master.buffer] : []);
+    });
+  }
+
+  // Built here from what the user typed, not copied from the server, so the engine can
+  // refuse a plan that differs from the trade the user asked for. Same units as the API:
+  // NOID (6 decimals) to buy, whole tokens to sell; both are micro-units on chain.
+  function tradeRequest({ token, side, amount, slippage }) {
+    if (!/^[0-9a-f]{64}$/.test(token || '')) throw new Error('pick a token first');
+    if (side !== 'buy' && side !== 'sell') throw new Error('choose buy or sell');
+    const raw = String(amount ?? '').trim();
+    if (side === 'buy' ? !/^\d{1,12}(\.\d{1,6})?$/.test(raw) : !/^\d{1,24}$/.test(raw)) {
+      throw new Error(side === 'buy' ? 'enter a NOID amount with up to 6 decimals' : 'enter a whole number of tokens to sell');
+    }
+    const [w, f = ''] = raw.split('.');
+    const gross = (BigInt(w) * 1000000n + BigInt((f + '000000').slice(0, 6))).toString();
+    if (gross === '0') throw new Error('the amount must be more than zero');
+    const slip = Number(slippage ?? 1);
+    if (!(slip >= 0 && slip <= 50)) throw new Error('slippage must be 0 to 50%');
+    return { action: 'trade', asset_id: token, buy: side === 'buy', gross_input: gross, minimum_output: null, slippage_bps: Math.round(slip * 100), valid_until: null };
+  }
+
+  // Asks the node for a plan for this wallet's address, then checks it in the engine.
+  // Returns the engine's review; nothing is signed or sent.
+  async function prepareTrade(params) {
+    const id = readIdentity();
+    if (!id) throw new Error('create or open your No1d wallet first');
+    const request = tradeRequest(params);
+    const q = new URLSearchParams({ sender: id.address, token: request.asset_id, side: request.buy ? 'buy' : 'sell', amount: String(params.amount).trim(), slippage: String(request.slippage_bps / 100) });
+    const res = await fetch(`/api/swap/intent?${q}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || 'the node refused that trade');
+    if (body.mock) throw new Error('this is sample data: nothing here can be traded');
+    const native = body.detail;
+    if (!native || native.owner !== id.address) throw new Error('the node built this trade for a different address');
+    const plan = {
+      native_plan: native,
+      expected_request: request,
+      expected_chain: MAINNET_CHAIN,
+      expected_parent_hash: String(native.review?.parent_hash || ''),
+      // The engine refuses the plan if its fee limit is above this; it is the figure shown as "Network fee, at most".
+      maximum_fee_micronoid: String(native.review?.fee_limit_micronoid ?? native.review?.fee_micronoid ?? '0'),
+    };
+    const { review } = await engineCall({ cmd: 'review', plan });
+    const key = crypto.randomUUID();
+    TRADES.clear();
+    TRADES.set(key, { plan, address: id.address, index: Number(id.index) || 0 });
+    return { id: key, address: id.address, review };
+  }
+
+  // Proves the reviewed trade on this device and submits it. Needs the wallet unlocked.
+  async function confirmTrade({ id } = {}) {
+    const t = TRADES.get(id);
+    if (!t) throw new Error('that quote expired: review the trade again');
+    if (locked()) throw new Error('unlock your wallet first');
+    if (await addressAt(t.index) !== t.address) throw new Error('the unlocked wallet does not own the trading address');
+    TRADES.delete(id);
+    const { intent } = await engineCall({ cmd: 'authorize', master: SESSION.master.slice(), index: t.index, plan: t.plan });
+    const res = await fetch('/api/swap-submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signed: intent }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.error) {
+      const msg = body.error || 'the node did not accept the trade';
+      throw new Error(/state|parent|stale|changed/i.test(msg) ? `A new block arrived before the trade was sent, so the node refused it. Nothing was spent. Review it again. (${msg})` : msg);
+    }
+    const r = body.result;
+    return { txid: typeof r === 'string' ? r : (r?.txid || r?.intent_id || ''), result: r };
+  }
+
+  // The engine-checked review as label/value rows. Buy: NOID in, token units out. Sell: token units in, NOID out.
+  function tradeRows(review, { side, ticker = 'tokens' } = {}) {
+    const units = (s) => { const n = BigInt(String(s ?? '0')); const w = (n / 1000000n).toLocaleString('en-US'); const f = String(n % 1000000n).padStart(6, '0').replace(/0+$/, ''); return `${w}${f ? '.' + f : ''}`; };
+    const tok = (s) => `${units(s)} ${ticker}`;
+    const r = review || {};
+    const gross = r.request?.gross_input;
+    const buy = side ? side === 'buy' : !!r.request?.buy;
+    return [
+      ['You pay', buy ? fmtNoid(r.noid_debit_micronoid || gross) : tok(gross)],
+      ['You get, quoted', buy ? tok(r.quoted_output) : fmtNoid(r.quoted_output)],
+      ['You get, at least', buy ? tok(r.minimum_output) : fmtNoid(r.minimum_output)],
+      ['Network fee', fmtNoid(r.fee_micronoid)],
+      ['Network fee, at most', fmtNoid(r.fee_limit_micronoid ?? r.fee_micronoid)],
+      ['Valid until block', r.valid_until == null ? '–' : Number(r.valid_until).toLocaleString('en-US')],
+      ['Paid to', 'your own address'],
+    ];
+  }
+
+  async function unlockWith(passphrase) {
+    const blob = storedBlob();
+    if (!blob) throw new Error('there is no wallet in this browser yet');
+    let master;
+    try { master = await decryptSeed(blob, passphrase); } catch { throw new Error('that passphrase did not open the wallet'); }
+    SESSION.master = master;
+    const id = readIdentity();
+    SESSION.index = id ? Number(id.index) || 0 : 0;
+  }
+
   const provider = {
     isNo1dWallet: true,
-    version: '0.1.0',
+    version: '0.2.0',
     async request({ method, params = {} } = {}) {
       if (method === 'account' || method === 'wallet_getAddress') {
         if (locked()) throw new Error('open the No1d Wallet page and unlock it first');
@@ -212,8 +327,10 @@
         if (locked()) throw new Error('open the No1d Wallet page and unlock it first');
         return { address: await addressAt(params.index || 0) };
       }
+      if (method === 'trade_prepare') return prepareTrade(params);
+      if (method === 'trade_confirm') return confirmTrade(params);
       if (method === 'signAndSubmit') {
-        throw new Error('this wallet build cannot spend yet: Parano1d payments need an authorization proof, and the prover is not bundled. Nothing was sent and nothing was signed.');
+        throw new Error('this wallet signs only plans it has checked itself: use trade_prepare, then trade_confirm. Nothing was sent.');
       }
       throw new Error(`unsupported method: ${method}`);
     },
@@ -437,58 +554,31 @@
       const out = $('tres');
       if (!token) { out.innerHTML = '<p class="msg err">No token to trade yet. Create or pick one on Explore.</p>'; return; }
       if (!amount) { out.innerHTML = '<p class="msg err">Enter an amount first.</p>'; return; }
-      out.innerHTML = '<p class="muted">Asking the node for a quote…</p>';
-      let q;
-      try {
-        q = await fetch(`/api/swap/intent?sender=${encodeURIComponent(address)}&token=${encodeURIComponent(token)}&side=${side}&amount=${encodeURIComponent(amount)}&slippage=${encodeURIComponent(slip)}`)
-          .then(async (r) => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
-      } catch (err) { out.innerHTML = `<p class="msg err">${esc(err.message)}</p>`; return; }
-      if (!q.ok) {
-        out.innerHTML = `<p class="msg err">${esc(q.body.error || 'the node refused that quote')}</p>`
-          + (/trading is off/i.test(q.body.error || '') ? '<p class="fine">Trading is switched off on this explorer right now, so no quote can be accepted. Nothing was sent.</p>' : '');
+      out.innerHTML = '<p class="muted">Asking the node for a plan, then checking it on this device…</p>';
+      let t;
+      try { t = await prepareTrade({ token, side, amount, slippage: slip }); }
+      catch (err) {
+        out.innerHTML = `<p class="msg err">${esc(err.message)}</p>`
+          + (/trading is off/i.test(err.message) ? '<p class="fine">Trading is switched off on this explorer right now. Nothing was sent.</p>' : '');
         return;
       }
-      const rv = (q.body.detail && q.body.detail.review) || {};
-      const tick = $('tasset').selectedOptions[0]?.textContent || 'the token';
-      const row = (k, v) => `<div><span class="muted">${esc(k)}</span> <b>${v}</b></div>`;
-      const got = side === 'buy'
-        ? `≈ ${esc(fmtUnits(Number(rv.quoted_output || 0) / 1e6))} ${esc(tick)} <span class="muted">min ${esc(fmtUnits(Number(rv.minimum_output || 0) / 1e6))}</span>`
-        : `≈ ${esc(fmtNoid(rv.noid_credit_micronoid || rv.quoted_output || '0'))}`;
-      const pay = side === 'buy' ? `${esc(fmtNoid(rv.noid_debit_micronoid || '0'))} <span class="muted">fee included</span>` : `${esc(amount)} ${esc(tick)} <span class="muted">plus the fee</span>`;
-      out.innerHTML = `<div class="wlist">
-          ${row('You pay', pay)}
-          ${row('You get', got)}
-          ${row('Network fee', esc(fmtNoid(rv.fee_micronoid || '0')))}
-          ${row('Quote good until block', esc(String(rv.valid_until ?? '–')))}
-        </div>
-        <div class="wrow"><button type="button" id="tsign">Sign &amp; submit in this wallet</button></div>
-        <p class="fine" id="tnote">The node built this quote for your address. The proof that authorises it has to run on this device.</p>
-        <details><summary class="muted">Already have signed bytes?</summary>
-          <div class="wrow"><input id="tsigned" placeholder="signed intent hex" autocomplete="off"><button type="button" id="tsend">Relay to the node</button></div>
-        </details>
-        <details><summary class="muted">Unsigned intent (${esc(String(q.body.unsigned || '').length / 2)} bytes)</summary>
-          <p class="fine mono" style="word-break:break-all">${esc(String(q.body.unsigned || '').slice(0, 160))}…</p></details>`;
+      const tick = $('tasset').selectedOptions[0]?.textContent || 'tokens';
+      out.innerHTML = `<div class="wlist">${tradeRows(t.review, { side, ticker: tick }).map(([k, v]) => `<div><span class="muted">${esc(k)}</span> <b>${esc(v)}</b></div>`).join('')}</div>
+        <div class="wrow"><button type="button" id="tsign" class="primary">Confirm ${side === 'buy' ? 'buy' : 'sell'}</button></div>
+        <p class="fine" id="tnote">Checked on this device: the amount, your slippage limit, the fee cap and that the tokens come back to your own address. Confirming proves the trade here and sends it.</p>`;
       $('tsign').onclick = async () => {
         const note = $('tnote');
+        $('tsign').disabled = true;
         note.className = 'fine';
-        note.textContent = 'Asking the wallet to prove and submit…';
+        note.textContent = 'Approving on this device. This takes about 10 to 30 seconds…';
         try {
-          const res = await provider.request({ method: 'signAndSubmit', params: { unsigned: q.body.unsigned, draft: q.body.detail } });
-          note.className = 'fine';
-          note.innerHTML = `Submitted ${esc(short(res?.txid || ''))}. It lands in the next block.`;
+          const res = await confirmTrade({ id: t.id });
+          note.innerHTML = `Sent${res.txid ? ` · <span class="mono">${esc(short(res.txid))}</span>` : ''}. It settles in the next block.`;
         } catch (err) {
           note.className = 'msg err';
           note.textContent = err.message;
+          $('tsign').disabled = false;
         }
-      };
-      $('tsend').onclick = async () => {
-        const note = $('tnote');
-        try {
-          const res = await fetch('/api/swap-submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signed: $('tsigned').value.trim() }) })
-            .then((r) => r.json().catch(() => ({})));
-          note.className = res.error ? 'msg err' : 'fine';
-          note.textContent = res.error || `Relayed to the node: ${JSON.stringify(res.result || {}).slice(0, 140)}`;
-        } catch (err) { note.className = 'msg err'; note.textContent = err.message; }
       };
     };
 
@@ -620,6 +710,13 @@
   window.No1dWallet = {
     async render(box) { try { return await render(box); } catch (error) { box.innerHTML = `<div class="card"><h2>Wallet</h2><p class="msg err">${esc(error.message)}</p></div>`; } },
     isUnlocked: () => !locked(),
+    hasWallet: () => !!storedBlob(),
+    unlock: unlockWith,
+    prepareTrade,
+    confirmTrade,
+    tradeRows,
+    // Proves a random throwaway statement, to check the engine runs on this device.
+    selftest: () => engineCall({ cmd: 'selftest' }).then((r) => r.result),
     identity: readIdentity,
     clearIdentity,
     async address(index = 0) { return addressAt(index); },
