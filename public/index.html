@@ -841,7 +841,7 @@
   .mcalc input, .mcalc select { width:100%; min-width:0 }
   #mout { grid-template-columns:repeat(auto-fit, minmax(min(150px, 100%), 1fr)) }
   /* iOS magnifies a field whose text is under 16px, which jumps the whole page on focus. Every field is 16px. */
-  input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea, .txfilters input, .txfilters select, .mtabs select { font-size:16px }
+  input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea { font-size:16px !important }
   /* Five live tiles stay on one line; they were wrapping to two. */
   .hudstats { grid-template-columns:repeat(5, minmax(0, 1fr)); gap:5px; margin:0 0 10px }
   .hudstats .chip { padding:4px 6px; font-size:9px; letter-spacing:.06em }
