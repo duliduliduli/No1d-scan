@@ -1331,7 +1331,8 @@ const routes = {
   },
 
   // Routes must return a promise: the handler shares in-flight calls with .finally.
-  tokens: async (...a) => payChains(profiles.decorate(await assets.tokens(...a))),
+  // /api/tokens/:id is the token page's route, so it carries the native trade flag too (withIntent skips the list).
+  tokens: async (...a) => withIntent(payChains(profiles.decorate(await assets.tokens(...a)))),
   token: async (...a) => withIntent(payChains(profiles.decorate(await assets.token(...a)))),
   wallet: async (id, params) => {
     const w = await assets.wallet(id, params);

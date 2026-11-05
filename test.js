@@ -886,6 +886,8 @@ test('indexer + api', async (t) => {
     seenIntents.push({ owner, request });
     return { plan_id: 'p1', intent_id: 'i1', owner, unsigned_intent_hex: 'deadbeef', review: { quoted_output: '282892894', minimum_output: '280063966', fee_micronoid: '9800', valid_until: 12 } };
   };
+  const [, pageData] = await get('tokens/gcat?demo=1');
+  assert.strictEqual(pageData.swap.intent.enabled, true, 'the token page route tells the page native trading is on');
   const [, buyI] = await get(`swap/intent?token=${INTENT_TOKEN}&side=buy&amount=1.5&slippage=1&sender=o1acdefghjkmnpqr`);
   assert.strictEqual(buyI.signable, true);
   assert.strictEqual(buyI.unsigned, 'deadbeef', 'the node field is read as the unsigned payload');
