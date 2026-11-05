@@ -313,8 +313,9 @@ wallet page's panel both use it; the passphrase can be entered on the token page
 Verified: addresses match `noid-wallet.wasm` (1,050 random seed/index pairs, and in
 `npm test`); a full owner proof passes the chain verifier in Node and in Chromium;
 malformed plans are refused before proving. Not yet verified: one real plan from the
-live node through `authorize` and `submitTxIntent`. That needs `SWAP_ENABLED=true` in
-`/etc/noid-scan.env` on the droplet; the trade card stays locked until then.
+live node through `authorize` and `submitTxIntent`. Native trades are on by default;
+`SWAP_ENABLED=false` in `/etc/noid-scan.env` on the droplet switches them off (the old
+quote/build path still needs `SWAP_ENABLED=true` plus its fee settings).
 
 The v2.1 intent flow pays no explorer fee: the native request has no fee output, so
 `SWAP_FEE_BPS` and `SWAP_FEE_ADDRESS` only apply to the old quote/build path.

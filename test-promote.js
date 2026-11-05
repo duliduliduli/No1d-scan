@@ -81,10 +81,11 @@ test('native trade intent: gated, mocked before activation, never signs', async 
   const rpc = async (m, p) => { calls.push([m, p]); if (mode === 'inactive') throw new Error('native operations are not active at the candidate height'); return m === 'prepareNativeIntent' ? 'abcd' : { txid: 'ff' }; };
   const it = require('./intent.js')(rpc, () => 279000);
   const P = (o) => new URLSearchParams({ token: 'ab'.repeat(32), side: 'buy', amount: '1.5', slippage: '1', sender: 'o124ken009f8887g9yu7nd2tlhhxxv0t6y9hwdf472ptynyq0nm30ql04u3a', ...o });
-  delete process.env.SWAP_ENABLED;
-  await assert.rejects(it.prepare(P()), /off/);
+  process.env.SWAP_ENABLED = 'false';
+  await assert.rejects(it.prepare(P()), /off/, 'SWAP_ENABLED=false switches native trades off');
   assert.strictEqual(it.info().enabled, false);
-  process.env.SWAP_ENABLED = 'true';
+  delete process.env.SWAP_ENABLED;
+  assert.strictEqual(it.info().enabled, true, 'native trades are on by default');
   assert.deepStrictEqual(it.info().blocks_left, 370);
   const mock = await it.prepare(P({ demo: '1' }));
   assert.strictEqual(mock.mock, true);

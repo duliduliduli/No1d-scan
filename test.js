@@ -875,10 +875,11 @@ test('indexer + api', async (t) => {
   assert.strictEqual(off.enabled, false);
   assert.strictEqual(off.signable, false);
 
-  // Trade intents: off until SWAP_ENABLED, then sized in micro-units on both sides, and the node's own
+  // Trade intents: on by default, off with SWAP_ENABLED=false, sized in micro-units on both sides, and the node's own
   // unsigned_intent_hex field is the payload the wallet signs.
-  assert.strictEqual((await get('swap/intent?token=...1&side=buy&amount=1&sender=o1acdefghjkmnpqr'))[0], 403, 'intents are off by default');
-  process.env.SWAP_ENABLED = 'true';
+  process.env.SWAP_ENABLED = 'false';
+  assert.strictEqual((await get('swap/intent?token=...1&side=buy&amount=1&sender=o1acdefghjkmnpqr'))[0], 403, 'SWAP_ENABLED=false switches intents off');
+  delete process.env.SWAP_ENABLED;
   const seenIntents = [];
   const INTENT_TOKEN = 'ef'.repeat(32);
   node.prepareNativeIntent = ({ owner, request }) => {

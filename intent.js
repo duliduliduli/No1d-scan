@@ -1,14 +1,15 @@
 // Native token trades through Parano1d v2.1 intents. Non-custodial: the node builds an UNSIGNED intent for the
 // buyer's own address (paranoid_prepareNativeIntent), the buyer's wallet signs it, and the signed bytes go to
 // paranoid_submitTxIntent (from the wallet, or relayed here as-is). This process never sees or holds a key.
-// Off unless SWAP_ENABLED=true. Before the native activation height the node refuses; demo mode returns a mock.
+// On by default (the wallet proves and checks every trade on the user's device); SWAP_ENABLED=false turns it off.
+// Before the native activation height the node refuses; demo mode returns a mock.
 const ADDR = /^o1[02-9ac-hj-np-z]{6,120}$/;
 const ID = /^[A-Za-z0-9:_-]{1,80}$/;
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 
 module.exports = function intents(rpc, tipNow = () => null) {
   const activation = () => Number(process.env.NATIVE_ACTIVATION_HEIGHT || 279370);
-  const enabled = () => process.env.SWAP_ENABLED === 'true';
+  const enabled = () => process.env.SWAP_ENABLED !== 'false';
   const notActive = (e) => /not active/i.test(e?.message || '');
 
   function info() {
