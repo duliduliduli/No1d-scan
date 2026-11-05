@@ -43,7 +43,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     return process.env.PAY_ADDRESS && p.usd ? { address: process.env.PAY_ADDRESS, usdPerNoid: p.usd, live: p.live } : null;
   };
   db.exec(`
-    create table if not exists accounts (id text primary key, key_hash text unique not null, credits integer not null default 0, requests integer not null default 0, created integer not null);
+    create table if not exists accounts (id text primary key, key_hash text unique not null, credits integer not null default 0, requests integer not null default 0, created integer not null, wallet text);
     create table if not exists ledger (id integer primary key, account text not null, delta integer not null, reason text not null, ref text unique, at integer not null);
     create index if not exists ledger_account on ledger(account, at);
     create table if not exists usage (account text not null, day text not null, requests integer not null default 0, chats integer not null default 0, primary key (account, day));
@@ -54,6 +54,9 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
   // The last 4 digits (μNOID "dust") identify an order, so a buyer may send more than quoted and still match;
   // extra is credited at the same rate. Dust is unique among open orders.
   try { db.exec('alter table noid_topups add column dust integer'); } catch {}
+  // The o1… address a browser wallet derives is the account's public identity. Only the address is stored, never a
+  // seed or a secret: it is public chain data, and a key can be linked to at most one address at a time.
+  try { db.exec('alter table accounts add column wallet text'); } catch {}
   db.exec('update noid_topups set dust = amount % 10000 where dust is null');
   try { db.exec('drop index if exists noid_topups_open; create unique index if not exists noid_topups_dust on noid_topups(dust) where paid_ref is null'); } catch {}
   // Expired orders are kept as records (expired_at). Their dust is cleared HOLD_MS later so the digits can be reused;
@@ -68,8 +71,10 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
   let baseline = freshSeen;
   const q = {
     insertAccount: db.prepare('insert into accounts (id, key_hash, created) values (?, ?, ?)'),
-    byKey: db.prepare('select id, credits, requests, created from accounts where key_hash = ?'),
-    byId: db.prepare('select id, credits, requests, created from accounts where id = ?'),
+    byKey: db.prepare('select id, credits, requests, created, wallet from accounts where key_hash = ?'),
+    byId: db.prepare('select id, credits, requests, created, wallet from accounts where id = ?'),
+    setWallet: db.prepare('update accounts set wallet = ? where id = ?'),
+    byWallet: db.prepare('select id, credits, requests, created, wallet from accounts where wallet = ? limit 1'),
     addCredits: db.prepare('update accounts set credits = credits + ? where id = ?'),
     takeCredits: db.prepare('update accounts set credits = credits - ? where id = ? and credits >= ?'),
     ledger: db.prepare('insert into ledger (account, delta, reason, ref, at) values (?, ?, ?, ?, ?)'),
@@ -288,6 +293,24 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       return { ...acct, tier: acct.credits > 0 ? 'paid' : 'free', rate_limit_per_min: acct.credits > 0 ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
     },
     'GET pricing': () => pricing(),
+    // Wallet-as-account: the browser wallet's o1… address is the public half of the login. Linking stores the address
+    // on the account so the account page, the watchlist and (later) trade relay belong to the wallet the visitor holds,
+    // not to a throwaway key. No seed, no secret, no signature is ever sent here; possession is proven by the wallet
+    // itself, and an address can only sit on one account.
+    'POST link': (acct, body) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const address = String(body?.address || '').trim();
+      if (!/^o1[02-9ac-hj-np-z]{6,120}$/.test(address)) throw bad('expected your o1… wallet address');
+      const other = q.byWallet.get(address);
+      if (other && other.id !== acct.id) throw bad('that wallet is already linked to another account', 409);
+      q.setWallet.run(address, acct.id);
+      return { wallet: address, note: 'Linked. This address is public; the seed behind it never leaves your browser.' };
+    },
+    'POST unlink': (acct) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      q.setWallet.run(null, acct.id);
+      return { wallet: null };
+    },
     'POST profile-pay': async (acct, body) => {
       if (!acct) throw bad('missing or unknown API key', 401);
       const row = profiles?.ownedUnpaid(acct.id, body?.id);

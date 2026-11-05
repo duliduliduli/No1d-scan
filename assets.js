@@ -825,7 +825,42 @@ module.exports = function assets(db, rpc, priceNow) {
     }
     return pts;
   }
-  function walletView(address, params) {
+  // Token balances for any address. v2.1 publishes them as state pages: getNativeHoldings({owner}) lists the pages
+  // an address owns, and a kind-2 page is exactly one token balance. Its opening bytes carry the "NOIDAS21" magic,
+  // the 32-byte asset id, then a little-endian u64 of micro-units at byte 76. A wallet can own several pages of the
+  // same token (one per output), so they are summed. Every other kind is a market, listing or collection page.
+  const PAGE_MAGIC = '4e4f494441533231';
+  const wholeUnits = (u) => {
+    const w = u / 1000000n, f = (u % 1000000n).toString().padStart(6, '0').replace(/0+$/, '');
+    return f ? `${w}.${f}` : w.toString();
+  };
+  function tokenPagesToHoldings(pages) {
+    const sum = new Map();
+    for (const p of pages || []) {
+      if (Number(p?.kind) !== 2) continue;
+      const hex = String(p?.opening_hex || '').toLowerCase();
+      if (hex.length < 168 || hex.slice(0, 16) !== PAGE_MAGIC) continue;
+      const id = hex.slice(24, 88);
+      if (!/^[0-9a-f]{64}$/.test(id)) continue;
+      let units = 0n;
+      for (let i = 7; i >= 0; i--) units = units * 256n + BigInt(parseInt(hex.slice(152 + 2 * i, 154 + 2 * i), 16));
+      if (units === 0n) continue;
+      sum.set(id, (sum.get(id) || 0n) + units);
+    }
+    return sum;
+  }
+  async function nodeHoldings(owner) {
+    const pages = [];
+    let cursor = null, guard = 0;
+    do {
+      const page = await rpc('getNativeHoldings', { owner, limit: 100, ...(cursor && { cursor }) }, 10_000);
+      if (Array.isArray(page?.holdings)) pages.push(...page.holdings);
+      cursor = page?.next || null;
+    } while (cursor && ++guard < 10);
+    return tokenPagesToHoldings(pages);
+  }
+
+  async function walletView(address, params) {
     if (!ADDR.test(address || '')) throw bad('expected an address');
     const demo = isDemo(params);
     const focus = params.get('token') || '';
@@ -843,11 +878,22 @@ module.exports = function assets(db, rpc, priceNow) {
       }
       trades.sort((a, b) => b.ts - a.ts);
     } else {
-      holdings = q.holdersByAddr.all(address).map((h) => {
-        const t = q.token.get(h.token_id);
-        return { token_id: h.token_id, name: t?.name || h.token_id, ticker: t?.ticker || '', balance: h.balance, price_micronoid: t?.price_micronoid || null };
-      });
       trades = q.tradesByTrader.all(address);
+      // The node is the source of truth for balances: the indexed table only holds what a snapshot captured.
+      let onchain = null;
+      try { onchain = await nodeHoldings(address); } catch { onchain = null; }
+      if (onchain) {
+        holdings = [...onchain].map(([id, units]) => {
+          const t = q.token.get(id);
+          return { token_id: id, name: t?.name || `Token ${id.slice(0, 8)}`, ticker: t?.ticker || '', logo: t?.logo || null,
+            units: units.toString(), balance: wholeUnits(units), price_micronoid: t?.price_micronoid || null, onchain: true };
+        });
+      } else {
+        holdings = q.holdersByAddr.all(address).map((h) => {
+          const t = q.token.get(h.token_id);
+          return { token_id: h.token_id, name: t?.name || h.token_id, ticker: t?.ticker || '', balance: h.balance, price_micronoid: t?.price_micronoid || null };
+        });
+      }
     }
     holdings.sort((a, b) => ((bi(b.balance) || 0n) > (bi(a.balance) || 0n) ? 1 : -1));
     const focused = focus ? trades.filter((t) => t.token_id === focus) : trades;
@@ -856,8 +902,13 @@ module.exports = function assets(db, rpc, priceNow) {
     return {
       demo, address, token_id: focus || null,
       holdings: holdings.map((h) => {
-        const value = bi(h.price_micronoid) == null ? null : (bi(h.balance) || 0n) * bi(h.price_micronoid);
-        return { token_id: h.token_id, name: h.name, ticker: h.ticker, balance: String(h.balance), value_micronoid: value == null ? null : value.toString(), value_usd: usdOf(value, usd) };
+        // price_micronoid is per whole token, so micro-units are scaled down before the multiply.
+        const value = bi(h.price_micronoid) == null ? null
+          : h.units != null ? (BigInt(h.units) * bi(h.price_micronoid)) / 1000000n
+            : (bi(h.balance) || 0n) * bi(h.price_micronoid);
+        return { token_id: h.token_id, name: h.name, ticker: h.ticker, logo: h.logo ?? null, balance: String(h.balance),
+          units: h.units ?? null, onchain: !!h.onchain, price_micronoid: h.price_micronoid ?? null,
+          value_micronoid: value == null ? null : value.toString(), value_usd: usdOf(value, usd) };
       }),
       trades: focused.slice(0, 80).map(publicTrade),
       pnl, activity: { txns: pnl.txns, buys: pnl.buys, sells: pnl.sells, first_ts: pnl.first_ts, last_ts: pnl.last_ts },

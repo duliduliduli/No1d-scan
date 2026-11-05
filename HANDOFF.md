@@ -163,7 +163,61 @@ bundled next; until then `signAndSubmit` throws an explicit error instead of
 faking a signature. The seed holds the same bytes a node keystore does, so a
 wallet created here can be exported as `wallet.key` and driven by the daemon.
 
-## 11. Quick verification commands
+## 11. Wallet as the account, portfolio and the trade panel (added 2026-11-05)
+
+The wallet in a browser is now the account, and the account page leads with it
+instead of a sign-up wall:
+
+- `public/wallet.js` remembers the **public** address in `localStorage`
+  (`no1d_wallet_identity_v1`, `{v, address, index, at}`) whenever the wallet is
+  seen unlocked, and clears it with the wallet. `window.No1dWallet.identity()`
+  reads it; `WalletDex.identity()` in the SPA wraps it (with a localStorage
+  fallback) and the menu shows `Wallet o1ab…1234 · API & Credits`.
+- `POST /api/link {address}` stores the address on the account
+  (`accounts.wallet`, additive column), `POST /api/unlink` clears it,
+  `GET /api/me` returns `wallet`. One account per address: a second account
+  linking the same address gets `409`. Only the address is stored — never a
+  seed, never a signature.
+- The account page (`pages.account`) shows the wallet card first: address, NOID
+  and USD, token count and USD, wallet total, receive index, a token table with
+  copy buttons, `Open the wallet`, `Full address page`, and link/unlink. With no
+  key it offers "Create a key for this wallet", which mints a key, saves it and
+  links the address in one go.
+- `pages.wallet` (the `/wallet` page) has the portfolio table: NOID plus every
+  native token with quantity, per-token price, USD value, total, a ⧉ button that
+  copies the **token id** (the contract address trades are addressed to), a
+  click-through to `/token/<id>`, and a Trade button that opens the trade panel
+  below it.
+
+### Where balances come from
+
+`assets.js` reads them from the node, not from the indexer. `paranoid_getNativeHoldings
+{owner, limit}` lists the state pages an address owns; **kind 2 is one token
+balance** whose `opening_hex` carries the `NOIDAS21` magic, the 32-byte asset id
+at hex offset 24 and a little-endian u64 of micro-units at byte 76 (hex 152).
+Several pages of the same token (one per output) are summed. Kinds 1, 4, 5 and
+65 are market, listing, collection and other pages and are ignored. The indexed
+`token_holders` table is empty in practice and is only the fallback for a node
+that does not answer the method — the wallet route is `async` for this reason.
+Verified against live chain data: `o1f8z7z298…` sums to 7 tokens, `o1exn9t45…`
+sums 14 pages down to 4.
+
+### The trade panel
+
+`/api/swap/intent` (GET, `intent.js`) prepares a real unsigned intent for the
+visitor's own address; the panel shows pay/get/min-out/fee/valid-until from the
+node's `review` object, then either asks the browser wallet to sign (which still
+throws until the prover ships) or relays already-signed bytes through
+`POST /api/swap-submit`. Two bugs were fixed while wiring it: a **sell** amount
+is whole tokens in the API and micro-units on chain (`× 1e6`), and the node
+returns the payload as `unsigned_intent_hex`, not `unsigned`.
+
+Still off: `SWAP_ENABLED` is not set on the droplet, so the panel answers
+"trading is off" in production until the operator turns it on. The prover is
+still the one thing between a quote and a real trade.
+
+## 12. Quick verification commands
+
 
 Local:
 ```bash

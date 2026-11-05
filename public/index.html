@@ -635,7 +635,8 @@
     .bar .fill, .globe .event { transition:none }
   }
   /* Self-custody wallet page */
-  .wrow { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 }
+  .wrow { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0 }
+  .wrow button.on { border-color:var(--accent); color:var(--accent); font-weight:600 }
   .wfield { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 12px }
   .wfield small { font:600 11px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); min-width:104px }
   .wfield b { font:13px var(--mono); word-break:break-all }
@@ -1834,6 +1835,15 @@ function unmountGlobe() {
 // This page never sees a key and never signs.
 const WalletDex = {
   provider() { return window.parano1d || null; },
+  // The public identity of the wallet in this browser: {address, index} or null. Read from localStorage, so it needs
+  // no passphrase and no network. The seed behind it stays encrypted and is never part of this.
+  identity() {
+    try {
+      if (window.No1dWallet?.identity) return window.No1dWallet.identity();
+      const b = JSON.parse(localStorage.getItem('no1d_wallet_identity_v1') || 'null');
+      return b && /^o1[02-9ac-hj-np-z]{6,120}$/.test(b.address || '') ? b : null;
+    } catch { return null; }
+  },
   ready() { return typeof this.provider()?.request === 'function'; },
   async account() {
     const acct = await this.provider().request({ method: 'account', params: {} });
@@ -3359,6 +3369,7 @@ const pages = {
           ${(P.plans || []).map((p) => `<tr><td><b>${esc(p.label)}</b></td><td>${esc(p.noid)} NOID${p.usd_at_market ? ` <span class="muted">(≈ $${esc(p.usd_at_market)})</span>` : ''}</td><td>${n(p.credits)}</td><td>${n(p.requests)}</td></tr>`).join('')}
         </table>
         <p class="muted">Credits never expire and there is no subscription. Payable in NOID only, on chain, to this explorer's own address${P.noid ? ` <span class="mono">${esc(P.noid.address)}</span>` : ''}. Card payments are not accepted.</p></div>
+      <div class="card" id="wcard"></div>
       <div class="card" id="acct"></div>
       <div class="card"><h2>API reference</h2>
         <p>Base URL <code>${esc(location.origin)}/api</code>. Every request needs your key as the <code>x-api-key</code> header (or <code>?key=</code>); create one free above. Keys without credits get the free tier.</p>
@@ -3384,24 +3395,79 @@ const pages = {
         <p><b>Coverage:</b> headers are complete since genesis; transaction bodies exist only for blocks this explorer captured while the node retained them (the last 42 blocks), see <code>coverage</code> in <code>/stats</code>. Holder counts and the rich list are approximate snapshots, taken every 2 hours.</p></div>`;
     const box = $('acct');
 
+    // The wallet in this browser is the account. Its address is remembered in the clear on this device, so the page
+    // can show holdings and trade without a key, and without ever seeing a seed. Credits, the watchlist and the API
+    // belong to the key; the key can be linked to the wallet so both describe the same person.
+    const wid = WalletDex.identity();
+    let onchain = null;
+    if (wid) {
+      const [acc, pos, st] = await Promise.all([
+        api('address/' + wid.address).catch(() => null), api('wallet/' + wid.address).catch(() => null), api('stats').catch(() => null),
+      ]);
+      onchain = { address: wid.address, index: Number(wid.index) || 0, acc, pos, usd: Number(st?.price?.usd) || null };
+    }
+    const money = (v) => (v == null || !Number.isFinite(Number(v)) ? '–' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    const showKey = (a, extra = '') => {
+      box.innerHTML = `<h2>Your account key</h2><p><b>Save this key now.</b> It is your login, it is shown only once, and it cannot be recovered. Anyone who has it can use your credits, so keep it secret (send it as the <code>x-api-key</code> header rather than in URLs). If you lose it, the credits on it are lost too; for a paid account, support can help if you still have your payment receipts.${extra}</p>
+        <p class="big" style="word-break:break-all">${esc(a.key)}</p>
+        <div class="row"><button id="copy">Copy key</button><button id="saved">I saved it</button></div>`;
+      $('copy').onclick = () => navigator.clipboard?.writeText(a.key).then(() => ($('copy').textContent = 'Copied'));
+      $('saved').onclick = () => pages.account();
+    };
+    const makeKey = async (btn, where) => {
+      btn.disabled = true;
+      try {
+        const a = await api('account', {});
+        saveKey(a.key);
+        let linked = '';
+        if (onchain) { try { await api('link', { address: onchain.address }); linked = ' It is linked to the wallet in this browser.'; } catch {} }
+        if (where === 'box') showKey(a, linked); else pages.account();
+      } catch (e) { btn.disabled = false; const el = where === 'box' ? $('aerr') : $('wnote'); if (el) { el.className = 'msg err'; el.textContent = e.message; } }
+    };
+
+    if (onchain) {
+      const noidMicro = BigInt(String(onchain.acc?.balance_micronoid ?? '0'));
+      const noidUsd = onchain.usd ? (Number(noidMicro) / 1e6) * onchain.usd : null;
+      const held = onchain.pos?.holdings || [];
+      const tokenUsd = held.reduce((s, h) => s + (h.value_usd || 0), 0);
+      const tag = (h) => h.ticker || h.name || String(h.token_id || '').slice(0, 8);
+      const linked = !!(me && me.wallet === onchain.address);
+      $('wcard').innerHTML = `<h2>Your wallet <small class="muted">this is your account</small></h2>
+        <p class="mono" style="word-break:break-all"><b>${esc(onchain.address)}</b> <button class="copy" id="wcopy">⧉</button><span class="muted" id="wcopied"></span></p>
+        <div class="grid">
+          <div class="stat"><small>NOID</small><b>${esc(fmtNoid(String(noidMicro)))}</b><small class="muted">${esc(money(noidUsd))}</small></div>
+          <div class="stat"><small>Tokens held</small><b>${held.length}</b><small class="muted">${esc(money(tokenUsd))}</small></div>
+          <div class="stat"><small>Wallet total</small><b>${esc(money((noidUsd || 0) + tokenUsd))}</b></div>
+          <div class="stat"><small>Receive index</small><b>${esc(String(onchain.index))}</b></div>
+        </div>
+        ${held.length ? `<table class="price"><tr><th>Token</th><th class="num">You hold</th><th class="num">Value</th><th class="num">Price</th><th></th></tr>
+          ${held.map((h) => `<tr><td><a href="/token/${esc(h.token_id)}" data-link>${esc(tag(h))}</a></td><td class="num">${esc(h.balance)}</td><td class="num">${esc(money(h.value_usd))}</td><td class="num">${esc(h.price_micronoid ? fmtNoid(h.price_micronoid) : '–')}</td><td><button class="copy" data-copy="${esc(h.token_id)}" title="Copy the token id">⧉</button></td></tr>`).join('')}</table>`
+          : '<p class="muted">No native tokens in this wallet yet. NOID above is ready to spend or trade.</p>'}
+        <p class="row">
+          <a href="/wallet" data-link>Open the wallet →</a>
+          ${me ? (linked ? '<span class="pill">Linked to this key ✓</span> <button id="unlink">Unlink</button>' : '<button id="link">Link this wallet to my key</button>') : '<button id="keyforwallet">Create a key for this wallet</button>'}
+          <a href="/address/${esc(onchain.address)}" data-link>Full address page →</a>
+        </p>
+        <p class="fine" id="wnote">The address is public chain data. The seed and passphrase behind it never leave this browser, and no server can spend from it.</p>`;
+      $('wcopy').onclick = () => navigator.clipboard?.writeText(onchain.address).then(() => ($('wcopied').textContent = ' copied'));
+      for (const b of $('wcard').querySelectorAll('[data-copy]')) b.onclick = () => navigator.clipboard?.writeText(b.dataset.copy).then(() => { b.textContent = '✓'; setTimeout(() => { b.textContent = '⧉'; }, 1200); });
+      const note = (m, bad) => { const el = $('wnote'); el.className = bad ? 'msg err' : 'fine'; el.textContent = m; };
+      if ($('link')) $('link').onclick = async () => { try { await api('link', { address: onchain.address }); pages.account(); } catch (e) { note(e.message, true); } };
+      if ($('unlink')) $('unlink').onclick = async () => { try { await api('unlink', {}); pages.account(); } catch (e) { note(e.message, true); } };
+      if ($('keyforwallet')) $('keyforwallet').onclick = () => makeKey($('keyforwallet'), 'page');
+    } else {
+      $('wcard').innerHTML = `<h2>Your wallet is your account</h2>
+        <p>Keys, credits and the watchlist are kept in <b>this browser</b>. A wallet makes the identity stronger: its <span class="mono">o1…</span> address becomes your account here, and your holdings, trading and credits all hang off it.</p>
+        <p><a href="/wallet" data-link>Make a wallet →</a> <span class="muted">it is made on this device; the seed never reaches this server</span></p>`;
+    }
+
     if (!me) {
-      box.innerHTML = `<h2>Your account</h2>
-        <p>No email or password: your account is a secret key. Create one free, then add credits.</p>
-        <p><button id="create">Create free account</button></p>
+      box.innerHTML = `<h2>${onchain ? 'A key is still worth having' : 'Your account'}</h2>
+        <p>${onchain ? 'Your wallet already works here: it shows your holdings and it trades. An API key adds the watchlist, the API itself and credits you buy, and it is remembered in this browser so you only do this once.' : 'No email and no password: an account is a free secret key, remembered in this browser, and you can add credits to it with NOID.'}</p>
+        <p><button id="create">${onchain ? 'Create a key for this wallet' : 'Create a free key'}</button></p>
         <p class="muted">Already have a key?</p>
-        <div class="row"><input id="kin" placeholder="nk_…" autocomplete="off"><button id="login">Log in</button></div><p id="aerr" class="muted"></p>`;
-      $('create').onclick = async () => {
-        $('create').disabled = true;
-        try {
-          const a = await api('account', {});
-          saveKey(a.key);
-          box.innerHTML = `<h2>Your account key</h2><p><b>Save this key now.</b> It is your login, it is shown only once, and it cannot be recovered. Anyone who has it can use your credits, so keep it secret (send it as the <code>x-api-key</code> header rather than in URLs). If you lose it, the credits on it are lost too; for a paid account, support can help if you still have your payment receipts.</p>
-            <p class="big" style="word-break:break-all">${esc(a.key)}</p>
-            <div class="row"><button id="copy">Copy key</button><button id="saved">I saved it</button></div>`;
-          $('copy').onclick = () => navigator.clipboard?.writeText(a.key).then(() => ($('copy').textContent = 'Copied'));
-          $('saved').onclick = () => pages.account();
-        } catch (e) { $('aerr').textContent = e.message; $('create').disabled = false; }
-      };
+        <div class="row"><input id="kin" placeholder="nk_…" autocomplete="off"><button id="login">Use it</button></div><p id="aerr" class="muted"></p>`;
+      $('create').onclick = () => makeKey($('create'), 'box');
       $('login').onclick = async () => {
         saveKey($('kin').value.trim());
         try { await api('me'); pages.account(); } catch { saveKey(''); $('aerr').textContent = 'That key was not found.'; }
@@ -4447,6 +4513,12 @@ async function render() {
   document.body.classList.toggle('widepage', onEx);
   const demoOn = new URLSearchParams(location.search).get('demo') === '1';
   for (const a of document.querySelectorAll('header a.explore, #menunav a[href^="/explore"]')) a.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
+  // A wallet in this browser is the identity, so the menu says so instead of offering a sign-up.
+  try {
+    const wid = WalletDex.identity();
+    const acctLink = document.querySelector('#menunav a[href="/account"]');
+    if (wid && acctLink) acctLink.innerHTML = `Wallet <span class="mono">${esc(wid.address.slice(0, 6))}…${esc(wid.address.slice(-4))}</span> · API &amp; Credits`;
+  } catch {}
   const screener = document.querySelector('[data-dock="screener"]');
   const watch = document.querySelector('[data-dock="watch"]');
   const alerts = document.querySelector('[data-dock="alerts"]');

@@ -27,8 +27,9 @@ module.exports = function intents(rpc, tipNow = () => null) {
     if (side !== 'buy' && side !== 'sell') throw bad('side must be buy or sell');
     const raw = String(params.get('amount') || '').trim();
     if (side === 'buy' ? !/^\d{1,12}(\.\d{1,6})?$/.test(raw) : !/^\d{1,24}$/.test(raw)) throw bad(side === 'buy' ? 'amount must be NOID with up to 6 decimals' : 'sell whole tokens');
+    // Both sides are sized in micro-units on chain: NOID for a buy, token units (1e6 per whole token) for a sell.
     const [w, f = ''] = raw.split('.');
-    const gross = side === 'buy' ? (BigInt(w) * 1_000_000n + BigInt((f + '000000').slice(0, 6))).toString() : BigInt(raw).toString();
+    const gross = side === 'buy' ? (BigInt(w) * 1_000_000n + BigInt((f + '000000').slice(0, 6))).toString() : (BigInt(raw) * 1_000_000n).toString();
     if (gross === '0') throw bad('amount must be positive');
     const slip = Number(params.get('slippage') ?? 1);
     if (!(slip >= 0 && slip <= 50)) throw bad('slippage must be 0–50%');
@@ -66,7 +67,7 @@ module.exports = function intents(rpc, tipNow = () => null) {
     if (out && typeof out === 'object' && (out.signature || out.signed || out.signed_tx)) throw bad('refusing a signed payload', 502);
     return {
       mock: false, signable: true, sender, request: req,
-      unsigned: typeof out === 'string' ? out : out?.intent ?? out?.unsigned ?? out?.hex ?? null,
+      unsigned: typeof out === 'string' ? out : out?.unsigned_intent_hex ?? out?.intent ?? out?.unsigned ?? out?.hex ?? null,
       detail: out && typeof out === 'object' ? out : null,
       note: 'Unsigned. Sign it in your own wallet, then submit the signed bytes. This site never holds keys.',
       submit_rpc: submitHint,

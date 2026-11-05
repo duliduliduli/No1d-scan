@@ -155,6 +155,19 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('me'))[0], 401);
   assert.strictEqual((await get('me', { headers: { 'x-api-key': 'nk_' + '0'.repeat(40) } }))[0], 401);
 
+  // Wallet as account: a key links one o1… address, an address belongs to one account, and unlink clears it.
+  assert.strictEqual((await post('link', { address: 'o1acdefghjkmnpqr' }))[0], 401, 'linking needs a key');
+  assert.strictEqual((await post('link', { address: 'not-an-address' }, K))[0], 400);
+  const [, linked] = await post('link', { address: 'o1acdefghjkmnpqr' }, K);
+  assert.strictEqual(linked.wallet, 'o1acdefghjkmnpqr');
+  assert.strictEqual((await get('me', { headers: K }))[1].wallet, 'o1acdefghjkmnpqr', 'the account answers with its wallet');
+  const [, rival] = await post('account', {});
+  assert.strictEqual((await post('link', { address: 'o1acdefghjkmnpqr' }, { 'x-api-key': rival.key }))[0], 409, 'a wallet cannot sit on two accounts');
+  assert.strictEqual((await get('me', { headers: { 'x-api-key': rival.key } }))[1].wallet, null);
+  assert.strictEqual((await post('unlink', {}, K))[1].wallet, null);
+  assert.strictEqual((await get('me', { headers: K }))[1].wallet, null);
+  await post('link', { address: 'o1acdefghjkmnpqr' }, K);
+
   // NOID top-up: unique amount -> matching slot appears -> credited once the tip is 18 blocks past it.
   const credits = async () => (await get('me', { headers: K }))[1].credits;
   const mine = async (n) => { tip += n; await tick(); };
@@ -547,6 +560,10 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="balauto"/);
   assert.doesNotMatch(homeHtml, /bottom:\s*56px/);
   assert.match(homeHtml, /data-star/);
+  assert.match(homeHtml, /id="wcard"/, 'the account page leads with the wallet card');
+  assert.match(homeHtml, /no1d_wallet_identity_v1/, 'the site knows the browser identity key');
+  assert.match(homeHtml, /WalletDex\.identity/, 'the account page can read the wallet identity');
+  assert.doesNotMatch(homeHtml, /Create free account/, 'no sign-up wall in front of a wallet that already exists');
   assert.match(homeHtml, /1W/);
   assert.match(homeHtml, /tokenchart/);
   assert.match(homeHtml, /Total you pay/);
@@ -839,6 +856,39 @@ test('indexer + api', async (t) => {
   const [, off] = await get('swap/quote?token=gcat&side=buy&amount=100');
   assert.strictEqual(off.enabled, false);
   assert.strictEqual(off.signable, false);
+
+  // Trade intents: off until SWAP_ENABLED, then sized in micro-units on both sides, and the node's own
+  // unsigned_intent_hex field is the payload the wallet signs.
+  assert.strictEqual((await get('swap/intent?token=...1&side=buy&amount=1&sender=o1acdefghjkmnpqr'))[0], 403, 'intents are off by default');
+  process.env.SWAP_ENABLED = 'true';
+  const seenIntents = [];
+  const INTENT_TOKEN = 'ef'.repeat(32);
+  node.prepareNativeIntent = ({ owner, request }) => {
+    seenIntents.push({ owner, request });
+    return { plan_id: 'p1', intent_id: 'i1', owner, unsigned_intent_hex: 'deadbeef', review: { quoted_output: '282892894', minimum_output: '280063966', fee_micronoid: '9800', valid_until: 12 } };
+  };
+  const [, buyI] = await get(`swap/intent?token=${INTENT_TOKEN}&side=buy&amount=1.5&slippage=1&sender=o1acdefghjkmnpqr`);
+  assert.strictEqual(buyI.signable, true);
+  assert.strictEqual(buyI.unsigned, 'deadbeef', 'the node field is read as the unsigned payload');
+  assert.strictEqual(buyI.detail.review.quoted_output, '282892894');
+  assert.strictEqual(seenIntents[0].request.gross_input, '1500000', 'a buy is sized in micro-NOID');
+  assert.strictEqual(seenIntents[0].request.slippage_bps, 100);
+  assert.strictEqual(seenIntents[0].request.buy, true);
+  const [, sellI] = await get(`swap/intent?token=${INTENT_TOKEN}&side=sell&amount=5&slippage=1&sender=o1acdefghjkmnpqr`);
+  assert.strictEqual(sellI.request.gross_input, '5000000', 'a sell is whole tokens scaled to micro-units');
+  assert.strictEqual(seenIntents[1].request.buy, false);
+  assert.strictEqual((await get(`swap/intent?token=${INTENT_TOKEN}&side=hold&amount=1&sender=o1acdefghjkmnpqr`))[0], 400);
+  assert.strictEqual((await get(`swap/intent?token=${INTENT_TOKEN}&side=buy&amount=1`))[0], 400, 'a sender is required');
+  assert.strictEqual((await post('swap-submit', { signed: 'not hex' }))[0], 400);
+  assert.strictEqual((await post('swap-submit', { signed: 'deadbeef' }))[0], 400, 'a node that cannot submit says so');
+  node.submitTxIntent = ({ hex }) => ({ txid: 'aa'.repeat(32), accepted: hex.length / 2 });
+  const [, relayed] = await post('swap-submit', { signed: 'deadbeef' });
+  assert.strictEqual(relayed.submitted, true, 'already-signed bytes are relayed');
+  assert.strictEqual(relayed.result.accepted, 4);
+  delete node.submitTxIntent;
+  delete node.prepareNativeIntent;
+  delete process.env.SWAP_ENABLED;
+
   const [, qte] = await get('swap/quote?demo=1&token=gcat&side=buy&amount=100&slippage=1');
   assert.strictEqual(qte.demo, true);
   assert.strictEqual(qte.signable, false);
@@ -1190,6 +1240,37 @@ test('indexer + api', async (t) => {
   assert.ok(liveWal.trades.length >= 1 && liveWal.pnl.txns >= 1);
   assert.ok(liveWal.balance_points == null);
   assert.ok(liveWal.usd_points == null);
+
+  // Balances are read from the node's own state pages: kind 2 is one token balance, several pages of the same token
+  // are summed, and every other kind is a market, listing or collection page. The indexed table is only a fallback.
+  const pageHex = (id, units) => '4e4f494441533231' + '0100' + '0200' + id + '00'.repeat(32)
+    + BigInt(units).toString(16).padStart(16, '0').match(/../g).reverse().join('') + '00'.repeat(8);
+  const HEXID = 'ab'.repeat(32); // a real asset id, not a demo slug: the address decoder insists on 32 bytes
+  db.prepare('insert or replace into tokens (id, name, ticker, supply, reserve_micronoid, price_micronoid) values (?, ?, ?, ?, ?, ?)')
+    .run(HEXID, 'Page Coin', 'PAGE', '1000', '1000000', '2000');
+  node.getNativeHoldings = ({ owner }) => ({ owner, height: 1, next: null, holdings: [
+    { kind: 2, slot_index: 1, opening_hex: pageHex(HEXID, 250000000) },
+    { kind: 2, slot_index: 2, opening_hex: pageHex(HEXID, 150000000) },
+    { kind: 2, slot_index: 3, opening_hex: pageHex(HEXID, 0) },
+    { kind: 1, slot_index: 4, opening_hex: pageHex(HEXID, 999000000) },
+  ] });
+  const [, fromNode] = await get('wallet/o1acdefghjkmnpqr');
+  const held = fromNode.holdings.find((h) => h.token_id === HEXID);
+  assert.ok(held, 'the node holdings are used when the node answers');
+  assert.strictEqual(fromNode.holdings.length, 1, 'a market page is not a balance and an empty page is dropped');
+  assert.strictEqual(held.units, '400000000', 'two pages of the same token sum');
+  assert.strictEqual(held.balance, '400');
+  assert.strictEqual(held.ticker, 'PAGE');
+  assert.strictEqual(held.onchain, true);
+  assert.strictEqual(held.value_micronoid, '800000', 'micro-units are scaled against the per-token price');
+  assert.ok(Number.isFinite(held.value_usd));
+  // A node without the method is the refusal case, and a different address keeps the response cache out of it.
+  delete node.getNativeHoldings;
+  await tick();
+  const [, fallback] = await get('wallet/o1qqqqqqqqqqqq');
+  assert.ok(fallback.holdings.some((h) => h.token_id === 'live1' && !h.onchain), 'a node without the method falls back to the indexed table');
+  db.prepare('delete from tokens where id = ?').run(HEXID);
+  await tick();
 
   // USDC: a chain is off until its address is set. An exact base-unit amount marks the profile pending and does not add credits.
   const { solanaCredits, mints, report } = require('./usdc.js');

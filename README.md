@@ -60,6 +60,9 @@ All amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); large values com
 
 ## Wallet
 
+The wallet in a browser is the account. Its public `o1…` address is remembered in `localStorage` (`no1d_wallet_identity_v1`), so the account page, the portfolio and the trade panel all know who you are without a key and without ever seeing a seed. `POST /api/link {address}` attaches that address to an API key (`POST /api/unlink` clears it, one account per address, `409` if taken), and `GET /api/me` answers with `wallet`. Holdings come from the node itself: `paranoid_getNativeHoldings {owner}` lists the address's state pages, a kind-2 page is one token balance (magic `NOIDAS21`, 32-byte asset id, little-endian u64 of micro-units at byte 76), and several pages of the same token are summed. The indexed `token_holders` table is only a fallback for a node that does not answer.
+
+
 `/wallet` is a self-custody Parano1d wallet that runs in the visitor's browser.
 It makes a 24-word seed from the browser's own randomness, derives `o1…`
 addresses on the device, and keeps the seed only as an AES-GCM blob under a

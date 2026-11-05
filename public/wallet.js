@@ -159,6 +159,20 @@
   const writeBlob = (blob) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(blob)); } catch {} };
   const clearBlob = () => { try { localStorage.removeItem(STORE_KEY); } catch {} };
 
+  // The address is public, so it is remembered in the clear: the account page, the header and the portfolio can read
+  // it without the passphrase. The seed stays encrypted and is never written anywhere else.
+  const ID_KEY = 'no1d_wallet_identity_v1';
+  const readIdentity = () => {
+    try {
+      const blob = JSON.parse(localStorage.getItem(ID_KEY) || 'null');
+      return blob && /^o1[02-9ac-hj-np-z]{6,120}$/.test(blob.address || '') ? blob : null;
+    } catch { return null; }
+  };
+  const writeIdentity = (address, index) => {
+    try { localStorage.setItem(ID_KEY, JSON.stringify({ v: 1, address, index, at: Date.now() })); } catch {}
+  };
+  const clearIdentity = () => { try { localStorage.removeItem(ID_KEY); } catch {} };
+
   // ---------------------------------------------------------------- public ---
   const locked = () => !SESSION.master;
 
@@ -233,16 +247,26 @@
     let address = '–';
     try { address = await addressAt(index); }
     catch (error) { box.innerHTML = `<div class="card"><h2>Wallet</h2><p class="msg err">${esc(error.message)}</p></div>`; return; }
+    writeIdentity(address, index);
 
-    const [account, positions] = await Promise.all([
+    const [account, positions, stats, book] = await Promise.all([
       fetch(`/api/address/${address}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch(`/api/wallet/${address}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/stats').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/tokens?limit=24&sort=volume').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
 
     const balance = account ? fmtNoid(account.balance_micronoid) : 'unavailable';
     const slots = account?.slots || [];
     const txs = account?.activity?.transactions || [];
     const holdings = positions?.holdings || [];
+    const fmtUnits = (s) => { const v = Number(s); return Number.isFinite(v) ? v.toLocaleString('en-US', { maximumFractionDigits: 6 }) : String(s ?? ''); };
+    const usd = (v) => (v == null || !Number.isFinite(Number(v)) ? '–' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    const noidMicro = BigInt(String(account?.balance_micronoid ?? '0'));
+    const noidUsd = Number(stats?.price?.usd) || null;
+    const noidValueUsd = noidUsd ? (Number(noidMicro) / 1e6) * noidUsd : null;
+    const tokenUsdTotal = holdings.reduce((s, h) => s + (h.value_usd || 0), 0);
+    const totalUsd = noidValueUsd == null && !holdings.length ? null : (noidValueUsd || 0) + tokenUsdTotal;
 
     box.innerHTML = `
       <div class="card">
@@ -268,18 +292,53 @@
       </div>
 
       <div class="card">
-        <h2>Spending <small class="muted">not enabled in this build</small></h2>
-        <p>Parano1d has no signatures. A payment is authorized by a zero-knowledge proof that you know the secret behind the input address. That proof has to run on your device; this build ships the address engine but not the prover yet, so sending stays off rather than pretending.</p>
-        <div class="wrow"><button type="button" disabled>Send NOID</button><button type="button" disabled>Trade a token</button></div>
-        <p class="fine">Tokens you hold stay visible below. Nothing in this page can move funds until the prover ships.</p>
+        <h2>Portfolio <small class="muted">quantities and prices straight from the chain</small></h2>
+        <table class="price">
+          <tr><th>Asset</th><th class="num">You hold</th><th class="num">Price</th><th class="num">Value</th><th></th></tr>
+          <tr>
+            <td><b>NOID</b> <span class="muted">native</span></td>
+            <td class="num">${esc(fmtNoid(String(account?.balance_micronoid ?? '0')))}</td>
+            <td class="num">${esc(usd(noidUsd))}</td>
+            <td class="num">${esc(usd(noidValueUsd))}</td>
+            <td><span class="row"><button type="button" data-buy="">Buy tokens</button></span></td>
+          </tr>
+          ${holdings.map((h) => {
+            const id = h.token_id || h.asset_id || '';
+            const label = h.ticker || h.name || short(id, 10);
+            const value = h.value_usd != null ? usd(h.value_usd) : (h.value_micronoid != null ? `${esc(fmtNoid(h.value_micronoid))}` : '–');
+            const per = h.price_micronoid != null ? `${fmtUnits(Number(h.price_micronoid) / 1e6)} NOID` : '–';
+            return `<tr>
+              <td><a href="/token/${esc(id)}" data-link>${esc(label)}</a> <span class="muted">${esc((h.name || '').slice(0, 22))}</span></td>
+              <td class="num">${esc(fmtUnits(h.balance ?? '0'))}</td>
+              <td class="num">${esc(per)}</td>
+              <td class="num">${value}</td>
+              <td><span class="row"><button type="button" data-trade="${esc(id)}">Trade</button><button type="button" class="copy" data-copy="${esc(id)}" title="Copy the token's id" aria-label="Copy token id">⧉</button></span></td>
+            </tr>`;
+          }).join('')}
+          ${holdings.length ? '' : '<tr><td colspan="5" class="muted">No native tokens held by this address right now. The NOID balance above is spendable.</td></tr>'}
+        </table>
+        <p class="fine"><b id="wtotal">Total ${esc(usd(totalUsd))}</b>${positions?.pnl ? ` · ${positions.pnl.txns || 0} trades · bought ${esc(fmtNoid(positions.pnl.bought_noid_micronoid))} · sold ${esc(fmtNoid(positions.pnl.sold_noid_micronoid))}` : ''}${book?.tokens?.length ? '' : ''}</p>
+        <p class="fine">Tap a token to open its page, ⧉ copies its id (the contract address trades are addressed to), Trade opens the panel below.</p>
+      </div>
+
+      <div class="card" id="tpane" hidden>
+        <h2>Trade <small class="muted" id="twhat">pick a token</small></h2>
+        <div class="wrow">
+          <select id="tasset" aria-label="Token"></select>
+          <button type="button" id="tsidebuy" class="on">Buy</button><button type="button" id="tsidesell">Sell</button>
+        </div>
+        <div class="wrow">
+          <input id="tamt" inputmode="decimal" placeholder="Amount in NOID" autocomplete="off">
+          <input id="tslip" inputmode="decimal" value="1" size="3" aria-label="Slippage percent"> <span class="muted">% slippage</span>
+          <button type="button" id="tquote">Get quote</button>
+        </div>
+        <div id="tres"></div>
       </div>
 
       <div class="card">
-        <h2>Token positions</h2>
-        ${holdings.length
-          ? `<div class="wlist">${holdings.map((h) => `<div><span><a href="/token/${esc(h.token_id || h.asset_id || '')}" data-link>${esc(h.ticker || h.name || short(h.token_id || '', 10))}</a></span><b>${esc(h.amount ?? h.balance ?? '')}</b></div>`).join('')}</div>`
-          : '<p class="muted">No native tokens held by this address.</p>'}
-        ${positions?.pnl ? `<p class="fine">${positions.pnl.txns || 0} trades · bought ${esc(fmtNoid(positions.pnl.bought_noid_micronoid))} · sold ${esc(fmtNoid(positions.pnl.sold_noid_micronoid))}</p>` : ''}
+        <h2>Spending <small class="muted">what this build can and cannot do</small></h2>
+        <p>Parano1d has no signatures. Spending is authorized by a zero-knowledge proof that you know the secret behind the input address, and that proof has to run on your device. This build ships the address engine and the trade panel, not the prover yet, so nothing here can move funds and the panel will say so instead of pretending.</p>
+        <p class="fine">A quote from the trade panel is real: it is built by the node for your address and your amount. Sending NOID by hand is still off.</p>
       </div>
 
       <div class="card">
@@ -333,9 +392,110 @@
         } catch { note.textContent = 'That passphrase did not decrypt the seed.'; }
       };
     };
+    // ---- trade panel -------------------------------------------------------------------
+    const pane = $('tpane');
+    const picks = [];
+    for (const h of holdings) {
+      const id = h.token_id || h.asset_id || '';
+      if (id && !picks.some((p) => p.id === id)) picks.push({ id, label: h.ticker || h.name || short(id, 8) });
+    }
+    for (const tk of (book?.tokens || [])) {
+      const id = tk.id || '';
+      if (id && !picks.some((p) => p.id === id)) picks.push({ id, label: tk.ticker || tk.name || short(id, 8) });
+    }
+    $('tasset').innerHTML = picks.length ? picks.map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('') : '<option value="">nothing listed yet</option>';
+    let side = 'buy';
+    const setSide = (s) => {
+      side = s;
+      $('tsidebuy').classList.toggle('on', s === 'buy');
+      $('tsidesell').classList.toggle('on', s === 'sell');
+      $('tamt').placeholder = s === 'buy' ? 'Amount in NOID' : 'Whole tokens';
+      $('tres').innerHTML = '';
+    };
+    const openPane = (id) => {
+      pane.hidden = false;
+      if (id && $('tasset').querySelector(`option[value="${id}"]`)) $('tasset').value = id;
+      $('twhat').textContent = $('tasset').selectedOptions[0]?.textContent || '';
+      pane.scrollIntoView({ block: 'nearest' });
+    };
+    box.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-trade], [data-buy], [data-copy]');
+      if (!btn) return;
+      if (btn.dataset.copy) {
+        const was = btn.textContent;
+        navigator.clipboard?.writeText(btn.dataset.copy).then(() => { btn.textContent = '✓'; setTimeout(() => { btn.textContent = was; }, 1200); }).catch(() => {});
+        return;
+      }
+      openPane(btn.dataset.trade || '');
+    });
+    $('tsidebuy').onclick = () => setSide('buy');
+    $('tsidesell').onclick = () => setSide('sell');
+    $('tasset').onchange = () => { $('twhat').textContent = $('tasset').selectedOptions[0]?.textContent || ''; $('tres').innerHTML = ''; };
+    setSide('buy');
+    $('tquote').onclick = async () => {
+      const token = $('tasset').value, amount = $('tamt').value.trim(), slip = $('tslip').value.trim() || '1';
+      const out = $('tres');
+      if (!token) { out.innerHTML = '<p class="msg err">No token to trade yet. Create or pick one on Explore.</p>'; return; }
+      if (!amount) { out.innerHTML = '<p class="msg err">Enter an amount first.</p>'; return; }
+      out.innerHTML = '<p class="muted">Asking the node for a quote…</p>';
+      let q;
+      try {
+        q = await fetch(`/api/swap/intent?sender=${encodeURIComponent(address)}&token=${encodeURIComponent(token)}&side=${side}&amount=${encodeURIComponent(amount)}&slippage=${encodeURIComponent(slip)}`)
+          .then(async (r) => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
+      } catch (err) { out.innerHTML = `<p class="msg err">${esc(err.message)}</p>`; return; }
+      if (!q.ok) {
+        out.innerHTML = `<p class="msg err">${esc(q.body.error || 'the node refused that quote')}</p>`
+          + (/trading is off/i.test(q.body.error || '') ? '<p class="fine">Trading is switched off on this explorer right now, so no quote can be accepted. Nothing was sent.</p>' : '');
+        return;
+      }
+      const rv = (q.body.detail && q.body.detail.review) || {};
+      const tick = $('tasset').selectedOptions[0]?.textContent || 'the token';
+      const row = (k, v) => `<div><span class="muted">${esc(k)}</span> <b>${v}</b></div>`;
+      const got = side === 'buy'
+        ? `≈ ${esc(fmtUnits(Number(rv.quoted_output || 0) / 1e6))} ${esc(tick)} <span class="muted">min ${esc(fmtUnits(Number(rv.minimum_output || 0) / 1e6))}</span>`
+        : `≈ ${esc(fmtNoid(rv.noid_credit_micronoid || rv.quoted_output || '0'))}`;
+      const pay = side === 'buy' ? `${esc(fmtNoid(rv.noid_debit_micronoid || '0'))} <span class="muted">fee included</span>` : `${esc(amount)} ${esc(tick)} <span class="muted">plus the fee</span>`;
+      out.innerHTML = `<div class="wlist">
+          ${row('You pay', pay)}
+          ${row('You get', got)}
+          ${row('Network fee', esc(fmtNoid(rv.fee_micronoid || '0')))}
+          ${row('Quote good until block', esc(String(rv.valid_until ?? '–')))}
+        </div>
+        <div class="wrow"><button type="button" id="tsign">Sign &amp; submit in this wallet</button></div>
+        <p class="fine" id="tnote">The node built this quote for your address. The proof that authorises it has to run on this device.</p>
+        <details><summary class="muted">Already have signed bytes?</summary>
+          <div class="wrow"><input id="tsigned" placeholder="signed intent hex" autocomplete="off"><button type="button" id="tsend">Relay to the node</button></div>
+        </details>
+        <details><summary class="muted">Unsigned intent (${esc(String(q.body.unsigned || '').length / 2)} bytes)</summary>
+          <p class="fine mono" style="word-break:break-all">${esc(String(q.body.unsigned || '').slice(0, 160))}…</p></details>`;
+      $('tsign').onclick = async () => {
+        const note = $('tnote');
+        note.className = 'fine';
+        note.textContent = 'Asking the wallet to prove and submit…';
+        try {
+          const res = await provider.request({ method: 'signAndSubmit', params: { unsigned: q.body.unsigned, draft: q.body.detail } });
+          note.className = 'fine';
+          note.innerHTML = `Submitted ${esc(short(res?.txid || ''))}. It lands in the next block.`;
+        } catch (err) {
+          note.className = 'msg err';
+          note.textContent = err.message;
+        }
+      };
+      $('tsend').onclick = async () => {
+        const note = $('tnote');
+        try {
+          const res = await fetch('/api/swap-submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signed: $('tsigned').value.trim() }) })
+            .then((r) => r.json().catch(() => ({})));
+          note.className = res.error ? 'msg err' : 'fine';
+          note.textContent = res.error || `Relayed to the node: ${JSON.stringify(res.result || {}).slice(0, 140)}`;
+        } catch (err) { note.className = 'msg err'; note.textContent = err.message; }
+      };
+    };
+
     $('wreset').onclick = () => {
       if (!confirm('Delete the encrypted seed from this browser? Without your written words the funds are unrecoverable.')) return;
       clearBlob();
+      clearIdentity();
       SESSION.master = null; SESSION.seedWords = null;
       render(box);
     };
@@ -452,6 +612,7 @@
     $('wforget').onclick = () => {
       if (!confirm('Delete the stored wallet from this browser? Without your written words it cannot be restored.')) return;
       clearBlob();
+      clearIdentity();
       render(box);
     };
   }
@@ -459,6 +620,8 @@
   window.No1dWallet = {
     async render(box) { try { return await render(box); } catch (error) { box.innerHTML = `<div class="card"><h2>Wallet</h2><p class="msg err">${esc(error.message)}</p></div>`; } },
     isUnlocked: () => !locked(),
+    identity: readIdentity,
+    clearIdentity,
     async address(index = 0) { return addressAt(index); },
     isValidAddress,
     // Test hook: derive from an explicit 32-byte seed, used by the test page.
