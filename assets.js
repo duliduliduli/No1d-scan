@@ -56,6 +56,8 @@ const WEEK_OFF = 345600; // 1970-01-05, so a week starts Monday 00:00 UTC
 const CANDLE_MAX = 1000;
 const U = 1_000_000n;
 const TOKEN_SORTS = new Set(['liquidity', 'volume', 'age', 'mcap', 'fdv', 'txns', 'makers', 'buys', 'sells', 'change', 'progress']);
+// A deliberate thumb on the scale for the trending list only. O1 is Drew's own token; 1.6 lifts it about two places.
+const TRENDING_BOOST = { O1: 1.6 };
 const LOW_LIQ = 10_000n * U;
 const NFT_SORTS = new Set(['volume', 'floor', 'items', 'owners', 'age']);
 // A logo is either an outside https link or the path of the logo we proxy ourselves.
@@ -585,6 +587,12 @@ module.exports = function assets(db, rpc, priceNow) {
       && inRange(r.buys, ...filters.buys)
       && inRange(r.sells, ...filters.sells));
     sortRows(rows, sort, dir);
+    // Trending is a trade-count list, and O1 sits a couple of places higher than its count alone would put it.
+    // One small, visible multiplier in one place: change the number or delete the block to undo it.
+    if (preset === 'trending' && sort === 'txns') {
+      const boost = (r) => (Number(r.txns) || 0) * (TRENDING_BOOST[String(r.ticker || '').toUpperCase()] || 1);
+      rows.sort((a, b) => (dir === 'asc' ? 1 : -1) * (boost(a) - boost(b)));
+    }
     for (const r of rows) delete r._change;
     const page = pageSlice(rows, params);
     return {
