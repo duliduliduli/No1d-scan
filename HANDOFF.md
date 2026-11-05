@@ -249,7 +249,61 @@ now stars too, stored as `addr:o1…` in the same table, and
   catalog. `ids` now filters on its own; `preset=watch` with no `ids` returns an
   empty list, which is the honest answer.
 
-## 13. Quick verification commands
+## 13. Native token names, tickers and logos (added 2026-11-05)
+
+**The bug that hid the names.** `assets.js` read the native catalogue with
+`rpc('getNativeCatalog', { kind, limit })`. The node takes **positional** params
+`(kind, cursor, limit)` and refuses the object form ("unknown variant `kind`"),
+so `nativeSnapshot()` threw on every sync, `sync()` swallowed it behind
+`status.error`, and the screener fell back to whatever the `tokens` table already
+held: stale rows, prices from indexed trades, and a five-entry hand-curated file
+(`tokens-extra.json`) for labels. Sixteen of seventeen tokens therefore showed
+`Token <hex>`. Fix: `[kind, cursor || null, 64]`. Re-check with
+`curl` — see the verification commands below.
+
+**Where a name comes from.** The chain stores no label, only a metadata digest in
+the kind-1 FungibleDefinition opening (`opening_hex[184:248]`, fields 5 and 6
+little-endian). That digest addresses a manifest on the protocol's own media
+service, `https://tradedata.parano1d.org/metadata/<hash>.json` — the origin the
+official wallet GUI ships with (`noid_gui/src/assets/media/transport.rs`).
+
+**Why we verify.** The manifest is content addressed: the hash is BLAKE3 over
+`b"Parano1d/native-metadata/v1\0" || canonical_bytes`, where canonical bytes are
+serde JSON in struct order plus a trailing newline. `blake3.js` implements that
+in pure JS because Node's crypto has no BLAKE3 and this repo takes no
+dependencies. It is cross-checked two ways: against the reference `blake3` crate
+(1.8.5) for lengths 0-5000 (so the chunk/parent tree is covered, not just the
+single-chunk path, where merging the last chunk eagerly produces a plausible
+wrong hash), and against 16 live manifests. A manifest that fails verification is
+cached as unusable and the token keeps its placeholder.
+
+**Files.** `blake3.js` (the hash), `metadata.js` (catalogue decode -> fetch ->
+verify -> `asset_meta` / `asset_label` / `asset_image`), `test-meta.js` (the
+suite), and in `server.js`: the module mount, `meta.start()` under
+`require.main`, `GET /api/asset-image/<hash>.png`, and `metadata` in
+`/api/stats`.
+
+**Caching and cost.** One fetch per asset, ever: `asset_meta` is keyed by hash,
+images live in `asset_image`, labels in `asset_label` keyed by asset id. Budget 4
+manifests per pass (8 on the two boot passes, 8 s / 40 s / 120 s), 8 s timeout,
+16 KiB manifests, 1.5 MiB images. Images are proxied so visitors never touch the
+media service. `MEDIA_ORIGIN` / `METADATA_EVERY_MS` / `METADATA_PER_PASS` /
+`METADATA_OFF` tune it.
+
+**Label precedence** (in `nativeSnapshot`): verified label -> catalogue
+`metadata`/`name` -> curated file -> `Token <hex>`. `assets.js` ignores a label
+whose name looks synthetic, so one sync cannot freeze a placeholder in as if it
+were real, and reads `asset_label` inside a `try` so a database where
+`metadata.js` has not run yet still syncs.
+
+**Still open.** `created_height` and per-token `holders` are `null` for tokens
+that came from the catalogue: the catalogue item carries neither (only
+`key`/`primary`/`related`), and no curated entry exists for them. Deriving them
+needs a create-transaction lookup (the launch definition, kind 48) — not
+attempted here. `NOIDCAT` has no published manifest, so its name comes from the
+curated file.
+
+## 14. Quick verification commands
 
 
 Local:
@@ -263,6 +317,24 @@ Production (read-only, safe):
 curl -s https://parano1d-scan.com/api/health
 curl -s -H 'sec-fetch-site: same-origin' https://parano1d-scan.com/api/stats | head -c 400
 for w in 24h 7d 30d all; do curl -s -H 'sec-fetch-site: same-origin' "https://parano1d-scan.com/api/miners?window=$w" | head -c 80; echo; done
+```
+
+Label and logo check (what the names should look like):
+```bash
+curl -s -H 'sec-fetch-site: same-origin' 'https://parano1d-scan.com/api/tokens?limit=40' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['count'], sum(1 for t in d['tokens'] if not t['name'].startswith('Token ')), 'named'); print(*[t['ticker'] for t in d['tokens']])"
+curl -s -H 'sec-fetch-site: same-origin' https://parano1d-scan.com/api/stats \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['metadata'])"
+# every token except NOIDCAT (no published manifest) must be named
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' -H 'sec-fetch-site: same-origin' \
+  "https://parano1d-scan.com$(curl -s -H 'sec-fetch-site: same-origin' 'https://parano1d-scan.com/api/tokens?limit=40' | python3 -c "import sys,json; print([t['logo'] for t in json.load(sys.stdin)['tokens'] if t.get('logo')][0])")"
+```
+
+The catalogue itself, on the node (this is the call that must be positional):
+```bash
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"paranoid_getNativeCatalog","params":["markets",null,64]}' \
+  http://127.0.0.1:9601 | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(len(r['items']), 'markets at height', r['height'])"
 ```
 
 The `sec-fetch-site: same-origin` header imitates the site's own pages. Without it, most routes need an `x-api-key` (`/api/stats` and `/api/health` are open).

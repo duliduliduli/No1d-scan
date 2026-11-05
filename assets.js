@@ -58,6 +58,9 @@ const U = 1_000_000n;
 const TOKEN_SORTS = new Set(['liquidity', 'volume', 'age', 'mcap', 'fdv', 'txns', 'makers', 'buys', 'sells', 'change', 'progress']);
 const LOW_LIQ = 10_000n * U;
 const NFT_SORTS = new Set(['volume', 'floor', 'items', 'owners', 'age']);
+// A logo is either an outside https link or the path of the logo we proxy ourselves.
+const LOGO_OK = /^(https:\/\/[^\s"'<>]+|\/api\/asset-image\/[0-9a-f]{64}\.png)$/;
+const logoOf = (v) => (typeof v === 'string' && LOGO_OK.test(v) ? v : null);
 
 module.exports = function assets(db, rpc, priceNow) {
   db.exec(`
@@ -415,7 +418,7 @@ module.exports = function assets(db, rpc, priceNow) {
       spark = spark.slice(-16);
     }
     return {
-      id: raw.id, name: raw.name, ticker: raw.ticker, logo: typeof raw.logo === 'string' && /^https:\/\//.test(raw.logo) ? raw.logo : null,
+      id: raw.id, name: raw.name, ticker: raw.ticker, logo: logoOf(raw.logo),
       creator: raw.creator || null, graduated: !!raw.graduated,
       launch: raw.launch === 'direct' || raw.launch === 'launchpad' ? raw.launch : (curve ? 'launchpad' : null),
       links: linksOf(raw.links),
@@ -1341,7 +1344,9 @@ module.exports = function assets(db, rpc, priceNow) {
     const items = [];
     let cursor = null;
     for (let i = 0; i < maxPages; i++) {
-      const page = await rpc('getNativeCatalog', { kind, limit: 64, ...(cursor && { cursor }) }, 10_000);
+      // The node takes positional params: (kind, cursor, limit). Passing an object here
+      // was silently failing the whole snapshot, which is why labels and holders froze.
+      const page = await rpc('getNativeCatalog', [kind, cursor || null, 64], 10_000);
       if (Array.isArray(page?.items)) items.push(...page.items);
       if (!page?.next) break;
       cursor = page.next;
@@ -1372,6 +1377,15 @@ module.exports = function assets(db, rpc, priceNow) {
   }
 
   async function nativeSnapshot() {
+    // Names written by metadata.js come from a manifest verified against the chain, so
+    // they outrank the curated file and the "Token <hex>" placeholder. Placeholders are
+    // ignored here, otherwise one sync would freeze them in as if they were real.
+    const synthetic = (s) => !s || /^token [0-9a-f]{8}$/i.test(String(s));
+    // metadata.js owns asset_label; on a database where it has not run yet there is
+    // nothing to read and every row falls back to the curated file or the placeholder.
+    let labels = [];
+    try { labels = db.prepare('select id, name, ticker, logo from asset_label').all(); } catch {}
+    const stored = new Map(labels.filter((r) => !synthetic(r.name)).map((r) => [r.id, r]));
     const [markets, cols, listings] = await Promise.all([nativePages('markets'), nativePages('collections'), nativePages('nft_listings')]);
     const tokens = [], pools = [];
     for (const m of markets) {
@@ -1389,14 +1403,15 @@ module.exports = function assets(db, rpc, priceNow) {
       const supplyFromChain = backAmt && backAmt > 0n ? String(backAmt / BACKING_PER_TOKEN) : null;
       const quoted = pick(m, 'price_micronoid', 'spot_price_micronoid');
       const spot = strInt(quoted) ?? await curvePriceMicronoid(id);
+      const held = stored.get(id) || {};
       tokens.push({
-        id, name: pick(meta, 'name') ?? pick(m, 'name') ?? cur.name ?? `Token ${short}`,
-        ticker: pick(meta, 'ticker', 'symbol') ?? pick(m, 'ticker', 'symbol') ?? cur.ticker ?? short.toUpperCase(),
+        id, name: pick(meta, 'name') ?? pick(m, 'name') ?? cur.name ?? held.name ?? `Token ${short}`,
+        ticker: pick(meta, 'ticker', 'symbol') ?? pick(m, 'ticker', 'symbol') ?? cur.ticker ?? held.ticker ?? short.toUpperCase(),
         creator: pick(m, 'creator', 'owner') ?? cur.creator ?? null,
         supply: pick(m, 'whole_tokens', 'supply', 'total_supply') ?? supplyFromChain ?? cur.supply,
         reserve_micronoid: pick(m, 'reserve_micronoid', 'backing_micronoid', 'reserve') ?? pick(m.primary || {}, 'amount_micronoid'),
         created_height: pick(m, 'created_height', 'height') ?? cur.created_height ?? null,
-        logo: pick(meta, 'image', 'logo') ?? cur.logo ?? null, graduated: !!pick(m, 'graduated'),
+        logo: pick(meta, 'image', 'logo') ?? cur.logo ?? held.logo ?? null, graduated: !!pick(m, 'graduated'),
         price_micronoid: spot,
         launch: 'launchpad',
       });

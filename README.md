@@ -89,6 +89,54 @@ The seed writes the same 48-byte `wallet.key` a node reads (`noid_plain_key_1`
 plus 32 secret bytes), so it can be exported from the wallet and used to run the
 chain's own wallet, or imported from one.
 
+## Native token names, tickers and logos
+
+The chain carries no label. What it carries is a **metadata digest**: the
+FungibleDefinition opening (kind 1) of every launched token commits to a 32-byte
+hash, and that hash addresses a manifest published by the protocol's own media
+service (`https://tradedata.parano1d.org/`, the same origin the official wallet
+ships with). So a name is sourced like this:
+
+1. `paranoid_getNativeCatalog ["markets", null, 64]` — **positional params**:
+   `(kind, cursor, limit)`. Sending an object here is refused by the node, which
+   is what silently froze every catalogue read (and with it names, holders and
+   creation heights) until 2026-11-05.
+2. The market's kind-1 related page is a 280-hex opening: 8-byte magic
+   `NOIDAS21`, u16 version, u16 kind, then 16-byte little-endian fields. Fields 5
+   and 6 are the metadata digest, so `opening_hex[184:248]` is the hash.
+3. `GET metadata/<hash>.json` returns `{schema, kind, name, symbol, description,
+   website, image{hash,…}}`.
+4. **The body is verified before it is believed**: BLAKE3 over
+   `b"Parano1d/native-metadata/v1\0" || canonical-bytes` must equal the digest
+   taken from the chain. `blake3.js` is that hash in pure JS (zero
+   dependencies), cross-checked against the reference `blake3` crate and against
+   16 live manifests. A manifest that does not verify is remembered as unusable
+   and the token keeps its `Token <hex>` placeholder rather than showing a name
+   nobody vouched for.
+5. The result is cached in `asset_label` (keyed by asset id) and `asset_meta`
+   (keyed by hash, so one fetch per asset ever), and mirrored onto the `tokens`
+   row. The indexer prefers a verified label over the curated file and over the
+   placeholder, so a later sync cannot wipe a real name.
+
+Logos are proxied and cached by this server (`GET /api/asset-image/<image>.png`,
+one week, immutable) so a visitor's browser never contacts the media service and
+an outage there cannot blank the screener. `tokens-extra.json` stays as the last
+resort for a token whose manifest was never published: as of 2026-11-05 that is
+exactly one of the seventeen, `c9df7529…` (NOIDCAT), which the curated file covers.
+The other sixteen names come from verified manifests — including `e064e05c…` (NO1)
+and `303e1233…` (HUMANO1D / HUMAN), which the placeholder used to hide.
+
+Fetching is bounded: 4 manifests per pass (8 on the boot passes), 8 s timeout,
+16 KiB manifests, 1.5 MiB images, and a failed fetch is cached so nothing
+retries in a loop. `/api/stats` reports progress under `metadata`.
+
+| Env | Default | |
+|---|---|---|
+| `MEDIA_ORIGIN` | `https://tradedata.parano1d.org/` | Media service that serves manifests and images |
+| `METADATA_EVERY_MS` | `600000` | How often the catalogue is re-read after the boot passes |
+| `METADATA_PER_PASS` | `4` | Manifests fetched per pass, so a cold start cannot burst |
+| `METADATA_OFF` | – | `true` disables the refresher (labels stay as they are) |
+
 ## Deploy (one VPS)
 
 1. **Node:** download the Core release and verify its SHA256. `./parano1d --check-hardware` must report `NODE READY`. Install to `/usr/local/bin`, then `cp deploy/parano1d.service /etc/systemd/system/` and `systemctl enable --now parano1d` (it runs as its own `parano1d` user, data in `/var/lib/parano1d`, RPC on `127.0.0.1:9601`). Never expose the RPC port publicly. Check it with `parano1d-cli status`.

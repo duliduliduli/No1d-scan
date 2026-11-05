@@ -815,6 +815,9 @@ function labelFor(address) {
 
 const profiles = require('./profiles.js')(db);
 const assets = require('./assets.js')(db, rpc, () => price.now);
+// Native token names, tickers and logos: decoded from the chain, fetched from the
+// protocol's media service, verified by hash before anything is shown.
+const meta = require('./metadata.js')(db, rpc);
 const boosts = require('./boosts.js')(db, (kind, id, demo) => {
   const params = new URLSearchParams(demo ? 'demo=1' : '');
   if (kind === 'collection') {
@@ -1095,6 +1098,7 @@ const routes = {
       network: networkStats(), txs_24h: q.txs24h.get(Math.floor(Date.now() / 1000) - 86400), price: price.now,
       economics: { ...econ, fee_floor: feeFloor, burned_micronoid: burned.n ? String(burned.s) : null, allocation_until: ALLOCATION_END },
       donate: process.env.DONATE_ADDRESS || null,
+      metadata: meta.status,
     };
   },
 
@@ -1446,6 +1450,15 @@ async function handle(req, res) {
     const id = parts[3] || '';
     const sub = parts[4] ? decodeURIComponent(parts[4]) : '';
     // Account and payment routes: never cached, may take a JSON body. Payments are NOID-only; no card webhooks.
+    // A token's published logo, proxied and cached here so the page never loads it from
+    // the media service and an outage there cannot blank the screener.
+    if (name === 'asset-image' && req.method === 'GET') {
+      const hash = String(id).replace(/\.png$/i, '').toLowerCase();
+      const img = await meta.image(hash);
+      if (!img) return send(404, { error: 'no image for that hash' });
+      res.writeHead(200, { 'content-type': img.media_type, 'cache-control': 'public, max-age=604800, immutable', 'x-content-type-options': 'nosniff', 'access-control-allow-origin': '*' });
+      return res.end(img.bytes);
+    }
     if (name === 'profile-media' && req.method === 'GET') {
       const img = profiles.image(decodeURIComponent(id), sub, url.searchParams);
       if (!img) return send(404, { error: 'not found' });
@@ -1595,6 +1608,7 @@ if (require.main === module) {
   every(pollMarkets, 3600_000);
   every(sweepHolders, HOLDERS_EVERY_MS);
   every(pollNetwork, 60_000);
+  meta.start(); // token names and logos; bounded, cached by hash, never blocks a request
   const watchUsdc = () => bill.pollUsdc().catch((e) => console.error('usdc:', e.message));
   watchUsdc();
   setInterval(watchUsdc, 15_000).unref();
@@ -1602,4 +1616,4 @@ if (require.main === module) {
     console.log(`noid-scan on http://${process.env.HOST || '127.0.0.1'}:${process.env.PORT || 8080}`));
 }
 
-module.exports = { server, tick, db, price, indexer, cacheKey, peerIps, peerConns, maskIp, geoRow, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance, nearestUsd, usdBalance };
+module.exports = { server, tick, db, meta, price, indexer, cacheKey, peerIps, peerConns, maskIp, geoRow, workOf, parseRpc, sweepHolders, pollPrice: () => pollPrice(), pollUsdc: () => bill.pollUsdc(), migrateDb, compressJson, packStats, issuance, nearestUsd, usdBalance };

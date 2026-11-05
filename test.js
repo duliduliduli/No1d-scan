@@ -938,7 +938,9 @@ test('indexer + api', async (t) => {
   process.env.ASSET_PROBE_MS = '0';
   // v2.1.0 nodes have no getAssetSnapshot; sync falls back to paged getNativeCatalog.
   const seenKinds = [];
-  node.getNativeCatalog = ({ kind, limit, cursor }) => {
+  // The node takes positional params -- (kind, cursor, limit) -- and rejects the object
+  // form the explorer used to send, which is what silently froze every catalogue read.
+  node.getNativeCatalog = ([kind, cursor, limit]) => {
     seenKinds.push(kind);
     assert.ok(limit >= 1 && limit <= 64, 'node rejects limits outside 1..=64');
     if (kind === 'markets' && !cursor) return { kind, height: 1, items: [], next: { after_key: 'k1' } };
@@ -956,20 +958,20 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('tokens?ids=' + 'z'.repeat(9000)))[0], 400, 'a runaway ids list is refused');
   db.prepare('delete from tokens').run();
   // an empty catalogue still shows the curated fallback rows
-  node.getNativeCatalog = ({ kind }) => ({ kind, height: 1, items: [], next: null });
+  node.getNativeCatalog = ([kind]) => ({ kind, height: 1, items: [], next: null });
   await tick();
   const curated = require('./tokens-extra.json').map((x) => x.id);
   assert.ok(curated.every((id) => db.prepare('select 1 from tokens where id = ?').get(id)), 'curated fallback tokens are listed when the catalogue is empty');
   // v2.1 emits {key, primary, related}: the asset id is the key minus its class prefix.
   const k2 = 'cd'.repeat(32);
-  node.getNativeCatalog = ({ kind }) => (kind === 'markets'
+  node.getNativeCatalog = ([kind]) => (kind === 'markets'
     ? { kind, height: 1, items: [{ key: `8000${k2}`, primary: { kind: 49, amount_micronoid: '250000' }, whole_tokens: '100000', related: [{ kind: 1, amount_micronoid: '9000000' }] }], next: null }
     : { kind, height: 1, items: [], next: null });
   await tick();
   assert.ok(db.prepare('select * from tokens where id = ?').get(k2), 'a key-shaped catalogue entry stores its token');
   db.prepare('delete from tokens').run();
   // A v2.1 market row as the node really emits it: key/primary/related, no whole_tokens anywhere.
-  node.getNativeCatalog = ({ kind }) => (kind === 'markets'
+  node.getNativeCatalog = ([kind]) => (kind === 'markets'
     ? { kind, height: 1, items: [{ key: `8000${k2}`, primary: { kind: 49, amount_micronoid: '250000' }, related: [{ kind: 1, amount_micronoid: '0' }, { kind: 3, amount_micronoid: '500000000' }] }], next: null }
     : { kind, height: 1, items: [], next: null });
   await tick();
