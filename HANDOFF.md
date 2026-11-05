@@ -305,6 +305,12 @@ curated file.
 
 ## 14. Trading with the built-in wallet (added 2026-11-05)
 
+The engine's final self-check used to refuse every native trade as `Wire(BadMarker)` (it ran the
+SDK's `verify_intent`, which only knows the paged-spend and object families). Fixed 2026-11-05:
+`authorize` decodes with the decoder matching the plan's `intent_kind`. Re-check the real proof
+path without spending anything with `node scripts/check-trade-authorize.mjs <wallet.key> <index>`
+(it ends `authorize OK ... magic: NOIDTO21` and does not submit).
+
 The missing prover is now bundled. `public/noid-trade.wasm` is built from
 `wasm/noid-trade` (source, provenance and build steps in its README), on top of the
 official Parano1d SDK, whose vendored code is Core v2.1.0 byte for byte plus its

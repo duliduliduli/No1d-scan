@@ -278,6 +278,7 @@ dependencies = [
  "noid_core",
  "noid_gkr",
  "noid_poseidon2b",
+ "noid_tx",
  "parano1d-authorization",
  "serde_json",
  "zeroize",

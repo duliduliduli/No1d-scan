@@ -16,6 +16,9 @@ parano1d-authorization = { git = "https://github.com/ignotusnemo/parano1d-sdk", 
 noid_core = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
 noid_poseidon2b = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
 noid_gkr = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
+# The intent families themselves, so the finished trade can be decoded with the decoder that
+# matches it (verify_intent in the SDK only knows the paged-spend and object families).
+noid_tx = { git = "https://github.com/ignotusnemo/parano1d-sdk", rev = "6ecef54dc40a7eed96be1a5481ed744592928b60" }
 serde_json = "1"
 hex = "0.4"
 zeroize = "1.8"

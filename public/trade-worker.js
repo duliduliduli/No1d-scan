@@ -8,7 +8,8 @@ let mod = null;
 
 async function load() {
   if (mod) return mod;
-  const res = await fetch('/noid-trade.wasm?v=1', { cache: 'force-cache' });
+  // Bumped to v=2 when the engine was rebuilt: force-cache kept a stale engine in browsers.
+  const res = await fetch('/noid-trade.wasm?v=2', { cache: 'no-cache' });
   if (!res.ok) throw new Error(`the trade engine is missing (${res.status})`);
   let x;
   const env = { noid_random: (ptr, len) => crypto.getRandomValues(new Uint8Array(x.memory.buffer, ptr, len)) };

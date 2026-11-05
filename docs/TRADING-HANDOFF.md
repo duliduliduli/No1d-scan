@@ -93,6 +93,21 @@ three browser-proving modules. Seed → secret derivation copies Core's
 3. Test artifact, not a bug: Playwright's `route.fetch()` drops `sec-fetch-site`, and the
    server then demands an API key. Pass the header through when intercepting.
 
+4. **Every real trade failed with `Wire(BadMarker)` after the proof was already made.** The
+   engine ended `authorize` with the SDK's `verify_intent`, which only decodes the paged-spend
+   and object intent families (`NOIDV2TX` / `0xA3`). A native trade is a `TradeOwnerIntent`
+   (`NOIDTO21`) and a native operation is a `NativeIntent` (`NOIDNT21`), so that self-check
+   refused the engine's own finished output ~5 s into a proof, before the node ever saw it:
+   the wallet showed `Wire(BadMarker)` and nothing was spent. `authorize` now decodes with the
+   decoder that matches the plan's `intent_kind` (`TradeOwnerIntent` for a trade, `NativeIntent`
+   for an operation) and checks the authorization bundle is present; `finish()` still runs the
+   chain's own verifier over the proof. `scripts/check-trade-authorize.mjs` runs the whole real
+   path (plan -> review -> prove -> finish) from a node `wallet.key` and stops before
+   submitting: `node scripts/check-trade-authorize.mjs ~/parano1d/wallet.key.backup 13`
+   (expected last line: `authorize OK in ... | magic: NOIDTO21`, then `NOT submitted`).
+   **Lesson:** a check that only ever ran on the paged-spend family passed for every plan the
+   tests used; the proof path itself had no test until this script.
+
 ## What to do next
 
 1. **One real trade.** The owner opens https://parano1d-scan.com/wallet, unlocks or creates

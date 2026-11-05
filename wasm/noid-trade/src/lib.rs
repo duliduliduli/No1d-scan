@@ -17,7 +17,13 @@ use noid_poseidon2b::{
     native::compression::Poseidon2bSponge,
     primitives::{derive_address, SpendSecret},
 };
-use parano1d_authorization::{native::NativeOperationPlan, prepare, prove_job, verify_intent, WalletOperation};
+use noid_tx::native_assets::trade::wire::TradeOwnerIntent;
+use noid_tx::native_assets::wire::NativeIntent;
+use parano1d_authorization::native::types::NativeClientIntentKind;
+use parano1d_authorization::native::NativeOperationPlan;
+use parano1d_authorization::prepare;
+use parano1d_authorization::prove_job;
+use parano1d_authorization::WalletOperation;
 use zeroize::{Zeroize, Zeroizing};
 
 type Result<T> = std::result::Result<T, String>;
@@ -64,8 +70,8 @@ pub fn review(json: &[u8]) -> Result<String> {
 /// Proves ownership for the plan and returns the authorized intent as hex.
 pub fn authorize(master: &[u8; 32], index: u32, json: &[u8]) -> Result<String> {
     let p = plan(json)?;
-    let height = p.native_plan.candidate_height;
     let owner = p.native_plan.owner.clone();
+    let kind = p.native_plan.intent_kind;
     let secret = derive_spend_secret(master, index);
     if derive_address(&secret).to_bech32() != owner {
         return Err("this plan is for a different address than the unlocked wallet".into());
@@ -76,7 +82,27 @@ pub fn authorize(master: &[u8; 32], index: u32, json: &[u8]) -> Result<String> {
     drop(secret);
     let response = prove_job(&request)?;
     let intent = pending.finish(&response)?;
-    verify_intent(&intent, height)?;
+    // The finished intent is the family the plan asked for: a native trade is a
+    // TradeOwnerIntent (NOIDTO21) and an operation is a NativeIntent (NOIDNT21). The SDK's
+    // verify_intent() only decodes the paged-spend and object families, so calling it here
+    // refused every native trade with Wire(BadMarker) -- after the proof was already made and
+    // before the node ever saw it. Decode with the decoder that matches the kind instead.
+    // finish() has already run the chain's own verifier over the proof.
+    match kind {
+        NativeClientIntentKind::Trade => {
+            let t = TradeOwnerIntent::from_bytes(&intent).map_err(|e| format!("{e:?}"))?;
+            if t.authorization_bytes.is_empty() {
+                return Err("the finished trade carries no authorization".into());
+            }
+            t.intent.validate_structure().map_err(|e| format!("{e:?}"))?;
+        }
+        NativeClientIntentKind::Operation => {
+            let i = NativeIntent::from_bytes(&intent).map_err(|e| format!("{e:?}"))?;
+            if i.authorization_bytes.is_empty() {
+                return Err("the finished intent carries no authorization".into());
+            }
+        }
+    }
     Ok(hex::encode(intent))
 }
 
