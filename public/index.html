@@ -81,7 +81,9 @@
   .stat[title] { cursor:help }
   /* Above the search field. The closed panel must not take taps: Safari still hit-tests its backdrop-filter layer, and the first iPhone tap must click. */
   .menu { position:relative; z-index:41; margin-left:auto }
-  @media (max-width:640px) { header h1 { order:1 } a.explore { order:2 } #menu { order:3 } #search { order:4; flex-basis:100% } }
+  /* Phones: brand first, then Explore and Favorites together, Wallet, the menu pushed right, the search on its own row. */
+  @media (max-width:899px) { header h1 { order:1 } a.explore { order:2 } a.favlink { order:3 } a.walletbtn { order:4 } #menu { order:5; margin-left:auto } #search { order:6; flex-basis:100% } }
+  /* Narrow phones hide the Wallet button (it stays in the menu), so no extra ordering is needed. */
   a.explore { padding:8px 12px; border:1px solid var(--accent); border-radius:3px; background:var(--accent); color:var(--bg); font:700 12px var(--mono); letter-spacing:.12em; text-transform:uppercase; box-shadow:var(--glow); white-space:nowrap }
   a.explore:hover { text-shadow:none; filter:brightness(1.08); color:var(--bg) }
   a.walletbtn { padding:8px 12px; border:1px solid var(--accent); border-radius:3px; color:var(--accent); font:700 12px var(--mono); letter-spacing:.12em; text-transform:uppercase; white-space:nowrap }
@@ -157,7 +159,7 @@
   button.star.lbl { padding:5px 10px; font-size:13px; letter-spacing:.02em; text-transform:none; vertical-align:0 }
   button.star.lbl.on { color:var(--gold); border-color:var(--gold) }
   a.favlink { padding:8px 12px; border:1px solid var(--line); border-radius:3px; font:700 12px var(--mono); letter-spacing:.12em; text-transform:uppercase; white-space:nowrap }
-  a.favlink:hover { border-color:var(--gold); color:var(--gold) }
+  a.favlink:hover, a.favlink.here { border-color:var(--gold); color:var(--gold) }
   .favcount { display:inline-block; min-width:16px; margin-left:5px; padding:0 4px; border-radius:8px; background:var(--gold); color:var(--bg); font:700 10px/16px var(--mono); text-align:center; vertical-align:1px }
   .favcount[hidden] { display:none }
   .favrow { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); flex-wrap:wrap }
@@ -418,7 +420,6 @@
     #exsort, #exwin, [data-tabs="preset"], .desknote, .deskbit, .paircard { display:none }
     #extools .filters { display:none }
     #extools .filters.open { display:block }
-    a.explore { display:none }
     .dock { display:flex }
     body.pair main { display:flex; flex-direction:column }
     body.pair .pairtools { order:0 }
@@ -639,6 +640,14 @@
   @media (max-width:420px) {
     .donutrow { flex-direction:column; align-items:flex-start }
   }
+  /* Phone header sizes: declared last so they win over the base button rule above. */
+  @media (max-width:899px) { header { gap:10px } a.explore, a.favlink, a.walletbtn { padding:6px 9px; font-size:11px; letter-spacing:.08em } }
+  @media (max-width:430px) {
+    header { gap:8px; padding-top:10px; padding-bottom:10px }
+    header h1 { font-size:13px; letter-spacing:.1em }
+    a.explore, a.favlink { padding:6px 8px; font-size:10px; letter-spacing:.06em }
+    a.walletbtn { display:none }
+  }
   @media (prefers-reduced-motion: reduce) {
     .dot, .ichart svg, tr.new td, .flash, .skel { animation:none }
     .ichart svg { clip-path:none }
@@ -698,7 +707,6 @@
 <nav class="dock mob flex" aria-label="Mobile">
   <a href="/explore" data-link data-dock="screener">Screener</a>
   <button type="button" id="docksearch">Search</button>
-  <a href="/favorites" data-link data-dock="fav">Favorites<span class="favcount" hidden></span></a>
   <a href="/alerts" data-link data-dock="alerts">Alerts</a>
   <button type="button" id="dockmenu">Menu</button>
 </nav>
@@ -4554,7 +4562,7 @@ async function render() {
   feed?.close(); feed = null; clearInterval(ticker); clearInterval(exploreTimer); clearInterval(tokenTimer); clearInterval(usdcTimer); exploreTimer = null; tokenTimer = null; usdcTimer = null;
   unmountPriceChart(); unmountBalChart(); unmountTokenChart(); unmountGlobe();
   const onEx = type === 'explore' || type === 'token' || type === 'collection';
-  for (const a of document.querySelectorAll('#menu nav a, a.explore, a.walletbtn')) {
+  for (const a of document.querySelectorAll('#menu nav a, a.explore, a.favlink, a.walletbtn')) {
     const href = a.getAttribute('href');
     a.classList.toggle('here', href === location.pathname || (onEx && href === '/explore'));
   }
@@ -4568,14 +4576,10 @@ async function render() {
     if (wid && acctLink) acctLink.innerHTML = `Wallet <span class="mono">${esc(wid.address.slice(0, 6))}…${esc(wid.address.slice(-4))}</span> · API &amp; Credits`;
   } catch {}
   const screener = document.querySelector('[data-dock="screener"]');
-  const watch = document.querySelector('[data-dock="watch"]');
   const alerts = document.querySelector('[data-dock="alerts"]');
   if (screener) screener.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
-  if (watch) watch.setAttribute('href', '/explore?preset=watch' + (demoOn ? '&demo=1' : ''));
   if (alerts) alerts.setAttribute('href', demoOn ? '/alerts?demo=1' : '/alerts');
-  const preset = new URLSearchParams(location.search).get('preset');
-  screener?.classList.toggle('on', type === 'explore' && preset !== 'watch');
-  watch?.classList.toggle('on', type === 'explore' && preset === 'watch');
+  screener?.classList.toggle('on', type === 'explore');
   alerts?.classList.toggle('on', type === 'alerts');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {

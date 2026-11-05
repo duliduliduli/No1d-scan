@@ -224,10 +224,19 @@ One list, one page, one vocabulary. Before this there were two systems: stars
 now stars too, stored as `addr:o1…` in the same table, and
 `migrateAddrWatch()` folds the old key into stars once at boot and deletes it.
 
-- `pages.favorites` (`/favorites`, in the header nav, the ☰ menu and the mobile
-  dock, all with a live count badge) shows a token table — price, 24h, volume,
-  mcap, Open — then an address list with balance, blocks mined, Open and remove.
-  Empty state points at the ☆ Save button.
+- `pages.favorites` (`/favorites`, in the header nav and the ☰ menu, both with a
+  live count badge) shows a token table — price, 24h, volume, mcap, Open — then
+  an address list with balance, blocks mined, Open and remove. Empty state points
+  at the ☆ Save button.
+- The header link sits directly after `a.explore`, and on phones `a.explore` is
+  no longer `display:none` so the two travel together: one row of
+  `brand · Explore · Favorites · ☰` with the search on its own row, down to
+  360px. The mobile dock is Screener / Search / Alerts / Menu — Favorites is not
+  a footer tab. Under 430px the header Wallet button is dropped (it is still in
+  the ☰ menu) because three buttons plus the brand do not fit. Size overrides for
+  these buttons are declared at the **end** of the stylesheet: the base
+  `a.explore` / `a.favlink` rules are set further down than the header block, so
+  an override declared beside them loses the cascade.
 - `starBtn(id, name, { label: true })` renders `☆ Save` / `★ Saved` instead of
   the bare glyph; it is used in the token page header row (no longer desktop
   only), on address and wallet pages where the old `☆ Watch` button used to be,

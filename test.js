@@ -550,7 +550,8 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await fetch(base + '/wallet')).status, 200, 'the wallet page is the app page');
   const homeHtml = await (await fetch(base + '/')).text();
   assert.match(homeHtml, /href="\/favorites"/, 'favorites are a page of their own, not a hidden tab');
-  assert.match(homeHtml, /data-dock="fav"/, 'favorites sit in the mobile dock');
+  assert.match(homeHtml, /class="explore"[^>]*>Explore<\/a>\s*<a class="favlink" href="\/favorites"/, 'Favorites sits beside Explore in the header');
+  assert.doesNotMatch(homeHtml, /data-dock="fav"/, 'Favorites is not a dock tab any more');
   assert.match(homeHtml, /data-label="1"/, 'a star can render as a labelled Save button');
   assert.match(homeHtml, /ADDR_STAR/, 'addresses are favorites too');
   assert.match(homeHtml, /migrateAddrWatch\(\)/, 'the old browser-only address list folds into favorites at boot');
