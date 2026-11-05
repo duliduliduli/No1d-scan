@@ -12,20 +12,6 @@ const ADDR = 'o1qqqqqqqqqqqq';
 const PAY_ADDR = 'o1payqqqqqqqq';
 let paySlots = [];
 const WHSEC = 'whsec_test';
-// Fake OpenRouter: first asks for the chain_stats tool, then answers from the tool result.
-let aiDown = false;
-const aiServer = http.createServer((req, res) => {
-  let body = '';
-  req.on('data', (c) => (body += c)).on('end', () => {
-    if (aiDown) { res.writeHead(500); return res.end(JSON.stringify({ error: { message: 'down' } })); }
-    const { messages } = JSON.parse(body);
-    const toolMsg = messages.find((m) => m.role === 'tool');
-    const message = toolMsg
-      ? { role: 'assistant', content: `Let me think about the user.\n</think>\n\nThe height is ${JSON.parse(toolMsg.content).chain.height}.` }
-      : { role: 'assistant', content: '', tool_calls: [{ id: 't1', type: 'function', function: { name: 'chain_stats', arguments: '{}' } }] };
-    res.end(JSON.stringify({ choices: [{ message }] }));
-  });
-});
 let tip = 99, fork = '', contractHeight = null;
 const holes = new Set(); // heights the fake node has no header for // `fork` changes hashes from height 98 up to simulate a reorg
 const hash = (h) => H(h, h >= 98 ? fork : '');
@@ -82,9 +68,6 @@ test('indexer + api', async (t) => {
   process.env.STRIPE_WEBHOOK_SECRET = WHSEC;
   process.env.NODE_ENV = 'test';
   process.env.ADMIN_TOKEN = 'adm-test';
-  await new Promise((r) => aiServer.listen(0, r));
-  process.env.OPENROUTER_API_KEY = 'or-test';
-  process.env.OPENROUTER_URL = `http://127.0.0.1:${aiServer.address().port}`;
   const labelFile = path.join(os.tmpdir(), `noid-labels-${process.pid}.json`);
   fs.writeFileSync(labelFile, JSON.stringify({ o1whalewhale: { entity: 'Test Whale', note: 'fixture' } }));
   process.env.LABELS_FILE = labelFile;
@@ -98,7 +81,7 @@ test('indexer + api', async (t) => {
     return [r.status, await r.json(), r.headers];
   };
   const post = (p, body, headers = {}) => get(p, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } });
-  t.after(() => { server.close(); rpcServer.close(); aiServer.close(); });
+  t.after(() => { server.close(); rpcServer.close(); });
 
   await tick();
   const count = () => db.prepare('select count(*) n, min(height) lo from blocks').get();
@@ -237,22 +220,15 @@ test('indexer + api', async (t) => {
   assert.strictEqual(hdr.get('x-tier'), 'paid'); assert.strictEqual(hdr.get('x-ratelimit-limit'), '3000'); assert.strictEqual(hdr.get('x-credits-remaining'), '2200');
   assert.strictEqual((await get('me', { headers: K }))[1].tier, 'paid');
 
-  // Chatbot: answers via tools from real routes; 3 free a day, then paid at 5 credits; refunded on model errors.
-  const ask = (h = {}) => post('chat', { messages: [{ role: 'user', content: 'what is the height?' }] }, h);
-  const [, a1] = await ask();
-  assert.match(a1.reply, new RegExp(`^The height is ${tip}`), 'answer built from the chain_stats tool, reasoning stripped');
-  assert.strictEqual(a1.free_left, 2);
-  await ask(); await ask();
-  assert.strictEqual((await ask())[0], 402, 'free quota used up');
-  const [, a5] = await ask(K);
-  assert.strictEqual(a5.paid, true);
-  assert.strictEqual(a5.credits, 2195);
-  aiDown = true;
-  assert.strictEqual((await ask(K))[0], 502);
-  assert.strictEqual((await get('me', { headers: K }))[1].credits, 2195, 'refunded when the model fails');
-  aiDown = false;
+  // There is no AI assistant: the route and the module are gone, and the account page no longer sells it.
+  assert.strictEqual((await get('chat'))[0], 404, 'no chat route');
+  assert.notStrictEqual((await post('chat', { messages: [{ role: 'user', content: 'hi' }] }))[0], 200, 'the assistant cannot be called');
+  const [, price0] = await get('pricing');
+  assert.strictEqual(price0.chat_cost, undefined);
+  assert.strictEqual(price0.free_chats_per_day, undefined);
+
   const hist = (await get('me', { headers: K }))[1].history.map((h) => h.reason);
-  assert.ok(hist.includes('AI question') && hist.some((r) => r.startsWith('NOID top-up')));
+  assert.ok(hist.some((r) => r.startsWith('NOID top-up')), 'the top-up is in the ledger');
   assert.ok(!hist.some((r) => /card/i.test(r)), 'no card rail anywhere in the ledger');
 
   // Late payment: an expired order keeps its digits reserved, and a payment for it still goes to the same account.
@@ -300,11 +276,6 @@ test('indexer + api', async (t) => {
   assert.strictEqual(h2.get('x-cache'), 'HIT', 'irrelevant parameters share the cache');
   assert.strictEqual((await get('txs?page=3', { bare: true, headers: K }))[2].get('x-cache'), 'MISS', 'different page is a different answer');
   assert.strictEqual(await reqs(), r0 + 3, 'each data response counts once');
-
-  // AI tools: amounts reach the model already converted, exactly; it never does unit math.
-  const { forModel } = require('./chat.js');
-  assert.deepStrictEqual(forModel({ chain: { height: 221000, circulating_supply_micronoid: '10718701000001', active_slot_count: 91214 }, latest: { supply: 5000, holders: 2141 }, fee_micronoid: 0 }),
-    { chain: { height: 221000, circulating_supply_noid: '10,718,701.000001', active_slot_count: '91,214' }, latest: { supply_noid: '0.005', holders: 2141 }, fee_noid: '0' });
 
   // Header shown with another block's body stats: never. A changed hash at the same height hides the old body.
   fork = 'c';

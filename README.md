@@ -48,7 +48,7 @@ The indexer calls `paranoid_getAssetSnapshot` and, once that exists, `paranoid_q
 
 **Swaps are non-custodial and off by default.** The server never holds a key and never signs. `/api/swap/quote` returns `{enabled:false}` unless `SWAP_ENABLED=true`, `SWAP_FEE_ADDRESS` is a valid `o1…` address, and the node exposes both swap methods. The fee (`SWAP_FEE_BPS`, default 50 = 0.50%, maximum 1000) is sent as its own output when `buildSwap` sets `fee_in_tx`; otherwise the quote only itemizes it. `/api/swap/build` returns an unsigned payload for the wallet, and refuses anything that already has a signature. `?demo=1` returns a preview quote from sample reserves and `/api/swap/build` rejects it. A token page shows a locked trade card until that is true. When trading is on, the quote lists the fee and the total before the wallet signs, and the sign button stays off until `window.parano1d` is present. `?demo=1` shows a preview quote and cannot submit.
 
-Errors are JSON `{"error": "…"}`: 400 bad input, 401 missing/unknown key, 402 out of credits (AI), 404 not found, 429 rate limited (`retry-after`), 502 node or upstream unavailable. `/api/stats` has `coverage` (which heights have captured bodies) and `indexer.error`. Holder counts and the rich list are approximate: a sweep reads the Live State over ~20 minutes while blocks keep arriving.
+Errors are JSON `{"error": "…"}`: 400 bad input, 401 missing/unknown key, 402 out of credits, 404 not found, 429 rate limited (`retry-after`), 502 node or upstream unavailable. `/api/stats` has `coverage` (which heights have captured bodies) and `indexer.error`. Holder counts and the rich list are approximate: a sweep reads the Live State over ~20 minutes while blocks keep arriving.
 
 **Reorgs.** The indexer re-reads the last 42 heights each pass. A replaced block is copied into `orphans` in the same transaction before the canonical row is overwritten, and block lists only show a body's tx count/fees when its hash matches the header. If the node's tip goes down by up to 18 blocks, those rows are copied to `orphans` and then removed. A bigger drop is not a normal reorg (node reset or resync): indexing pauses with an error in `/api/stats` and `/api/health`, and nothing is deleted. Heights the node pruned before a body was stored are `gaps`; each pass retries a few against this node and then `ARCHIVE_PEERS`.
 
@@ -130,21 +130,19 @@ cat /home/deploy/.ssh/id_deploy
 
 Copy the printed private key (all of it, including the `BEGIN`/`END` lines) into the GitHub secret `DEPLOY_KEY`, put the droplet IP in `DEPLOY_HOST`, then delete the server copy: `rm /home/deploy/.ssh/id_deploy`. GitHub's runners connect over SSH, so port 22 must be open to them (key-only login).
 
-## Payments and AI
+## Payments
 
 **Accounts** are API keys (`nk_…`): no email or password. Only the key's SHA-256 is stored. Anyone can create one free on the **API & Credits** page; the key is shown once.
 
-**Prepaid credits, bought with NOID only.** Three plans, priced directly in NOID so a quote never depends on the USD price feed: Starter 5 NOID = 1,000 credits, Pro 10 NOID = 3,000, Scale 20 NOID = 8,000. Credits never expire and there is no subscription. With credits a key gets `PAID_RATE_LIMIT` requests/min and pays 1 credit per 1,000 requests; the AI assistant costs `CHAT_COST` credits per question. Without credits everyone keeps the free tier, including `FREE_CHATS_PER_DAY` AI questions per IP. There is no card rail: `POST /api/topup` takes `{"plan":"starter|pro|scale"}` and answers a NOID quote.
+**Prepaid credits, bought with NOID only.** Three plans, priced directly in NOID so a quote never depends on the USD price feed: Starter 5 NOID = 1,000 credits, Pro 10 NOID = 3,000, Scale 20 NOID = 8,000. Credits never expire and there is no subscription. With credits a key gets `PAID_RATE_LIMIT` requests/min and pays 1 credit per 1,000 requests. Without credits everyone keeps the free tier. The explorer has no AI assistant: the pages, the route and the module are gone. There is no card rail: `POST /api/topup` takes `{"plan":"starter|pro|scale"}` and answers a NOID quote.
 
-**What a request costs.** A keyed request counts only when it returns data (HTTP 200, cached or not). Errors, 404s, the `/live` stream and account/payment routes are free. AI questions are charged separately and refunded when the model call fails. Every request, billed or not, counts toward the per-minute rate limit. `/live` allows 10 streams per IP; a viewer that stops reading is dropped once 256 KB is queued for it (the browser reconnects).
+**What a request costs.** A keyed request counts only when it returns data (HTTP 200, cached or not). Errors, 404s, the `/live` stream and account/payment routes are free. Every request, billed or not, counts toward the per-minute rate limit. `/live` allows 10 streams per IP; a viewer that stops reading is dropped once 256 KB is queued for it (the browser reconnects).
 
 - **NOID** (the only way to buy credits): the buyer gets a quote whose last 4 μNOID digits ("dust", e.g. `5.004217 NOID`) identify the order; NOID has no payment memo, so the digits are the link. An output on `PAY_ADDRESS` pays the unpaid order with the same digits only if the order was quoted before the output first appeared (outputs already on the address can never pay a new order) and only after `NOID_CONFIRMATIONS` blocks (default 18: Parano1d consensus can replace up to 18 blocks, `CONSENSUS_FINALITY_DEPTH` in Core; about 9 minutes). A payment that disappears in a reorg before then is never credited. Credits scale with the amount received at the quoted rate. Each output pays once. Claiming the order, the ledger entry and the balance change are one database transaction. Quotes are valid 24 h; an expired order is kept, and its digits stay reserved for 7 more days so a late payment can't match someone else's order: a late payment is credited to the account that ordered it, at the quoted rate. Anything that fails to settle is marked `review` in `noid_seen` and logged.
-- **AI assistant** (`/chat`): OpenRouter, default `qwen/qwen3.5-flash-02-23`. The model answers by calling the explorer's own routes as tools, so numbers come from the node. A question costs you roughly $0.0005; credits are refunded if the model call fails.
 
 Put secrets in `/etc/noid-scan.env` (`chmod 600`, owned by root), one per line, then `systemctl restart noid-scan`:
 
 ```
-OPENROUTER_API_KEY=sk-or-...
 PAY_ADDRESS=o1...
 SITE_URL=https://parano1d-scan.com
 ```
@@ -156,9 +154,6 @@ SITE_URL=https://parano1d-scan.com
 | `NOID_CONFIRMATIONS` / `PRICE_MAX_AGE_MS` | `18` / `900000` | Blocks before a NOID payment is credited; how old the live price may be for USD-based promo quotes |
 | `PRICE_ID` | `noid-parano1d` | CoinPaprika coin id for the price panel (free API, no key; ticker every 3 min, history hourly) |
 | `SITE_URL` | `https://parano1d-scan.com` | Canonical site URL used in links and redirects |
-| `OPENROUTER_API_KEY` | – | Enables the AI assistant. Set a monthly spending limit on the key in OpenRouter as a hard cap |
-| `OPENROUTER_MODEL` | `qwen/qwen3.5-flash-02-23` | Any OpenRouter model with tool calling |
-| `CHAT_COST` / `FREE_CHATS_PER_DAY` | `5` / `3` | |
 | `PAID_RATE_LIMIT` | `3000` | Requests/min for accounts with credits |
 | `LIVE_MS` | `2000` | How often the live feed polls the node (shared by all viewers) |
 | `DONATE_ADDRESS` | – | `o1…` address shown in the footer |

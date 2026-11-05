@@ -1094,7 +1094,7 @@ const routes = {
       coverage: { bodies_from: bodies.lo, bodies_to: bodies.hi, headers_to: history.synced_to, gaps: q.gapCount.get().n, reorgs: q.reorgCount.get().n, orphans: q.orphanCount.get().n, since: q.minHeaderTs.get().t },
       network: networkStats(), txs_24h: q.txs24h.get(Math.floor(Date.now() / 1000) - 86400), price: price.now,
       economics: { ...econ, fee_floor: feeFloor, burned_micronoid: burned.n ? String(burned.s) : null, allocation_until: ALLOCATION_END },
-      donate: process.env.DONATE_ADDRESS || null, ai: ai.enabled,
+      donate: process.env.DONATE_ADDRESS || null,
     };
   },
 
@@ -1362,7 +1362,6 @@ const routes = {
   },
 };
 
-const ai = require('./chat.js')(routes);
 
 // shortcut: in-memory per-IP limiter, resets on restart and is per-process; move to the reverse proxy if you run several instances.
 const hits = new Map();
@@ -1439,17 +1438,7 @@ async function handle(req, res) {
     const name = parts[2];
     const id = parts[3] || '';
     const sub = parts[4] ? decodeURIComponent(parts[4]) : '';
-    // Account, payment and chat routes: never cached, may take a JSON body. Payments are NOID-only; no card webhooks.
-    if (name === 'chat' && req.method === 'POST') {
-      const body = parseJson(await readBody(req));
-      const charge = bill.chargeChat(acct, ip);
-      try {
-        return send(200, { ...(await ai.ask(body.messages)), paid: charge.paid, free_left: charge.free_left, credits: acct && bill.account(req.headers['x-api-key'] || url.searchParams.get('key'))?.credits }, { 'cache-control': 'no-store' });
-      } catch (e) {
-        charge.refund();
-        throw e;
-      }
-    }
+    // Account and payment routes: never cached, may take a JSON body. Payments are NOID-only; no card webhooks.
     if (name === 'profile-media' && req.method === 'GET') {
       const img = profiles.image(decodeURIComponent(id), sub, url.searchParams);
       if (!img) return send(404, { error: 'not found' });

@@ -8,7 +8,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 - **Site:** https://parano1d-scan.com
 - **Repo:** https://github.com/duliduliduli/No1d-scan (default branch `main`)
 - **Owner:** Duli Media LLC (dulimediallc@gmail.com). The owner is not a developer. They work from a phone/laptop and paste commands into the DigitalOcean web console. Give them exact, copy-paste commands and plain-language summaries: what changed, what they must do, and what they should see after doing it.
-- **Stack:** one Node 22 process (`server.js`), **zero npm dependencies**, `node:sqlite` (WAL) and `node:http`. The UI is a single static SPA (`public/index.html`, vanilla JS). Tests use `node:test` with a fake JSON-RPC node and a fake OpenRouter.
+- **Stack:** one Node 22 process (`server.js`), **zero npm dependencies**, `node:sqlite` (WAL) and `node:http`. The UI is a single static SPA (`public/index.html`, vanilla JS). Tests use `node:test` with a fake JSON-RPC node.
 
 ## 2. State at handoff (verified 2026-11-02)
 
@@ -24,8 +24,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 | File | What it does |
 |---|---|
 | `server.js` | Indexer loop (10 s), header backfill, reorg/orphan handling, gaps and cold archive, price/market/holders/network pollers, the whole HTTP API, SSE `/api/live`, 5 s response cache, rate limits, API-key gate |
-| `billing.js` | Accounts (`nk_` API keys, only SHA-256 stored), append-only `ledger`, prepaid credits bought with NOID only (Starter 5 / Pro 10 / Scale 20 NOID), free AI quota, plus checkout wiring for profiles and boosts |
-| `chat.js` | AI assistant (OpenRouter, default `qwen/qwen3.5-flash-02-23`), tool calls into the explorer's own routes. `forModel()` pre-formats every amount so the model never does unit math |
+| `billing.js` | Accounts (`nk_` API keys, only SHA-256 stored), append-only `ledger`, prepaid credits bought with NOID only (Starter 5 / Pro 10 / Scale 20 NOID), plus checkout wiring for profiles and boosts |
 | `assets.js` | Tokens, pools, trades and NFT collections for Explore (screener, token and collection pages, candles, order book). Empty until the node exposes `getAssetSnapshot`; `?demo=1` / `TOKENS_DEMO=1` shows an in-memory sample |
 | `intent.js` | Non-custodial native trades via Parano1d v2.1 intents (`prepareNativeIntent` → wallet signs → `submitTxIntent`). Off unless `SWAP_ENABLED=true`; activation height `NATIVE_ACTIVATION_HEIGHT` (default **279,370**, roughly 2 days after this handoff) |
 | `usdc.js` | Native Circle USDC payments on 6 EVM chains and Solana, matched by an exact-amount suffix; includes its own keccak for EIP-55 |
@@ -45,7 +44,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
   - **The explorer:** `noid-scan.service`, user `noidscan`, code in `/opt/noid-scan`, port 8080.
   - **Caddy:** TLS; `parano1d-scan.com`, with `www` redirecting.
 - **Database:** `/var/lib/noid-scan/noid.db`. It holds the **only copy of pruned block bodies**, plus all accounts, credits, ledger and payments. Never delete it, reset it or "rebuild from scratch".
-- **Secrets:** only in `/etc/noid-scan.env` (root, chmod 600), loaded through `EnvironmentFile`. They include `OPENROUTER_API_KEY`, `PAY_ADDRESS`, `ADMIN_TOKEN` and the USDC addresses/RPCs. Never put secrets in the repo, chat, GitHub or URLs, and never print them.
+- **Secrets:** only in `/etc/noid-scan.env` (root, chmod 600), loaded through `EnvironmentFile`. They include `PAY_ADDRESS`, `ADMIN_TOKEN` and the USDC addresses/RPCs. Never put secrets in the repo, chat, GitHub or URLs, and never print them.
 - **Sandboxing:** the service runs with `ProtectSystem=strict` + `PrivateTmp=true` + `SQLITE_TMPDIR=/var/lib/noid-scan`. The code also sets `pragma temp_store=memory`. History: big grouped queries once failed with "disk I/O error" because every temp directory was read-only (README has a section on this).
 - **Cloudflare:** DNS for the domain.
 - **How the owner deploys:** historically by pasting into the droplet console:
@@ -84,7 +83,7 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
   - New quotes pause if the live price is more than 15 min old.
 - **Payments are NOID only.** Cards and Stripe were removed by decision (Nov 2026): no card rail, no webhook route, no card buttons. Credits come from an exact-amount match on `PAY_ADDRESS` (dust digits), settled by the chain watcher or by a pasted payment receipt.
 - **USDC (profiles and boosts):** exact base-unit amount match; one transaction settles one order; native Circle USDC only. These payments do **not** add API credits.
-- **API billing:** a keyed request counts only when it returns 200. Errors, 404s, `/live` and account routes are free. 1 credit = 1,000 requests; $1 = 1,000 credits; AI costs 5 credits per question, refunded if the model fails.
+- **API billing:** a keyed request counts only when it returns 200. Errors, 404s, `/live` and account routes are free. 1 credit = 1,000 requests.
 - **Books check:** the read-only SQL in the README's "Checking the books" section must return nothing. Run it after any billing change.
 - **Never in tests or development:** live payments, wallet transfers, price changes or production DB edits without explicit owner approval.
 
@@ -103,7 +102,6 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 - **Holders and rich list:** a sweep of every Live State slot (batched `getSlot`) every 2 h, taking about 20 min. The results are **approximate**, labeled as such, and matched noidexplorer.org when checked.
 - **Globe:** connected peer IPs are read from `/proc/net/tcp*` on port 9600 and resolved to **country level with country.is** (one lookup per IP, four at a time, successes cached, misses retried on the next minute's poll). The API sends only a salted id, a masked address and the country code; full IPs stay in the process.
   - **Licensing: settled** (2026-11-02). ip-api.com's free tier is non-commercial only and this site sells things, so the globe went back to country.is, which is free for any use and needs no key. City, region, ASN and provider are now null; the page pins a peer at its country's middle and says so. Reverting to ip-api would need their paid plan ($15+/mo) to be worth it.
-- **AI:** OpenRouter. The owner should keep a monthly spend cap on the key.
 
 ## 8. Working rules for this repo
 
@@ -126,13 +124,12 @@ Written 2026-11-02 for an agent taking over the whole project. Read this, then `
 **Owner actions** (not code; remind them gently):
 1. Any `STRIPE_*` variables left in `/etc/noid-scan.env` are now ignored and can be deleted.
 2. **Cloudflare:** turn the proxy on (orange cloud) and set SSL mode to **Full (strict)**. The DigitalOcean firewall should allow 80/443 only from Cloudflare IPs, 9600 open, and 22 from the owner's IP. Status unknown.
-3. **OpenRouter:** set a monthly spend limit on the key.
-4. **`SUPPORT_EMAIL`:** add it to `/etc/noid-scan.env` so checkout shows a help contact.
-5. **Real payment test:** one small (about $5) NOID test purchase end to end. Credits should land about 9 minutes after the payment confirms.
-6. **Backups:** confirm `noid-scan-backup.timer` is enabled (`systemctl list-timers | grep noid`) and set `BACKUP_DEST` for an off-machine copy. Today the archive may exist only on the droplet.
-7. **Auto-deploy secrets:** decide whether to set `DEPLOY_HOST` / `DEPLOY_KEY` (see the README "Auto-deploy" section) or keep deploying by `git pull`.
-8. **Credential hygiene:** a temporary site password was once shared in chat during setup. It has been removed from the site; it must not be reused anywhere.
-9. **`ADMIN_TOKEN` is unset in production** (checked 2026-11-02: `GET /api/admin` is 404), so an approved enhanced profile or promoted slot has no route to be approved. Set it in `/etc/noid-scan.env` and restart; then open `https://parano1d-scan.com/admin` and paste the token. Console block in section 10.
+3. **`SUPPORT_EMAIL`:** add it to `/etc/noid-scan.env` so checkout shows a help contact.
+4. **Real payment test:** one small (about $5) NOID test purchase end to end. Credits should land about 9 minutes after the payment confirms.
+5. **Backups:** confirm `noid-scan-backup.timer` is enabled (`systemctl list-timers | grep noid`) and set `BACKUP_DEST` for an off-machine copy. Today the archive may exist only on the droplet.
+6. **Auto-deploy secrets:** decide whether to set `DEPLOY_HOST` / `DEPLOY_KEY` (see the README "Auto-deploy" section) or keep deploying by `git pull`.
+7. **Credential hygiene:** a temporary site password was once shared in chat during setup. It has been removed from the site; it must not be reused anywhere.
+8. **`ADMIN_TOKEN` is unset in production** (checked 2026-11-02: `GET /api/admin` is 404), so an approved enhanced profile or promoted slot has no route to be approved. Set it in `/etc/noid-scan.env` and restart; then open `https://parano1d-scan.com/admin` and paste the token. Console block in section 10.
 
 **Code and tech debt:**
 - ~~Globe geolocation uses ip-api.com's free (non-commercial) tier~~ — done 2026-11-02, back on country.is.

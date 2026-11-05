@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NOID Scan</title>
-<meta name="description" content="Live Parano1d (NOID) explorer: blocks, transactions, addresses, network globe, full-history charts and an AI assistant.">
+<meta name="description" content="Live Parano1d (NOID) explorer: blocks, transactions, addresses, network globe and full-history charts.">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -13,7 +13,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="NOID Scan">
 <meta property="og:title" content="NOID Scan – live Parano1d (NOID) explorer">
-<meta property="og:description" content="Blocks, transactions, addresses, network globe, full-history charts and an AI assistant.">
+<meta property="og:description" content="Blocks, transactions, addresses, network globe and full-history charts.">
 <meta property="og:url" content="https://parano1d-scan.com/">
 <meta property="og:image" content="https://parano1d-scan.com/og.png?v=3">
 <meta property="og:image:width" content="1200">
@@ -677,7 +677,6 @@
       <a href="/receipts" data-link>Receipts</a>
       <a href="/contracts" data-link>Contracts</a>
       <a href="/account" data-link>API &amp; Credits</a>
-      <a href="/chat" data-link>Ask AI</a>
       <button id="theme"></button>
     </nav>
   </div>
@@ -3237,6 +3236,7 @@ const pages = {
       <div class="card"><h2>Details</h2>${details ? kv(details) : '<p class="muted">Body pruned and not captured here; the pointer above is permanent.</p>'}</div>`;
   },
   'api-access': () => go('/account'),
+  chat: () => go('/'), // the AI assistant is gone; old links land on the overview
 
   async market() {
     const [s, pr, ho, rl, su] = await Promise.all([
@@ -3353,7 +3353,6 @@ const pages = {
         <table class="price"><tr><th></th><th>Free</th><th>With credits</th></tr>
           <tr><td>Explorer website, live data</td><td>Unlimited</td><td>Unlimited</td></tr>
           <tr><td>API requests</td><td>${n(120)} per minute with a free account key</td><td>${n(3000)} per minute · 1 credit per ${n(P.requests_per_credit)} requests</td></tr>
-          <tr><td>AI assistant</td><td>${P.free_chats_per_day} questions per day</td><td>${P.chat_cost} credits per question</td></tr>
         </table>
         <h2 style="margin-top:14px">NOID plans</h2>
         <table class="price"><tr><th>Plan</th><th>Price</th><th>Credits</th><th>API requests</th></tr>
@@ -3379,9 +3378,9 @@ const pages = {
         </table>
         <p>Example: <code>curl -H "x-api-key: YOUR_KEY" ${esc(location.origin)}/api/stats</code>. Amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); very large ones come as decimal strings.</p>
         <h2 style="margin-top:14px">Billing, limits and errors</h2>
-        <p><b>What counts:</b> every request that returns data (HTTP 200), including cached answers, counts toward your usage; with credits, each ${n(P.requests_per_credit)} counted requests cost 1 credit. Errors, 404s, the <code>/live</code> stream and account/payment routes never count. AI questions are charged separately and refunded if the model fails.</p>
+        <p><b>What counts:</b> every request that returns data (HTTP 200), including cached answers, counts toward your usage; with credits, each ${n(P.requests_per_credit)} counted requests cost 1 credit. Errors, 404s, the <code>/live</code> stream and account/payment routes never count.</p>
         <p><b>Response headers:</b> <code>x-tier</code>, <code>x-ratelimit-limit</code>, <code>x-ratelimit-remaining</code> (per minute), <code>x-credits-remaining</code>, <code>x-cache</code> (data is reused for up to 5 s).</p>
-        <p><b>Errors</b> are JSON <code>{"error": "…"}</code>: 400 bad input · 401 missing or unknown key · 402 out of credits (AI) · 404 not found · 429 rate limited (see <code>retry-after</code>) · 502 node or upstream unavailable, retry shortly. <code>/live</code> allows 10 open streams per IP.</p>
+        <p><b>Errors</b> are JSON <code>{"error": "…"}</code>: 400 bad input · 401 missing or unknown key · 402 out of credits · 404 not found · 429 rate limited (see <code>retry-after</code>) · 502 node or upstream unavailable, retry shortly. <code>/live</code> allows 10 open streams per IP.</p>
         <p><b>Coverage:</b> headers are complete since genesis; transaction bodies exist only for blocks this explorer captured while the node retained them (the last 42 blocks), see <code>coverage</code> in <code>/stats</code>. Holder counts and the rich list are approximate snapshots, taken every 2 hours.</p></div>`;
     const box = $('acct');
 
@@ -3414,7 +3413,7 @@ const pages = {
     box.innerHTML = `<h2>Your account <small class="muted">${esc(me.id)}</small></h2>
       <div class="grid">
         <div class="stat"><small>Credits</small><b>${n(me.credits)}</b><small class="muted">≈ ${n(me.credits * P.requests_per_credit)} API requests</small></div>
-        <div class="stat"><small>AI questions left</small><b>${n(Math.floor(me.credits / P.chat_cost))}</b></div>
+        <div class="stat"><small>Rate limit</small><b>${n(me.rate_limit_per_min)}</b><small class="muted">requests per minute</small></div>
         <div class="stat"><small>API requests made</small><b>${n(me.requests)}</b></div>
         <div class="stat"><small>Tier</small><b>${me.credits > 0 ? 'Paid' : 'Free'}</b></div>
       </div>
@@ -3422,7 +3421,7 @@ const pages = {
       ${P.noid ? `<p class="row">${pay()}</p><p class="muted">Pick a plan, send the exact NOID amount shown, and credits land automatically after ${esc(P.noid.confirmations)} block confirmations. One-off: no subscription, nothing to cancel.</p>` : '<p class="muted">NOID payments are not enabled right now.</p>'}
       ${P.noid_paused ? `<p class="muted">New promoted-listing quotes are paused: ${esc(P.noid_paused)}. API plans are fixed in NOID and keep working.</p>` : ''}
       <div id="payout"></div>
-      <h2 style="margin-top:14px">Usage (last 30 days)</h2>${rows(me.usage, ['day', 'requests', 'chats'])}
+      <h2 style="margin-top:14px">Usage (last 30 days)</h2>${rows(me.usage, ['day', 'requests'])}
       <h2 style="margin-top:14px">History</h2>${rows(me.history.map((h) => ({ when: new Date(h.at).toLocaleString(), credits: (h.delta > 0 ? '+' : '') + n(h.delta), what: h.reason })), ['when', 'credits', 'what'])}
       <p class="row"><button id="copyk">Copy my key</button><button id="logout">Log out on this device</button></p>`;
     $('copyk').onclick = () => navigator.clipboard?.writeText(key).then(() => ($('copyk').textContent = 'Copied'));
@@ -3445,9 +3444,9 @@ const pages = {
             <small>Paid</small><span>${esc(when(t.paid_at / 1000))}</span>
             <small>Amount</small><span class="mono">${esc(t.amount_noid)} NOID${t.usd_at_market ? ` <small class="muted">(≈ $${esc(t.usd_at_market)} at market)</small>` : ''}</span>
             <small>Credits added</small><span><b>${n0(t.credits_added ?? t.credits)}</b>${t.credits_added > t.credits ? ` <span class="muted">(${n0(t.credits)} for the pack + ${n0(t.credits_added - t.credits)} for the extra NOID sent)</span>` : ''}</span>
-            <small>Your balance</small><span><b>${n0(t.balance)}</b> credits · ${esc(Math.floor(t.balance / P.chat_cost).toLocaleString())} AI questions or ${n0(t.balance * P.requests_per_credit)} API requests</span>
+            <small>Your balance</small><span><b>${n0(t.balance)}</b> credits · ${n0(t.balance * P.requests_per_credit)} API requests</span>
             <small>Chain reference</small><span class="mono" style="word-break:break-all">${esc(t.paid_ref)}</span></div>
-          <p style="margin:14px 0 0">Your key is active on the paid tier now: 3,000 requests/min and the AI assistant. Try it:</p>
+          <p style="margin:14px 0 0">Your key is active on the paid tier now: 3,000 requests/min. Try it:</p>
           <p><code>curl -H "x-api-key: YOUR_KEY" ${esc(location.origin)}/api/stats</code></p></div>
           <div class="status"><span class="ok">●</span> Verified on the NOID blockchain by this explorer's own node.${support}</div></div>`;
         return;
@@ -3472,7 +3471,7 @@ const pages = {
         <div class="status" style="border-top:0;padding-top:0;color:var(--muted)">Verified directly on the NOID blockchain by this explorer's node · no third party holds your funds${support}</div></div>
         <div class="trust">
           <div><b>Prepaid, no subscription</b>Credits never expire and there is nothing to cancel.</div>
-          <div><b>Refund policy</b>Unused credits are refunded in NOID on request; AI questions that fail are refunded automatically.</div>
+          <div><b>Refund policy</b>Unused credits are refunded in NOID on request.</div>
           <div><b>Sent a different amount?</b>If the last digits match, it is credited in proportion. Otherwise contact support with the order number and your transaction; it is credited by hand.</div>
         </div>`;
       clearInterval(cdTimer);
@@ -3487,34 +3486,6 @@ const pages = {
         await watch(r.id);
       } catch (e) { $('payout').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
       b.disabled = false;
-    };
-  },
-
-  async chat() {
-    const P = await api('pricing');
-    const s = await api('stats');
-    const hist = [];
-    app.innerHTML = `<div class="card"><h2>Ask AI <small class="muted">answers from live NOID chain data</small></h2>
-      ${s.ai ? '' : '<p class="msg err">The AI assistant is not enabled on this explorer yet.</p>'}
-      <div class="msgs" id="msgs"><div class="msg bot">Ask me anything about the NOID chain: "What's the latest block?", "How has difficulty changed?", "What's in block 1200?", "What does address o1… hold?"</div></div>
-      <form id="ask" class="row"><input id="q" placeholder="Ask about blocks, addresses, supply, difficulty…" autocomplete="off" maxlength="2000"><button id="send">Ask</button></form>
-      <p class="muted" id="quota">${myKey() ? `Using your account: ${P.chat_cost} credits per question.` : `${P.free_chats_per_day} free questions a day. <a href="/account" data-link>Get credits</a> for more.`}</p></div>`;
-    const add = (cls, text) => { const d = document.createElement('div'); d.className = `msg ${cls}`; d.textContent = text; $('msgs').append(d); $('msgs').scrollTop = 1e9; return d; };
-    $('ask').onsubmit = async (e) => {
-      e.preventDefault();
-      const text = $('q').value.trim();
-      if (!text) return;
-      $('q').value = ''; $('send').disabled = true;
-      add('user', text); hist.push({ role: 'user', content: text });
-      const wait = add('bot', 'Looking that up on the chain…');
-      try {
-        const r = await api('chat', { messages: hist });
-        wait.textContent = r.reply; hist.push({ role: 'assistant', content: r.reply });
-        $('quota').innerHTML = r.paid ? `${n0(r.credits)} credits left · ${P.chat_cost} per question` : `${r.free_left} free questions left today. <a href="/account" data-link>Get credits</a> for more.`;
-      } catch (err) {
-        wait.className = 'msg bot err'; wait.textContent = err.message; hist.pop();
-      }
-      $('send').disabled = false; $('q').focus();
     };
   },
 
@@ -4488,7 +4459,7 @@ async function render() {
   alerts?.classList.toggle('on', type === 'alerts');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    const named = ['api-access', 'account', 'wallet', 'chat', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'verified'];
+    const named = ['api-access', 'account', 'wallet', 'mempool', 'mining', 'market', 'explore', 'alerts', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'verified'];
     document.body.classList.toggle('pair', type === 'token' || type === 'collection');
     if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
     await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());

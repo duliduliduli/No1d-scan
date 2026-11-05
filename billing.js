@@ -12,9 +12,7 @@ const PLANS = [
 ];
 const PLAN_BY_ID = new Map(PLANS.map((p) => [p.id, p]));
 const planMicronoid = (noid) => Math.round(noid * 1e6); // μNOID owed for a plan, before the unique dust digits
-const CHAT_COST = Number(process.env.CHAT_COST || 5); // credits per chatbot question
 const REQUESTS_PER_CREDIT = 1000; // keyed API requests
-const FREE_CHATS_PER_DAY = Number(process.env.FREE_CHATS_PER_DAY || 3);
 
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const today = () => new Date().toISOString().slice(0, 10);
@@ -50,7 +48,6 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     create index if not exists ledger_account on ledger(account, at);
     create table if not exists usage (account text not null, day text not null, requests integer not null default 0, chats integer not null default 0, primary key (account, day));
     create table if not exists noid_topups (id text primary key, account text not null, amount integer not null, credits integer not null, created integer not null, paid_ref text unique);
-    create table if not exists free_chat (who text not null, day text not null, n integer not null, primary key (who, day));
     create table if not exists token_stars (account text not null, token_id text not null, created integer not null, primary key (account, token_id));
     create index if not exists token_stars_acct on token_stars(account, created desc, token_id);
   `);
@@ -80,7 +77,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     countReq: db.prepare('update accounts set requests = requests + 1 where id = ? returning requests'),
     useDay: db.prepare(`insert into usage (account, day, requests, chats) values (?, ?, ?, ?)
       on conflict (account, day) do update set requests = requests + excluded.requests, chats = chats + excluded.chats`),
-    usage: db.prepare('select day, requests, chats from usage where account = ? order by day desc limit 30'),
+    usage: db.prepare('select day, requests from usage where account = ? order by day desc limit 30'),
     newTopup: db.prepare('insert into noid_topups (id, account, amount, credits, created, dust) values (?, ?, ?, ?, ?, ? % 10000)'),
     topup: db.prepare('select id, account, amount, credits, created, paid_ref, expired_at, plan from noid_topups where id = ?'),
     paidAt: db.prepare('select at from ledger where ref = ?'),
@@ -93,8 +90,6 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     addSeen: db.prepare('insert into noid_seen (ref, value, first_seen, height, status) values (?, ?, ?, ?, ?)'),
     setSeen: db.prepare('update noid_seen set status = ?, topup = ? where ref = ?'),
     seenFor: db.prepare("select height from noid_seen where topup = ? and status = 'confirming'"),
-    freeUsed: db.prepare('select n from free_chat where who = ? and day = ?'),
-    freeUse: db.prepare('insert into free_chat (who, day, n) values (?, ?, 1) on conflict (who, day) do update set n = n + 1'),
     starList: db.prepare('select token_id from token_stars where account = ? order by created desc, token_id'),
     starAdd: db.prepare('insert into token_stars (account, token_id, created) values (?, ?, ?) on conflict (account, token_id) do nothing'),
     starDel: db.prepare('delete from token_stars where account = ? and token_id = ?'),
@@ -131,21 +126,6 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     const { requests } = q.countReq.get(acct.id);
     q.useDay.run(acct.id, today(), 1, 0);
     if (requests % REQUESTS_PER_CREDIT === 0) spend(acct.id, 1, `API usage (${REQUESTS_PER_CREDIT.toLocaleString()} requests)`);
-  }
-
-  // Chatbot: paid accounts spend CHAT_COST credits, everyone else gets FREE_CHATS_PER_DAY per IP.
-  // Returns a refund function to call if the model request fails.
-  function chargeChat(acct, ip) {
-    if (acct && spend(acct.id, CHAT_COST, 'AI question')) {
-      q.useDay.run(acct.id, today(), 0, 1);
-      return { paid: true, refund: () => credit(acct.id, CHAT_COST, 'AI question refund (model error)') };
-    }
-    const used = q.freeUsed.get(ip, today())?.n ?? 0;
-    if (used >= FREE_CHATS_PER_DAY) {
-      throw bad(acct ? `Not enough credits (a question costs ${CHAT_COST}). Top up on the API & Credits page.` : `You've used your ${FREE_CHATS_PER_DAY} free questions today. Create an account and add credits to keep asking.`, 402);
-    }
-    q.freeUse.run(ip, today());
-    return { paid: false, free_left: FREE_CHATS_PER_DAY - used - 1, refund: () => db.prepare('update free_chat set n = n - 1 where who = ? and day = ?').run(ip, today()) };
   }
 
   // NOID has no payment memo, so an output on PAY_ADDRESS pays the order whose last 4 digits ("dust") match, if:
@@ -264,7 +244,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     return {
       payment: 'noid',
       plans: PLANS.map((p) => ({ id: p.id, label: p.label, noid: p.noid, micronoid: planMicronoid(p.noid), credits: p.credits, requests: p.credits * REQUESTS_PER_CREDIT, usd_at_market: usd ? +(p.noid * usd).toFixed(2) : null })),
-      chat_cost: CHAT_COST, free_chats_per_day: FREE_CHATS_PER_DAY, requests_per_credit: REQUESTS_PER_CREDIT,
+      requests_per_credit: REQUESTS_PER_CREDIT,
       enhanced_profile_usd: profiles ? profiles.priceUsd() : 100, enhanced_profile_usdc: profiles ? profiles.priceUsdc() : 100, usdc_chains: usdcPay.chains(), support: process.env.SUPPORT_EMAIL || null,
       noid: process.env.PAY_ADDRESS ? { address: process.env.PAY_ADDRESS, usd_per_noid: usd ? +usd.toFixed(6) : null, live: !!px.live, confirmations: CONFIRMATIONS } : null,
       noid_paused: process.env.PAY_ADDRESS && !noid() ? priceNow().paused : null,
@@ -371,5 +351,5 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
   };
 
-  return { account, countRequest, chargeChat, settleNoid, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
+  return { account, countRequest, settleNoid, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
 };
