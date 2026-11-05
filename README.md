@@ -145,6 +145,26 @@ retries in a loop. `/api/stats` reports progress under `metadata`.
 | `METADATA_PER_PASS` | `4` | Manifests fetched per pass, so a cold start cannot burst |
 | `METADATA_OFF` | – | `true` disables the refresher (labels stay as they are) |
 
+## Paid promotions and API time (contracts)
+
+Trading is free and stays free. The two paid lines are promotions and API time, both bought with NOID
+through a real Parano1d contract.
+
+- `POST /api/promo-contract` with `{ noid, asset_id, payer }` returns a contract the node built:
+  `pay_address` (its own `o1…` address), the exact amount, and `deadline_height`.
+- `POST /api/api-time` with `{ noid, payer }` does the same for API days.
+- `GET /api/noid-order?id=…` (or `?payer=o1…`) reports the order: `awaiting`, `live`, `done` or
+  `refundable`.
+
+The contract is a `refundable_payment`: the buyer is the payer, we are the payee, and it carries a
+deadline. Before the deadline we can claim it; after it the buyer can take the money back. A funded
+instance is the only proof of payment, so a promotion turns on by itself when the block carrying the
+payment lands, and an order nobody paid simply expires and refunds.
+
+Promotion tiers: 1 NOID = 1 hour, then 3/10/25/50/100 NOID = 6 h / 1 d / 4 d / 9 d / 20 d.
+API time: 1 NOID = 1 day, then 3/10/25/50/100 NOID = 3 / 11 / 30 / 65 / 140 days. While API time is
+active the account is a paid account: requests do not draw down credits and the higher rate limit applies.
+
 ## Deploy (one VPS)
 
 1. **Node:** download the Core release and verify its SHA256. `./parano1d --check-hardware` must report `NODE READY`. Install to `/usr/local/bin`, then `cp deploy/parano1d.service /etc/systemd/system/` and `systemctl enable --now parano1d` (it runs as its own `parano1d` user, data in `/var/lib/parano1d`, RPC on `127.0.0.1:9601`). Never expose the RPC port publicly. Check it with `parano1d-cli status`.

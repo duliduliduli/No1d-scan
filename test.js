@@ -13,6 +13,9 @@ const PAY_ADDR = 'o1payqqqqqqqq';
 let paySlots = [];
 const WHSEC = 'whsec_test';
 let tip = 99, fork = '', contractHeight = null;
+let objSlots = {}; // opening_hex -> funded instances the fake node reports
+let lastObject = null; // the last definition handed to createObject
+let objCount = 0; // each contract the fake node mints gets its own opening
 const holes = new Set(); // heights the fake node has no header for // `fork` changes hashes from height 98 up to simulate a reorg
 const hash = (h) => H(h, h >= 98 ? fork : '');
 // Target 2^240 little-endian -> 2^16 expected hashes per block; blocks 60 s apart; two alternating miners.
@@ -43,6 +46,16 @@ const node = {
     : { slot_index: i, value: 0, creation_id: 0, owner: '', empty: true }),
   getMempoolInfo: () => ({ size: 2, fee_floor: 5000, txs: [{ tx_hash: H('m1'), fee_micronoid: 9000, fee_rate: 1285, n_inputs: 1, n_outputs: 2 }, { tx_hash: H('m2'), fee_micronoid: 6000, fee_rate: 654, n_inputs: 1, n_outputs: 1 }] }),
   estimateFeeDetailed: ([i, o]) => ({ n_inputs: i, n_outputs: o, net_new_slots: o - i, fee_micronoid: 5000 + 1000 * o }),
+  createObject: ([defn]) => {
+    lastObject = defn;
+    return { abi_version: 3, state: ['0', '0'], address: 'o1qntrctqqqqqqqq', opening_hex: '4e4f49444f424a33' + String(objCount += 1).padStart(6, '0') + 'ab'.repeat(37),
+      code_id: 'cd'.repeat(32), deadline_height: defn.expiry_height, program: [],
+      claim_authority: defn.payee, recovery_authority: defn.payer, claim_recipient: defn.payee,
+      recovery_recipient: defn.payer, max_fee_micronoid: defn.max_fee_micronoid, max_payout_micronoid: 0,
+      min_retained_micronoid: 0, claim_can_continue: false, claim_can_close: true, recovery_can_continue: false,
+      recovery_can_close: true, unrestricted_payout_recipient: false };
+  },
+  getObjectInstances: ([opening]) => ({ address: 'o1qntrctqqqqqqqq', height: tip, tip_hash: hash(tip), slots: objSlots[opening] || [], next_slot: null }),
 };
 
 const rpcServer = http.createServer((req, res) => {
@@ -68,6 +81,7 @@ test('indexer + api', async (t) => {
   process.env.STRIPE_WEBHOOK_SECRET = WHSEC;
   process.env.NODE_ENV = 'test';
   process.env.ADMIN_TOKEN = 'adm-test';
+  process.env.PROMO_PAYEE = PAY_ADDR; // paid promotions and API time settle to the explorer's own address
   const labelFile = path.join(os.tmpdir(), `noid-labels-${process.pid}.json`);
   fs.writeFileSync(labelFile, JSON.stringify({ o1whalewhale: { entity: 'Test Whale', note: 'fixture' } }));
   process.env.LABELS_FILE = labelFile;
@@ -1652,6 +1666,75 @@ test('indexer + api', async (t) => {
   assert.match(checkOut, /quick_check: ok/);
   assert.throws(() => execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', 'scripts/db-check.js', '--repair', tmpDb], { encoding: 'utf8' }), (e) => e.status === 2 && /Refusing --repair/.test(e.stderr));
   fs.rmSync(tmpDb, { force: true });
+
+  // Paid promotions and API time ride a real Parano1d contract. The node mints an object with its own
+  // o1 address; the buyer pays that address like any other NOID payment; only a funded instance turns the
+  // order on; and after the deadline the money is the buyer's again. The suite checks all four facts.
+  {
+    const payer = 'o1acdefghjkmnpqr'; // the wallet linked to K
+    assert.strictEqual((await post('promo-contract', { noid: 4, asset_id: 'live1', payer }))[0], 400, 'only the published tiers are for sale');
+    assert.strictEqual((await post('promo-contract', { noid: 1, asset_id: 'live1', payer: 'nope' }))[0], 400);
+    assert.strictEqual((await post('promo-contract', { noid: 1, asset_id: 'no-such-token', payer }))[0], 400);
+    const [cStatus, order] = await post('promo-contract', { noid: 1, asset_id: 'live1', payer });
+    assert.strictEqual(cStatus, 200);
+    assert.strictEqual(order.status, 'awaiting');
+    assert.strictEqual(order.noid, 1);
+    assert.strictEqual(order.secs, 3600, '1 NOID buys an hour');
+    assert.match(order.pay_address, /^o1[02-9ac-hj-np-z]{6,120}$/, 'the contract has a real o1 address to pay');
+    assert.ok(order.deadline_height > tip);
+    assert.strictEqual(lastObject.kind, 'refundable_payment');
+    assert.strictEqual(lastObject.payer, payer, 'the contract names the buyer as the payer');
+    assert.strictEqual(lastObject.payee, PAY_ADDR, 'and us as the payee');
+    assert.ok(lastObject.expiry_height > tip, 'and carries a deadline');
+    // Unfunded: nothing shows in Promoted, and the order stays awaiting.
+    await tick();
+    assert.strictEqual((await get('noid-order?id=' + order.id))[1].status, 'awaiting');
+    assert.ok(!(await get('boosts?kind=token'))[1].boosts.some((b) => b.pack === 'noid'));
+    // Funded: the node reports the instance, the next tick turns the order on, and it shows in Promote.
+    objSlots[order.opening_hex] = [{ slot_index: 12, creation_id: 7 }];
+    await tick();
+    const lived = (await get('noid-order?id=' + order.id))[1];
+    assert.strictEqual(lived.status, 'live');
+    assert.ok(lived.ends > Date.now());
+    const panel = (await get('boosts?kind=token'))[1];
+    const promoted = panel.boosts.find((b) => b.pack === 'noid');
+    assert.ok(promoted, 'a paid promotion appears in the Promoted panel');
+    assert.strictEqual(promoted.label, 'Promoted');
+    assert.match(panel.disclaimer, /Paid promotion/, 'and it is never shown without the paid note');
+    // The second order for the same token is refused while one is live.
+    assert.strictEqual((await post('promo-contract', { noid: 1, asset_id: 'live1', payer }))[0], 400);
+    // Past the deadline with nothing funded, the buyer can take the money back.
+    const [dStatus, dead] = await post('api-time', { noid: 3, payer: 'o1rfundqqqqqqqqq' });
+    assert.strictEqual(dStatus, 200);
+    tip = dead.deadline_height + 1;
+    await tick();
+    assert.strictEqual((await get('noid-order?id=' + dead.id))[1].status, 'refundable', 'an uncollected order becomes the payer\'s again');
+    // API time: 1 NOID is 1 day, granted when the contract is funded, tied to the account that pays.
+    const [aStatus, days] = await post('api-time', { noid: 1, payer }, K);
+    assert.strictEqual(aStatus, 200);
+    assert.strictEqual(days.secs, 86400, '1 NOID buys a day of API time');
+    assert.strictEqual((await get('me', { headers: K }))[1].api_until ?? null, null, 'nothing is granted before the payment is on chain');
+    objSlots[days.opening_hex] = [{ slot_index: 13, creation_id: 8 }];
+    await tick();
+    const meNow = (await get('me', { headers: K }))[1];
+    assert.ok(Number(meNow.api_until) > Date.now(), 'a funded contract grants the days to the account that pays');
+    assert.strictEqual((await get('noid-order?id=' + days.id))[1].status, 'live');
+    // The same contract cannot be granted twice.
+    const before = Number((await get('me', { headers: K }))[1].api_until);
+    await tick();
+    assert.strictEqual(Number((await get('me', { headers: K }))[1].api_until), before, 'a second pass over the same contract changes nothing');
+    // An account with bought API time is a paid account even with no credits.
+    const [, fresh] = await post('account', {});
+    const FK = { 'x-api-key': fresh.key };
+    await post('link', { address: 'o1tmetakerqqqqqqq' }, FK);
+    const [, t2] = await post('api-time', { noid: 1, payer: 'o1tmetakerqqqqqqq' }, FK);
+    objSlots[t2.opening_hex] = [{ slot_index: 14, creation_id: 9 }];
+    await tick();
+    const freshMe = (await get('me', { headers: FK }))[1];
+    assert.strictEqual(freshMe.credits, 0);
+    assert.strictEqual(freshMe.tier, 'paid', 'API time alone makes an account paid');
+    assert.ok(freshMe.rate_limit_per_min > 120);
+  }
 });
 
 test('migrates a text-hash archive and backups round-trip', () => {
@@ -1792,6 +1875,13 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.doesNotMatch(w, /No activity this explorer has retained/);
   assert.doesNotMatch(html, /Your own keys, made and kept/);
   assert.doesNotMatch(html, /Writing the seed down is the whole backup/);
+  // Paid promotions and API time: the pages carry the contract cards and state the terms.
+  assert.match(html, /function noidTierCard\(kind, opts = \{\}\) \{/);
+  assert.match(html, /noidTierCard\('promo', \{ payer: walletId \}\)/);
+  assert.match(html, /noidTierCard\('api', \{ payer: \(WalletDex\.identity\(\)\?\.address \|\| ''\) \}\)/);
+  assert.match(html, /you can take the money back after it/, 'the page states the refund in plain words');
+  assert.match(html, /wireNoidTierCard\('api'\)/);
+  assert.doesNotMatch(html, /Paid promotion\. Not a recommendation[\s\S]{0,400}API time buys requests/, 'API time is not labelled a promotion');
   assert.match(w, /no1d_wallet_pending_v1/);
   assert.match(w, /PEND_MAX_WAIT_MS/);
   assert.match(w, /function settled\(p, unitsNow\)/);

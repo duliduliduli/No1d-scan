@@ -362,6 +362,46 @@ The v2.1 intent flow pays no explorer fee: the native request has no fee output,
 - **The owner trims copy, and the pages stay terse.** The wallet page keeps no wallet-intro card, no seed-reassurance line, no "Spending / what this build can and cannot do" card, no activity card, no "Explorer index as of block N" line, and no explanatory clause after the total - he asked for all of them gone. Before adding a paragraph of reassurance or a caption to a page he uses daily, assume it will be deleted; states, balances and buttons stay.
 - **The amount field now says what it buys or sells.** Both trade panels show an estimate under the slider: buying divides by the mark price, selling uses the *implied* price from the node's payout for the whole balance when the server quoted one (honest number, since the curve's price is not the mark), and falls back to the mark price with the wording saying so. Both lines end by saying the node quotes the exact figure on review.
 
+## 14d. Paid promotions and API time through a real contract (added 2026-11-05)
+
+Trading has no fee and never will. Promotions and API time are the paid lines, and both are bought with
+NOID through a real Parano1d contract, not a fee address with dust digits.
+
+- **The chain has a contract runtime.** `paranoid_getContractProtocol` on the live node: ABI v3, 16
+  instructions, 2 persistent registers, classes small/large/native, active since block 210,537.
+  A contract is a *policy on an output*, not a program: a rule about when and to whom value may move.
+- **`contracts.js`** builds a `refundable_payment` object for each order: payer = the buyer's address,
+  payee = ours (`PROMO_PAYEE`, falling back to `PAY_ADDRESS`), expiry = now + the tier's duration + 120
+  blocks of grace. `paranoid_createObject` returns an object with an ordinary `o1…` address
+  (`pay_address`), and the buyer pays that address like any other NOID payment.
+- **What the contract enforces:** before the deadline the payee can claim and close; after it the payer
+  can recover. The chain holds the money, this site holds nothing. The page says exactly that.
+- **What the site enforces:** the promotion window and the API days. A funded instance is the only proof
+  of payment (`paranoid_getObjectInstances`), and `contracts.watch(tip)` runs on every indexer tick, so
+  an order turns on by itself when the block carrying the payment lands. Unfunded past the deadline the
+  order is marked `refundable`, and the buyer takes the money back on chain.
+- **Tiers.** Promotions: 1 NOID = 1 hour, then 3/10/25/50/100 NOID = 6 h / 1 d / 4 d / 9 d / 20 d.
+  API time is linear with volume rewards: 1 NOID = 1 day, then 3/10/25/50/100 NOID = 3 / 11 / 30 / 65 / 140 days.
+- **Routes.** `POST /api/promo-contract { noid, asset_id, payer }`, `POST /api/api-time { noid, payer }`
+  (key optional; API time attaches to the account whose linked wallet pays), `GET /api/noid-order?id=…`
+  or `?payer=…`. Live promotions are merged into `/api/boosts` with `pack: 'noid'`, so the existing
+  Promoted panel, the bolt mark and the paid-promotion disclaimer carry them unchanged.
+- **API time is a real paid tier.** `accounts.api_until` (additive column). While it is in the future
+  `billing.paid()` is true: requests do not draw down credits and the higher rate limit applies. The
+  grant is idempotent: the contract id is the ledger ref, so a second pass over the same contract adds
+  nothing.
+- **UI.** `noidTierCard('promo')` on `/promote` and `noidTierCard('api')` on `/account`, both wired by
+  `wireNoidTierCard`, both polling `/api/noid-order` every 8 s and remembering the order in
+  `localStorage['no1d_noid_order_promo' | 'no1d_noid_order_api']`.
+- **Collecting.** Claiming our side is a wallet action on the machine that holds the payee key; a server
+  cannot do it and must not pretend to. On the droplet that is the node's own wallet:
+  `parano1d contracts call <object.json> <slot> <creation_id> --close --pay-to <address>`. **Set
+  `PROMO_PAYEE` to an address whose key is on the droplet node** (the node wallet, index 13), or the
+  orders will simply refund to the buyer after the deadline.
+- **Open item.** A buyer pays from their own Parano1d wallet today, because the browser wallet cannot yet
+  send a plain NOID payment. Funding the object address is an ordinary send, so the day the send screen
+  lands, this flow becomes one-click from the site.
+
 ## 15. Quick verification commands
 
 

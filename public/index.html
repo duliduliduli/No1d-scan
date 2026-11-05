@@ -799,6 +799,7 @@
   .metapill b { font:600 13px var(--ui) } .metapill .px { font:12px var(--mono) }
   .metapill .logo { width:18px; height:18px; font-size:8px }
   #boostform { border-color:var(--line) }
+  .nptiers { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:6px; margin:8px 0 }
   #promote .opt { border-color:var(--line); border-radius:var(--r) }
   #promote .opt:has(input:checked) { border-color:var(--accent); box-shadow:none; background:var(--accent-soft) }
   #promote fieldset { border-color:var(--line); border-radius:var(--r) }
@@ -3050,6 +3051,94 @@ function wireEnhance(d, t, demo, page) {
   });
 }
 
+// Paid promotions and API time, bought with NOID through a real Parano1d contract.
+// The node mints a contract with its own o1 address; the buyer pays that address like any
+// other NOID payment. Before the deadline we can claim it, after it the buyer takes it back.
+// The page says exactly that and nothing more.
+const NOID_PROMO_TIERS = [[1, '1 hour'], [3, '6 hours'], [10, '1 day'], [25, '4 days'], [50, '9 days'], [100, '20 days']];
+const NOID_API_TIERS = [[1, '1 day'], [3, '3 days'], [10, '11 days'], [25, '30 days'], [50, '65 days'], [100, '140 days']];
+function noidTierCard(kind, opts = {}) {
+  const tiers = kind === 'api' ? NOID_API_TIERS : NOID_PROMO_TIERS;
+  const what = kind === 'api' ? 'API time' : 'a promotion';
+  const id = kind === 'api' ? 'apitime' : 'noidpromo';
+  const saved = readNoidOrder(kind);
+  return `<div class="card" id="${id}"><h2>${kind === 'api' ? 'API time' : 'Promote with NOID'} <small>paid on chain in a contract</small></h2>
+    ${kind === 'api' ? '<p class="fine">API time buys requests, not a promotion. It attaches to the account whose wallet pays.</p>' : `<p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>`}
+    <p class="fine">You pay NOID into a contract the node builds for your order. It names you as the payer and us as the payee, and it carries a deadline: we can collect before it, you can take the money back after it. Nothing is held by this site, and the promotion or the API days start the moment the payment confirms.</p>
+    <div class="nptiers">${tiers.map(([n, label], i) => `<label class="opt"><input type="radio" name="nptier" value="${n}"${i === 0 ? ' checked' : ''}> <b>${n} NOID</b> <span class="muted">${kind === 'api' ? `${label} of API time` : `promotion for ${label}`}</span></label>`).join('')}</div>
+    ${kind === 'promo' ? `<label>Token <span class="muted">ticker or token id</span><input name="npasset" id="npasset" placeholder="e.g. PCAT" spellcheck="false" value="${esc(opts.asset || '')}"></label>` : ''}
+    <label>Your address <span class="muted">the o1 address you will pay from</span><input name="nppayer" id="nppayer" placeholder="o1…" spellcheck="false" value="${esc(opts.payer || '')}"></label>
+    <div class="row"><button type="button" id="npmake">Build the contract</button></div>
+    <div id="npout" aria-live="polite">${saved ? noidOrderHtml(saved) : ''}</div></div>`;
+}
+function readNoidOrder(kind) {
+  try { return JSON.parse(localStorage.getItem('no1d_noid_order_' + kind) || 'null'); } catch { return null; }
+}
+function saveNoidOrder(kind, order) {
+  try { order ? localStorage.setItem('no1d_noid_order_' + kind, JSON.stringify(order)) : localStorage.removeItem('no1d_noid_order_' + kind); } catch {}
+}
+function noidOrderHtml(o) {
+  if (!o) return '';
+  const live = o.status === 'live';
+  const done = o.status === 'done';
+  const gone = o.status === 'refundable';
+  const what = o.kind === 'api' ? `${Math.round(o.secs / 86400)} days of API time` : `the promotion`;
+  if (live) return `<p class="msg">Paid. <b>${esc(what)}</b> started ${esc(when(o.starts))} and runs to ${esc(when(o.ends))}.${o.kind === 'promo' ? ' It shows in the Promoted section with the paid-promotion note.' : ''}</p>`;
+  if (done) return `<p class="msg">Finished ${esc(when(o.ends))}. Pay again to start another run.</p>`;
+  if (gone) return `<p class="msg">The deadline passed before we collected, so the money is yours to take back from <span class="mono">${esc(o.pay_address)}</span>.</p>`;
+  return `<p>Send <b>${o.noid} NOID</b> to <span class="mono">${esc(o.pay_address)}</span> ${copyBtn(o.pay_address)}. The order turns on by itself when the block carrying it lands, and this card updates without a reload.</p>
+    <p class="fine">Contract deadline: block ${esc(String(o.deadline_height))}. Before it we can collect; after it you can recover the NOID. Contract id ${esc(o.id)}.</p>`;
+}
+function wireNoidTierCard(kind) {
+  const card = $(kind === 'api' ? 'apitime' : 'noidpromo');
+  if (!card) return;
+  const out = $('npout');
+  const paint = () => { const o = readNoidOrder(kind); if (o) out.innerHTML = noidOrderHtml(o); };
+  paint();
+  const id = readNoidOrder(kind)?.id;
+  if (id) noidWatch(kind, id);
+  $('npmake').onclick = async () => {
+    const msg = (t, bad) => { out.innerHTML = `<p class="msg${bad ? ' bad' : ''}">${esc(t)}</p>`; };
+    const payer = $('nppayer').value.trim();
+    if (!/^o1[02-9ac-hj-np-z]{6,120}$/.test(payer)) return msg('Enter the o1 address you will pay from.', true);
+    const noid = Number(card.querySelector('input[name="nptier"]:checked')?.value || 0);
+    let asset_id = '';
+    if (kind === 'promo') {
+      const q = $('npasset').value.trim();
+      if (!q) return msg('Pick a token to promote.', true);
+      try {
+        const found = await api('tokens?q=' + encodeURIComponent(q) + '&limit=8');
+        const list = found.tokens || [];
+        const hit = list.find((t) => String(t.id).toLowerCase() === q.toLowerCase()) || list.find((t) => String(t.ticker || '').toLowerCase() === q.toLowerCase()) || (list.length === 1 ? list[0] : null);
+        if (!hit) return msg(list.length ? `Which one? Try the exact ticker or id: ${list.slice(0, 5).map((t) => t.ticker).join(', ')}` : 'No token matched that.', true);
+        asset_id = hit.id;
+      } catch (e) { return msg(e.message, true); }
+    }
+    $('npmake').disabled = true;
+    try {
+      const made = await api(kind === 'api' ? 'api-time' : 'promo-contract', { noid, payer, asset_id });
+      saveNoidOrder(kind, made);
+      out.innerHTML = noidOrderHtml(made);
+      noidWatch(kind, made.id);
+    } catch (e) { msg(e.message, true); }
+    $('npmake').disabled = false;
+  };
+}
+let noidTimer = null;
+function noidWatch(kind, id) {
+  clearInterval(noidTimer);
+  noidTimer = setInterval(async () => {
+    try {
+      const o = await api('noid-order?id=' + encodeURIComponent(id));
+      if (o && o.status !== readNoidOrder(kind)?.status) { saveNoidOrder(kind, o); }
+      else if (o) saveNoidOrder(kind, o);
+      const out = $('npout');
+      if (out && o) out.innerHTML = noidOrderHtml(o);
+      if (!o || o.status === 'done') clearInterval(noidTimer);
+    } catch {}
+  }, 8000);
+}
+
 function boostCard(kind, id, promo, demo) {
   const live = (promo?.boosts || [])[0];
   const packs = promo?.packs || [];
@@ -3802,6 +3891,7 @@ const pages = {
           ${(P.plans || []).map((p) => `<tr><td><b>${esc(p.label)}</b></td><td>${esc(p.noid)} NOID${p.usd_at_market ? ` <span class="muted">(≈ $${esc(p.usd_at_market)})</span>` : ''}</td><td>${n(p.credits)}</td><td>${n(p.requests)}</td></tr>`).join('')}
         </table>
         <p class="muted">Credits never expire and there is no subscription. Payable in NOID only, on chain, to this explorer's own address${P.noid ? ` <span class="mono">${esc(P.noid.address)}</span>` : ''}. Card payments are not accepted.</p></div>
+      ${noidTierCard('api', { payer: (WalletDex.identity()?.address || '') })}
       <div class="card" id="wcard"></div>
       <div class="card" id="acct"></div>
       <div class="card"><h2>API reference</h2>
@@ -3827,6 +3917,12 @@ const pages = {
         <p><b>Errors</b> are JSON <code>{"error": "…"}</code>: 400 bad input · 401 missing or unknown key · 402 out of credits · 404 not found · 429 rate limited (see <code>retry-after</code>) · 502 node or upstream unavailable, retry shortly. <code>/live</code> allows 10 open streams per IP.</p>
         <p><b>Coverage:</b> headers are complete since genesis; transaction bodies exist only for blocks this explorer captured while the node retained them (the last 42 blocks), see <code>coverage</code> in <code>/stats</code>. Holder counts and the rich list are approximate snapshots, taken every 2 hours.</p></div>`;
     const box = $('acct');
+    // API time bought with a NOID contract; the card shows its own order and polls the chain.
+    wireNoidTierCard('api');
+    if (me && Number(me.api_until) > Date.now()) {
+      const el = $('apitime');
+      if (el) el.insertAdjacentHTML('afterbegin', `<p class="msg">API time is active on this key until ${esc(when(me.api_until))}.</p>`);
+    }
 
     // The wallet in this browser is the account. Its address is remembered in the clear on this device, so the page
     // can show holdings and trade without a key, and without ever seeing a seed. Credits, the watchlist and the API
@@ -4737,7 +4833,8 @@ const pages = {
     app.innerHTML = `<div class="card"><h2>Contracts</h2><p class="muted">${esc(note)}</p>${proto}</div>${lists}<div class="tpls">${cards}</div>`;
   },
   verified: () => pages.promote(true),
-  async promote(verified = false) {
+  
+async promote(verified = false) {
     const params = new URLSearchParams(location.search);
     const demo = params.get('demo') === '1';
     const dq = demo ? '&demo=1' : '';
@@ -4749,7 +4846,8 @@ const pages = {
     const packs = promo.packs || [];
     const back = params.get('promote') === 'paid' || params.get('enhance') === 'paid'
       ? '<p class="msg">If your payment went through, the order is in review. Nothing shows until it is approved.</p>' : '';
-    app.innerHTML = `${back}<div class="card" id="promote"><h2>${verified ? 'Verified accounts' : 'Promote <span aria-hidden="true">⚡</span>'} <small>native tokens</small></h2>
+    const walletId = (() => { try { return WalletDex.identity?.()?.address || ''; } catch { return ''; } })();
+    app.innerHTML = `${back}${verified ? '' : noidTierCard('promo', { payer: walletId })}<div class="card" id="promote"><h2>${verified ? 'Verified accounts' : 'Promote <span aria-hidden="true">⚡</span>'} <small>native tokens</small></h2>
       <p class="paidnote"><a href="/terms#promotion" data-link>${esc(PAID)}</a></p>
       ${verified ? '<p class="fine">A verified account puts a banner, an icon, a short description and your website and X links on the token page, plus the ⚡ mark next to the ticker. One-time fee, paid on chain in NOID. Shown as soon as the payment confirms; there is no waiting list.</p>' : ''}
       <p class="fine">Anyone can promote any token. Every order is reviewed before it goes live. A paid order unlocks a banner, a website and an X link on the token page; tokens without one show no banner at all.</p>
@@ -4851,6 +4949,7 @@ const pages = {
         b.disabled = false;
       }
     });
+    wireNoidTierCard('promo');
   },
   async admin() {
     app.innerHTML = `<div class="card" id="admin"><h2>Profile review</h2>

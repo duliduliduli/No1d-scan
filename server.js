@@ -594,6 +594,8 @@ async function tick() {
   await backfillTrades().catch((e) => console.error('trades:', e.message));
   try { maybeCold(tip); } catch (e) { console.error('cold:', e.message); }
   await bill.settleNoid(tip);
+  // A funded contract instance is the proof of payment for a promotion or API time.
+  await contracts.watch(tip).catch((e) => console.error('contracts:', e.message));
   // Token indexing must not pause block indexing: a missing v2.1 method is normal until the node ships it.
   if (await assets.sync()) cache.clear();
   Object.assign(indexer, { tip, at: Date.now(), error: null });
@@ -837,6 +839,17 @@ profiles.setFallback({ extras: (id) => boosts.extrasFor(id), banner: (id) => boo
 const intents = require('./intent.js')(rpc, () => indexer.tip);
 const withIntent = (out) => { if (out?.swap) out.swap = { ...out.swap, intent: intents.info() }; return out; };
 const bill = require('./billing.js')(db, rpc, () => price.now && { usd: price.now.usd, at: price.now.fetched_at }, () => indexer.tip, profiles, boosts);
+// Paid promotions and API time, bought with NOID through a real Parano1d contract.
+// We create the object; the buyer pays it like any other NOID payment; the chain
+// enforces the refund after the deadline and we only read the funded instance.
+const contracts = require('./contracts.js')(db, rpc, {
+  payee: process.env.PROMO_PAYEE || process.env.PAY_ADDRESS || null,
+  apiPayee: process.env.API_PAYEE || process.env.PROMO_PAYEE || process.env.PAY_ADDRESS || null,
+  tip: () => indexer.tip,
+  lookupAsset: (id) => (assets.token(id, new URLSearchParams(''))?.token || null),
+  byWallet: (address) => db.prepare('select id from accounts where wallet = ? limit 1').get(address),
+  onApiTime: (account, secs, ref) => bill.grantTime(account, secs, ref),
+});
 
 // One quick_check at startup (DB_QUICK_CHECK=0 skips it). Logs either way; never rewrites the file.
 let dbCheck = { ok: true, result: 'skipped' };
@@ -1367,6 +1380,10 @@ const routes = {
   collection: async (...a) => payChains(profiles.decorate(await assets.collection(...a))),
   boosts: async (_, params) => {
     const page = boosts.list(params);
+    // Contract promotions are paid, live and public: same panel, same disclaimer.
+    for (const p of contracts.promotions()) {
+      if (p.asset_id && !page.boosts.some((b) => b.asset_id === p.asset_id)) page.boosts.push({ ...p, label: 'Promoted' });
+    }
     const decorated = profiles.decorate({ demo: page.demo, tokens: page.boosts.map((b) => b.asset) });
     page.boosts.forEach((b, i) => { b.asset = decorated.tokens[i]; });
     page.usdc_chains = bill.usdcChains();
@@ -1514,6 +1531,19 @@ async function handle(req, res) {
       if (body.product !== 'boost') return send(400, { error: 'product must be enhanced or boost' });
       const made = boosts.create(acct, { kind: 'token', asset_id: body.token_id, pack: body.pack }, profiles.extras(body));
       return send(200, { product: 'boost', ...made }, { 'cache-control': 'no-store' });
+    }
+    // Paid promotions and API time: the buyer pays a real contract, and the funded
+    // instance is what turns the order on. No account and no key are needed to buy
+    // a promotion; API time is tied to the account whose wallet pays.
+    if ((name === 'promo-contract' || name === 'api-time') && req.method === 'POST') {
+      const body = parseJson(await readBody(req, 20_000));
+      const made = await contracts.create(name === 'api-time' ? 'api' : 'promo', { ...body, account: acct?.id || null });
+      return send(200, made, { 'cache-control': 'no-store' });
+    }
+    if (name === 'noid-order' && req.method === 'GET') {
+      const id = url.searchParams.get('id');
+      const out = id ? contracts.status(id) : contracts.mine(url.searchParams.get('payer'));
+      return out == null ? send(404, { error: 'unknown order' }) : send(200, out, { 'cache-control': 'no-store' });
     }
     if (name === 'swap-submit' && req.method === 'POST') return send(200, await intents.submit(parseJson(await readBody(req, 4_200_000))), { 'cache-control': 'no-store' });
     if (name === 'profile' && req.method === 'POST') {

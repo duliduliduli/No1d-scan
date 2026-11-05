@@ -57,6 +57,9 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
   // The o1… address a browser wallet derives is the account's public identity. Only the address is stored, never a
   // seed or a secret: it is public chain data, and a key can be linked to at most one address at a time.
   try { db.exec('alter table accounts add column wallet text'); } catch {}
+  // API time bought with a NOID contract: while this is in the future the account is a paid account,
+  // so requests do not draw down prepaid credits and the higher rate limit applies.
+  try { db.exec('alter table accounts add column api_until integer'); } catch {}
   db.exec('update noid_topups set dust = amount % 10000 where dust is null');
   try { db.exec('drop index if exists noid_topups_open; create unique index if not exists noid_topups_dust on noid_topups(dust) where paid_ref is null'); } catch {}
   // Expired orders are kept as records (expired_at). Their dust is cleared HOLD_MS later so the digits can be reused;
@@ -71,10 +74,11 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
   let baseline = freshSeen;
   const q = {
     insertAccount: db.prepare('insert into accounts (id, key_hash, created) values (?, ?, ?)'),
-    byKey: db.prepare('select id, credits, requests, created, wallet from accounts where key_hash = ?'),
-    byId: db.prepare('select id, credits, requests, created, wallet from accounts where id = ?'),
+    byKey: db.prepare('select id, credits, requests, created, wallet, api_until from accounts where key_hash = ?'),
+    byId: db.prepare('select id, credits, requests, created, wallet, api_until from accounts where id = ?'),
     setWallet: db.prepare('update accounts set wallet = ? where id = ?'),
-    byWallet: db.prepare('select id, credits, requests, created, wallet from accounts where wallet = ? limit 1'),
+    byWallet: db.prepare('select id, credits, requests, created, wallet, api_until from accounts where wallet = ? limit 1'),
+    addTime: db.prepare('update accounts set api_until = ? where id = ?'),
     addCredits: db.prepare('update accounts set credits = credits + ? where id = ?'),
     takeCredits: db.prepare('update accounts set credits = credits - ? where id = ? and credits >= ?'),
     ledger: db.prepare('insert into ledger (account, delta, reason, ref, at) values (?, ?, ?, ?, ?)'),
@@ -126,11 +130,38 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
 
   const account = (key) => (typeof key === 'string' && /^nk_[0-9a-f]{40}$/.test(key) ? q.byKey.get(hashKey(key)) : undefined);
 
-  // Called for every keyed data request: 1 credit per REQUESTS_PER_CREDIT.
+  // Called for every keyed data request: 1 credit per REQUESTS_PER_CREDIT. An account with bought
+  // API time is paid until that moment, so its requests are counted but they do not draw credits down.
   function countRequest(acct) {
     const { requests } = q.countReq.get(acct.id);
     q.useDay.run(acct.id, today(), 1, 0);
+    if (paid(acct)) return;
     if (requests % REQUESTS_PER_CREDIT === 0) spend(acct.id, 1, `API usage (${REQUESTS_PER_CREDIT.toLocaleString()} requests)`);
+  }
+  // Paid means either prepaid credits or API time bought through a NOID contract.
+  function paid(acct) {
+    if (!acct) return false;
+    if (Number(acct.credits) > 0) return true;
+    const row = q.byId.get(acct.id);
+    return !!(row && row.api_until > Date.now());
+  }
+  // API time is granted from the chain, not from a webhook: `ref` is the contract order id, so a
+  // second pass over the same paid contract is a no-op.
+  function grantTime(account, secs, ref) {
+    const row = q.byId.get(account);
+    if (!row) return false;
+    const days = Math.round(secs / 86400);
+    try {
+      tx(() => {
+        const from = Math.max(Date.now(), Number(row.api_until) || 0);
+        q.ledger.run(account, 0, `API time bought with NOID (${days} day${days === 1 ? '' : 's'})`, ref, Date.now());
+        q.addTime.run(from + secs * 1000, account);
+      });
+      return true;
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE')) return false; // already granted for this contract
+      throw e;
+    }
   }
 
   // NOID has no payment memo, so an output on PAY_ADDRESS pays the order whose last 4 digits ("dust") match, if:
@@ -290,7 +321,8 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
     'GET me': (acct) => {
       if (!acct) throw bad('missing or unknown API key', 401);
-      return { ...acct, tier: acct.credits > 0 ? 'paid' : 'free', rate_limit_per_min: acct.credits > 0 ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
+      const time = Number(q.byId.get(acct.id)?.api_until) || 0;
+      return { ...acct, tier: acct.credits > 0 || time > Date.now() ? 'paid' : 'free', api_until: time || null, rate_limit_per_min: paid(acct) ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
     },
     'GET pricing': () => pricing(),
     // Wallet-as-account: the browser wallet's o1… address is the public half of the login. Linking stores the address
@@ -374,5 +406,5 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     },
   };
 
-  return { account, countRequest, settleNoid, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
+  return { account, countRequest, paid, grantTime, settleNoid, routes, pricing, pollUsdc: () => usdcPay.poll(), usdcChains: () => usdcPay.chains() };
 };
