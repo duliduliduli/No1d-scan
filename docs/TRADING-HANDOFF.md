@@ -131,4 +131,5 @@ three browser-proving modules. Seed → secret derivation copies Core's
   explicit approval (HANDOFF.md, rules).
 - Rebuilding the engine runs third-party Rust code, which the session's Auto permission mode
   blocks; the owner switched to Accept edits to allow it.
-- The general project handoff is `HANDOFF.md` (section 13 covers this feature).
+- The general project handoff is `HANDOFF.md` (section 14 covers this feature; section 13
+  covers native token names and logos).
