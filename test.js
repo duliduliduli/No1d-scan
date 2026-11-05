@@ -600,6 +600,8 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /class="iauto on"/);
   assert.match(homeHtml, /id="balauto"/);
   assert.doesNotMatch(homeHtml, /bottom:\s*56px/);
+  assert.match(homeHtml, /<span class="go">Explore tokens →<\/span>/, 'the home card button says just Explore tokens');
+  assert.doesNotMatch(homeHtml, /Open Explore/);
   assert.match(homeHtml, /data-star/);
   assert.match(homeHtml, /id="wcard"/, 'the account page leads with the wallet card');
   assert.match(homeHtml, /no1d_wallet_identity_v1/, 'the site knows the browser identity key');
