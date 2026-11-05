@@ -1763,6 +1763,8 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.match(html, /<p class="fine">Trading is not investment advice/);
   // A submitted trade is kept in this browser and said out loud until the chain shows it.
   assert.match(html, /id="trest"/, 'the trade card says what the amount buys or sells');
+  assert.doesNotMatch(html, /n2\(/, 'the tx page uses helpers that exist (n2 was never defined and broke the page)');
+  assert.match(html, /const n0 = \(x\)/);
   assert.match(html, /function paintEst\(\)/, 'the estimate is painted as the amount changes');
   assert.match(w, /id="test"/, 'the wallet panel says the same');
   assert.match(w, /function paintEst\(\)/);

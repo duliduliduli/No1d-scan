@@ -3632,8 +3632,8 @@ const pages = {
     const xfers = (effects?.transfers || []);
     const did = (trades.length || xfers.length) ? `<div class="card"><h2>What it did <small class="muted">indexed here</small></h2>
       <table><thead><tr><th>Token</th><th>Side</th><th class="num">Tokens</th><th class="num">NOID</th></tr></thead><tbody>
-      ${trades.map((tr) => `<tr><td>${link('token', tr.token_id)} <span class="muted">${esc(short(tr.token_id, 6))}</span></td><td class="${tr.side === 'buy' ? 'up' : 'down'}">${esc(tr.side)}</td><td class="num">${esc(n2(tr.token_amount))}</td><td class="num">${esc(noid(tr.noid_micronoid))}</td></tr>`).join('')}
-      ${xfers.map((x) => `<tr><td>${link('token', x.token_id)} <span class="muted">${esc(short(x.token_id, 6))}</span></td><td>transfer</td><td class="num">${esc(n2(x.amount))}</td><td class="num">–</td></tr>`).join('')}
+      ${trades.map((tr) => `<tr><td>${link('token', tr.token_id)} <span class="muted">${esc(short(tr.token_id, 6))}</span></td><td class="${tr.side === 'buy' ? 'up' : 'down'}">${esc(tr.side)}</td><td class="num">${esc(n0(tr.token_amount))}</td><td class="num">${esc(noid(tr.noid_micronoid))}</td></tr>`).join('')}
+      ${xfers.map((x) => `<tr><td>${link('token', x.token_id)} <span class="muted">${esc(short(x.token_id, 6))}</span></td><td>transfer</td><td class="num">${esc(n0(x.amount))}</td><td class="num">–</td></tr>`).join('')}
       </tbody></table>
       <p class="fine">Read from the trade and transfer tables this explorer keeps permanently, keyed by this txid.</p></div>` : '';
     const parts = feePartsView(details);
