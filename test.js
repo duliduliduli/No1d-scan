@@ -623,7 +623,8 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /data-boost=/);
   assert.match(homeHtml, /id="promotion"/);
   assert.match(homeHtml, /aria-label="Promoted"/);
-  assert.match(homeHtml, /@keyframes promocrwl/);
+  assert.doesNotMatch(homeHtml, /@keyframes promocrwl/, 'the Promoted strip is a static label, not a scrolling ticker');
+  assert.match(homeHtml, /class="promobar"><span class="pill promo"/);
   assert.match(homeHtml, /class="metapill"/);
   assert.match(homeHtml, /id="topclist"/);
   assert.match(homeHtml, /Connected nodes/);

@@ -1388,6 +1388,9 @@ const STATIC = {
   '/wallet.js': 'text/javascript; charset=utf-8',
   '/bip39.txt': 'text/plain; charset=utf-8',
   '/noid-wallet.wasm': 'application/wasm',
+  // IBM Plex (SIL Open Font License), served from here so visitors never call a font CDN.
+  '/fonts/plex-sans-400.woff2': 'font/woff2', '/fonts/plex-sans-500.woff2': 'font/woff2', '/fonts/plex-sans-600.woff2': 'font/woff2',
+  '/fonts/plex-mono-400.woff2': 'font/woff2', '/fonts/plex-mono-500.woff2': 'font/woff2',
 };
 
 function readBody(req, max = 64_000) {
@@ -1410,7 +1413,7 @@ async function handle(req, res) {
   try {
     const url = new URL(req.url, 'http://x');
     if (STATIC[url.pathname]) {
-      res.writeHead(200, { 'content-type': STATIC[url.pathname], 'cache-control': 'public, max-age=86400' });
+      res.writeHead(200, { 'content-type': STATIC[url.pathname], 'cache-control': url.pathname.startsWith('/fonts/') ? 'public, max-age=31536000, immutable' : 'public, max-age=86400' });
       return res.end(fs.readFileSync(path.join(__dirname, 'public', url.pathname)));
     }
     if (!url.pathname.startsWith('/api/')) return req.method === 'GET' ? send(200, fs.readFileSync(INDEX)) : send(405, { error: 'GET only' });
