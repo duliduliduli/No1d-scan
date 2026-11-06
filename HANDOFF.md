@@ -516,6 +516,13 @@ control over the account".
 - Tests added in `test.js`: token lifecycle, no secret in the list, expiry 402 for scripts / flagged
   for own pages, delete revokes while the account key keeps working, keep-≥1 rule, raw secret never stored.
 
+### Token-page stats: no standalone 24h change chip (2026-11-06)
+
+The mobile token-page stats box (`winBox`, used for tokens only) no longer shows a big `.winpct`
+change figure (e.g. a red "-42.1%") above the Txns/Volume/Traders row — the owner marked it as a
+looks-clickable-but-isn't chip to remove. Change % is still visible in the ticker column and the
+desktop `statHead`. Collections' own `winbox` (colPanel) is unchanged.
+
 ## 15. Quick verification commands
 
 

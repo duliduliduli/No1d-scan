@@ -2280,7 +2280,7 @@ function splitBar(lName, lVal, rName, rVal, lRaw, rRaw) {
 }
 function winBox(t, key) {
   const w = (t.windows && t.windows[key]) || {};
-  return `<div class="winbox"><div class="winpct">${chgHtml(t.change?.[key])}</div><div class="winnums">
+  return `<div class="winbox"><div class="winnums">
       <span><small>Txns</small><b>${n0(w.txns ?? t.txns)}</b></span>
       <span><small>Volume</small><b>${esc(fmtNoid(w.volume_micronoid ?? t.volume_micronoid))}</b></span>
       <span><small>Traders</small><b>${n0(w.makers ?? t.makers)}</b></span>
