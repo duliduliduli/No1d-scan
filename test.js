@@ -637,6 +637,13 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /data-star/);
   assert.match(homeHtml, /id="wcard"/, 'the account page leads with the wallet card');
   assert.match(homeHtml, /Buy NOID on SafeTrade/, 'the NOID price card offers an easy buy button');
+  // Launchpad in the menu, and the API link says just API.
+  assert.match(homeHtml, /href="\/launch" data-link>Launchpad</, 'the menu has a Launchpad entry');
+  assert.match(homeHtml, /href="\/account" data-link>API<\/a>/, 'the account link says just API');
+  assert.doesNotMatch(homeHtml, /API &amp; Credits/, 'no menu item is called API & Credits any more');
+  assert.match(homeHtml, /'promote', 'launch'\]/, 'the launch page is a named route');
+  assert.match(homeHtml, /async launch\(\)/, 'the launch page exists');
+  assert.match(homeHtml, /Review launch/, 'the launch page offers a review button');
   assert.match(homeHtml, /no1d_wallet_identity_v1/, 'the site knows the browser identity key');
   assert.match(homeHtml, /WalletDex\.identity/, 'the account page can read the wallet identity');
   assert.doesNotMatch(homeHtml, /Create free account/, 'no sign-up wall in front of a wallet that already exists');
@@ -1865,6 +1872,9 @@ test('the trade engine matches the wallet engine and proves on this machine', as
   const w = fs.readFileSync(path.join(__dirname, 'public/wallet.js'), 'utf8');
   assert.match(w, /MAINNET_CHAIN = '860e70453390bf815718e933aa4927167a13d098b0151391eefd722ee1add610'/, 'the wallet pins mainnet (genesis hash)');
   assert.doesNotMatch(w, /prover is not bundled/);
+  assert.match(w, /async function prepareLaunch/, 'the wallet can prepare a create-token launch');
+  assert.match(w, /async function confirmLaunch/, 'and prove and submit it');
+  assert.match(w, /launch_prepare/, 'the provider exposes the launch path');
 });
 
 test('the phone menu stays open when the hamburger is the click target', () => {

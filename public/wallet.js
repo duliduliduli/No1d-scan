@@ -257,6 +257,69 @@
     return { action: 'trade', asset_id: token, buy: side === 'buy', gross_input: gross, minimum_output: null, slippage_bps: Math.round(slip * 100), valid_until: null };
   }
 
+  // Same shape the node's CreateToken receives (see intent.js), built here from what the
+  // user typed so the engine can refuse any plan that does not match it exactly.
+  function launchRequest({ whole_tokens, metadata_hash = '', initial_buy_units = '' }) {
+    const wt = String(whole_tokens ?? '').trim();
+    if (!/^\d{1,18}$/.test(wt) || wt === '0') throw new Error('enter a whole number of tokens to mint');
+    let mh = String(metadata_hash ?? '').trim().toLowerCase();
+    if (mh !== '' && mh !== '0' && !/^[0-9a-f]{64}$/.test(mh)) throw new Error('the metadata hash must be 64 hex characters, or leave it empty');
+    const request = { action: 'create_token', whole_tokens: wt, metadata_hash: mh === '0' ? '0'.repeat(64) : mh };
+    const ib = String(initial_buy_units ?? '').trim();
+    if (ib) {
+      if (!/^\d{1,30}$/.test(ib) || ib === '0') throw new Error('the initial buy must be a positive number of micro-units');
+      request.initial_buy_units = ib;
+    }
+    return request;
+  }
+
+  // Asks the node for a create-token plan for this wallet's address and checks it in the
+  // engine. Same non-custodial path as a trade; nothing is signed or sent.
+  async function prepareLaunch(params) {
+    const id = readIdentity();
+    if (!id) throw new Error('create or open your No1d wallet first');
+    const request = launchRequest(params);
+    const q = new URLSearchParams({ sender: id.address, whole_tokens: request.whole_tokens, metadata_hash: request.metadata_hash === '0'.repeat(64) ? '0' : request.metadata_hash });
+    if (request.initial_buy_units) q.set('initial_buy_units', request.initial_buy_units);
+    const res = await fetch(`/api/launch/intent?${q}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || 'the node refused that token');
+    if (body.mock) throw new Error('this is sample data: nothing here can be created');
+    const native = body.detail;
+    if (!native || native.owner !== id.address) throw new Error('the node built this token for a different address');
+    const plan = {
+      native_plan: native,
+      expected_request: request,
+      expected_chain: MAINNET_CHAIN,
+      expected_parent_hash: String(native.review?.parent_hash || ''),
+      maximum_fee_micronoid: String(native.review?.fee_limit_micronoid ?? native.review?.fee_micronoid ?? '0'),
+    };
+    const { review } = await engineCall({ cmd: 'review', plan });
+    const key = crypto.randomUUID();
+    TRADES.clear();
+    TRADES.set(key, { plan, address: id.address, index: Number(id.index) || 0 });
+    return { id: key, address: id.address, review, native };
+  }
+
+  // Proves the reviewed token launch on this device and submits it. Needs the wallet unlocked.
+  async function confirmLaunch({ id } = {}) {
+    const t = TRADES.get(id);
+    if (!t) throw new Error('that quote expired: review the launch again');
+    if (locked()) throw new Error('unlock your wallet first');
+    if (await addressAt(t.index) !== t.address) throw new Error('the unlocked wallet does not own the launch address');
+    TRADES.delete(id);
+    const { intent } = await engineCall({ cmd: 'authorize', master: SESSION.master.slice(), index: t.index, plan: t.plan });
+    const res = await fetch('/api/swap-submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signed: intent }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.error) {
+      const msg = body.error || 'the node did not accept the launch';
+      throw new Error(/state|parent|stale|changed/i.test(msg) ? `A new block arrived before the launch was sent, so the node refused it. Nothing was spent. Review it again. (${msg})` : msg);
+    }
+    const r = body.result;
+    const txid = typeof r === 'string' ? r : (r?.txid || r?.intent_id || '');
+    return { txid, result: r };
+  }
+
   // Asks the node for a plan for this wallet's address, then checks it in the engine.
   // Returns the engine's review; nothing is signed or sent.
   async function prepareTrade(params) {
@@ -368,6 +431,8 @@
       }
       if (method === 'trade_prepare') return prepareTrade(params);
       if (method === 'trade_confirm') return confirmTrade(params);
+      if (method === 'launch_prepare') return prepareLaunch(params);
+      if (method === 'launch_confirm') return confirmLaunch(params);
       if (method === 'signAndSubmit') {
         throw new Error('this wallet signs only plans it has checked itself: use trade_prepare, then trade_confirm. Nothing was sent.');
       }
@@ -914,6 +979,8 @@
     prepareTrade,
     confirmTrade,
     tradeRows,
+    prepareLaunch,
+    confirmLaunch,
     // Proves a random throwaway statement, to check the engine runs on this device.
     selftest: () => engineCall({ cmd: 'selftest' }).then((r) => r.result),
     identity: readIdentity,

@@ -883,6 +883,11 @@
 /* One-line, accent-filled button that sends a visitor to SafeTrade to buy NOID. */
 .buybtn { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border:1px solid var(--accent); border-radius:3px; background:var(--accent); color:var(--bg); font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap }
 .buybtn:hover { filter:brightness(1.08); color:var(--bg) }
+  /* Launchpad form fields: label on top, field under it, one per row. */
+  .lfield { display:block; margin:10px 0 4px }
+  .lfield > span { display:block; color:var(--muted); font:600 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; margin-bottom:4px }
+  .lfield input { width:100%; box-sizing:border-box; padding:9px 10px; font-size:16px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px }
+  .lfield input:focus { border-color:var(--accent); outline:none }
 </style>
 </head>
 <body>
@@ -898,6 +903,7 @@
       <a href="/explore" data-link>Explore tokens</a>
       <a href="/favorites" data-link>Favorites</a>
       <a href="/wallet" data-link>Wallet</a>
+      <a href="/launch" data-link>Launchpad</a>
       <a href="/promote" data-link>Promote <span aria-hidden="true">⚡</span></a>
       <a href="/" data-link>Overview &amp; live stats</a>
       <a href="/blocks/latest" data-link>All blocks</a>
@@ -908,7 +914,7 @@
       <a href="/market" data-link>Market analytics</a>
       <a href="/receipts" data-link>Receipts</a>
       <a href="/contracts" data-link>Contracts</a>
-      <a href="/account" data-link>API &amp; Credits</a>
+      <a href="/account" data-link>API</a>
       <button id="theme"></button>
     </nav>
   </div>
@@ -4999,7 +5005,76 @@ async promote() {
     };
     if (tok()) paint().catch((err) => { $('adminq').innerHTML = `<p class="msg err">${esc(err.message)}</p>`; });
   },
+
+  async launch() {
+    const wid = WalletDex.identity();
+    if (!wid || !window.No1dWallet?.prepareLaunch) {
+      app.innerHTML = `<div class="card"><h2>Launch a token</h2>
+        <p class="muted">Mint a new native token straight onto its launchpad curve, with your own wallet in this browser. The seed never leaves it, and this explorer takes no fee.</p>
+        <p class="muted"><a href="/wallet" data-link>Open the No1d wallet</a> first, then come back here.</p></div>`;
+      return;
+    }
+    app.innerHTML = `<div class="card"><h2>Launch a token</h2>
+      <p class="muted">The node mints the token for your wallet <span class="mono">${esc(wid.address)}</span>, and every token starts on its own launchpad curve. A network fee and the curve's liquidity reserve come out of the wallet; this explorer takes nothing.</p>
+      <div class="lfield"><span>Total supply <small class="muted">whole tokens</small></span>
+        <input id="lmut" inputmode="numeric" placeholder="e.g. 1000000" autocomplete="off"></div>
+      <div class="lfield"><span>Initial buy <small class="muted">optional, in NOID — launches with the curve already seeded</small></span>
+        <input id="lmib" inputmode="decimal" placeholder="e.g. 10.5" autocomplete="off"></div>
+      <p class="fine">The initial buy, if any, spends that many NOID from your wallet at the openness of the curve and returns the tokens to you.</p>
+      <div class="wrow"><button type="button" class="primary" id="lmgo">Review launch</button></div>
+      <div id="lmout"></div>
+      <p class="fine">A token without a published metadata manifest shows as <span class="mono">Token …</span> until its creator publishes one on the protocol's media service. It is still fully tradeable from the moment it exists.</p>`;
+    wireLaunch(wid);
+  },
 };
+
+function wireLaunch(wid) {
+  const out = $('lmout');
+  $('lmgo').onclick = async () => {
+    out.innerHTML = '<p class="muted">Asking the node for a plan, then checking it on this device…</p>';
+    const wt = $('lmut').value.trim();
+    if (!/^\d{1,18}$/.test(wt) || wt === '0') { out.innerHTML = '<p class="msg err">Enter a whole number of tokens to mint.</p>'; return; }
+    const ibRaw = $('lmib').value.trim();
+    let ib = '';
+    if (ibRaw) {
+      if (!/^\d{1,12}(\.\d{1,6})?$/.test(ibRaw) || Number(ibRaw) <= 0) { out.innerHTML = '<p class="msg err">Enter the initial buy as NOID with up to 6 decimals.</p>'; return; }
+      const [w, f = ''] = ibRaw.split('.');
+      ib = (BigInt(w) * 1000000n + BigInt((f + '000000').slice(0, 6))).toString();
+    }
+    let t;
+    try { t = await window.No1dWallet.prepareLaunch({ whole_tokens: wt, metadata_hash: '', initial_buy_units: ib }); }
+    catch (err) { out.innerHTML = `<p class="msg err">${esc(err.message)}</p>`; return; }
+    const r = t.review || {};
+    const rows = [
+      ['Mints', `${n0(Number(wt))} whole tokens`],
+      ['Network fee', noid(r.fee_micronoid)],
+      ['Network fee, at most', noid(r.fee_limit_micronoid ?? r.fee_micronoid)],
+      ['Curve liquidity reserve', noid(r.reserve_deposit_micronoid)],
+      ...(ib && r.initial_buy_cost_micronoid != null ? [['Initial buy cost', noid(r.initial_buy_cost_micronoid)]] : []),
+      ...(ib && r.quoted_output != null ? [['Initial buy returns, quoted', `${n0(Number(r.quoted_output) / 1e6)} tokens`]] : []),
+      ['Total NOID out', noid(r.noid_debit_micronoid)],
+      ['Valid until block', r.valid_until == null ? '–' : n0(Number(r.valid_until))],
+    ];
+    out.innerHTML = `<div class="wlist">${rows.map(([k, v]) => `<div><span class="muted">${esc(k)}</span> <b>${esc(v)}</b></div>`).join('')}</div>
+      <div class="wrow"><button type="button" id="lmgo2" class="primary">Confirm launch</button></div>
+      <p class="fine" id="lmnote">Checked on this device: the supply you asked for and the fee cap. Confirming proves the launch here and sends it; the token lands in the next block.</p>`;
+    $('lmgo2').onclick = async () => {
+      const note = $('lmnote');
+      $('lmgo2').disabled = true;
+      note.className = 'fine';
+      note.textContent = 'Approving on this device. This takes about 10 to 30 seconds…';
+      try {
+        const r2 = await window.No1dWallet.confirmLaunch({ id: t.id });
+        note.innerHTML = `Launched. The node accepted it and it settles in the next block, about 30 seconds.${r2.txid ? ` Code <span class="mono">${esc(short(r2.txid, 10))}</span> ${copyBtn(r2.txid)}` : ''} <a href="/explore?sort=newest" data-link>See it on the screener →</a>`;
+        note.className = 'msg';
+      } catch (err) {
+        note.className = 'msg err';
+        note.textContent = err.message;
+        $('lmgo2').disabled = false;
+      }
+    };
+  };
+}
 
 function feePartsView(t) {
   const inputs = t?.n_inputs ?? t?.inputs?.length;
@@ -5031,14 +5106,14 @@ async function render() {
   try {
     const wid = WalletDex.identity();
     const acctLink = document.querySelector('#menunav a[href="/account"]');
-    if (wid && acctLink) acctLink.innerHTML = `Wallet <span class="mono">${esc(wid.address.slice(0, 6))}…${esc(wid.address.slice(-4))}</span> · API &amp; Credits`;
+    if (wid && acctLink) acctLink.innerHTML = `API · <span class="mono">${esc(wid.address.slice(0, 6))}…${esc(wid.address.slice(-4))}</span>`;
   } catch {}
   const screener = document.querySelector('[data-dock="screener"]');
   if (screener) screener.setAttribute('href', demoOn ? '/explore?demo=1' : '/explore');
   screener?.classList.toggle('on', type === 'explore');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    const named = ['api-access', 'account', 'favorites', 'wallet', 'mempool', 'mining', 'market', 'explore', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote'];
+    const named = ['api-access', 'account', 'favorites', 'wallet', 'mempool', 'mining', 'market', 'explore', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'launch'];
     document.body.classList.toggle('pair', type === 'token' || type === 'collection');
     if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
     await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());
