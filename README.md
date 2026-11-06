@@ -1,10 +1,11 @@
 # NOID Scan
 
-A public explorer for the Parano1d (NOID) chain. It runs as one Node.js process with no dependencies and contains:
+A public explorer for the Parano1d (NOID) chain, plus an AI-agent MCP server for the same data. It runs as one Node.js process with no dependencies and contains:
 
 - **Indexer:** every 10 s it saves the block bodies the node still retains (the last ~42 blocks) and records a stats snapshot for each new tip. The node prunes bodies after that window, so this is the only data the explorer needs to keep.
-- **API:** a JSON API under `/api/*`. Headers, tx pointers and Live State are permanent on the node, so the API reads those live.
+- **API:** a JSON API under `/api/*`, **free** — anonymous reads at 120 req/min, any free API key at 3000 req/min, no credits, no expiry, no subscription. Headers, tx pointers and Live State are permanent on the node, so the API reads those live.
 - **UI:** one static page (`public/index.html`) with shareable URLs such as `/block/220800`, `/tx/<txid>` and `/address/o1…`.
+- **MCP server:** `mcp-server.mjs` exposes the same data to AI agents over the Model Context Protocol — `node mcp-server.mjs` and any MCP client (Claude, Cursor, bots) can query blocks, txs, addresses, tokens and prices. Read-only, zero dependencies, never holds a key. See `mcp/README.md`.
 
 Requires Node ≥ 22.13 (for the built-in `node:sqlite`) and a synced `parano1d` node with RPC on `127.0.0.1:9601`.
 

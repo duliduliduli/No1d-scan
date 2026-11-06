@@ -98,13 +98,17 @@ module.exports = function intents(rpc, tipNow = () => null) {
     const sender = params.get('sender') || '';
     if (!ADDR.test(sender)) throw bad('expected your o1… wallet address');
     const raw = String(params.get('whole_tokens') || '').trim();
-    if (!/^\d{1,18}$/.test(raw) || raw === '0') throw bad('whole_tokens must be a positive whole number');
+    if (!/^\d{1,18}$/.test(raw)) throw bad('whole_tokens must be a positive whole number');
+    const w = BigInt(raw);
+    if (w < 100000n) throw bad('whole_tokens must be at least 100,000: every token is backed by 1,000 µNOID, so the smallest launch carries the 100 NOID curve reserve');
+    if (w > 10248191152n) throw bad('whole_tokens exceeds the chain maximum of 10,248,191,152');
     const mh = String(params.get('metadata_hash') || '').trim().toLowerCase();
     if (mh !== '' && mh !== '0' && !/^[0-9a-f]{64}$/.test(mh)) throw bad('metadata_hash must be 64 hex characters, or empty');
     const req = { action: 'create_token', whole_tokens: raw, metadata_hash: mh === '0' ? '0'.repeat(64) : mh };
     const ib = String(params.get('initial_buy_units') || '').trim();
     if (ib !== '') {
       if (!/^\d{1,30}$/.test(ib) || ib === '0') throw bad('initial_buy_units must be a positive whole number of micro-units');
+      if (BigInt(ib) > (w * 60n) / 100n * 1_000_000n) throw bad('initial_buy_units can be at most 60% of supply — the most the curve can sell in one launch');
       req.initial_buy_units = ib;
     }
     if (params.get('demo') === '1') {

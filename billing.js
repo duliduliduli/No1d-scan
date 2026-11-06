@@ -130,32 +130,23 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
 
   const account = (key) => (typeof key === 'string' && /^nk_[0-9a-f]{40}$/.test(key) ? q.byKey.get(hashKey(key)) : undefined);
 
-  // Called for every keyed data request: 1 credit per REQUESTS_PER_CREDIT. An account with bought
-  // API time is paid until that moment, so its requests are counted but they do not draw credits down.
+  // Called for every keyed data request: the API is free, so requests are counted
+  // for the usage page but never draw credits and no key ever expires.
   function countRequest(acct) {
-    const { requests } = q.countReq.get(acct.id);
+    q.countReq.get(acct.id);
     q.useDay.run(acct.id, today(), 1, 0);
-    if (paid(acct)) return;
-    if (requests % REQUESTS_PER_CREDIT === 0) spend(acct.id, 1, `API usage (${REQUESTS_PER_CREDIT.toLocaleString()} requests)`);
   }
-  // Paid means either prepaid credits or API time bought through a NOID contract.
+  // Paid meant credits or API time; the API is free now, so every account is paid-tier rate.
   function paid(acct) {
-    if (!acct) return false;
-    if (Number(acct.credits) > 0) return true;
-    const row = q.byId.get(acct.id);
-    return !!(row && row.api_until > Date.now());
+    return !!acct;
   }
-  // A key that bought API time is void the moment that time ends: keyed requests stop answering until
-  // the same key is reloaded with more NOID. A key that never bought time is untouched, so existing
-  // credit customers keep working exactly as before.
+  // API time bought through a NOID contract used to void a key at expiry. The API is free,
+  // so nothing ever expires; time bought earlier still lands in the ledger, then does nothing.
   function expired(acct) {
-    const row = acct && q.byId.get(acct.id);
-    return !!(row && row.api_until && Number(row.api_until) <= Date.now());
+    return false;
   }
   function expiredMessage(acct) {
-    const row = acct && q.byId.get(acct.id);
-    const on = new Date(Number(row?.api_until) || 0).toISOString().slice(0, 10);
-    return `API time ended on ${on}, so this key is void. Reload it with NOID at /account and the same key answers again.`;
+    return 'The API is free: no key expires.';
   }
 
   // API time is granted from the chain, not from a webhook: `ref` is the contract order id, so a

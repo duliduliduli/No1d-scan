@@ -1568,7 +1568,8 @@ async function handle(req, res) {
     const ownPage = req.headers['sec-fetch-site'] === 'same-origin' || /^https?:\/\/([^/]+)/.exec(req.headers.referer || '')?.[1] === req.headers.host;
     // A wrong key must fail loudly for scripts; our own pages just drop a stale saved key.
     if (givenKey && !acct && !ownPage) return send(401, { error: 'unknown API key. Check the x-api-key header; create a key free at /account.' });
-    const paid = acct?.credits > 0;
+    // The API is free: every keyed request gets the paid-tier rate, unkeyed requests the base rate.
+    const paid = !!acct;
     const who = paid ? acct.id : ip;
     const n = (hits.get(who) || 0) + 1;
     hits.set(who, n);
@@ -1657,10 +1658,8 @@ async function handle(req, res) {
 
     // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
-    if (!acct && !ownPage && name !== 'stats' && name !== 'health' && name !== 'safetrade-probe') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
-    // An API token bought as API time is void once its time runs out. Our own pages are exempt, so the
-    // account page can still show the order and offer a reload.
-    if (acct && !ownPage && bill.expired(acct)) return send(402, { error: bill.expiredMessage(acct) });
+    // The API is free and open for reads: anonymous data requests pass at the base rate, keys raise the cap and
+    // identify the account. Personal routes (me, stars, payments) still need an account and reject without one.
     if (url.pathname === '/api/live') return live(req, res, ip);
     // No key required, same as /api/stats: uptime checks hit this directly. 503 when the db check fails or indexing is stalled.
     if (name === 'health') {

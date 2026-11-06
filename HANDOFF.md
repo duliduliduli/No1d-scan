@@ -462,6 +462,30 @@ NOID through a real Parano1d contract, not a fee address with dust digits.
   publishes a manifest on the protocol's media service; still fully tradeable.
 - Next: real test mint (needs user go — spends NOID), and any launch fee gate.
 
+## 14g. The API is free, and agents can read the chain over MCP (added 2026-11-06)
+
+- **API is free for everyone.** No credits, no expiry, no subscription. Anonymous reads pass at the
+  base rate (120/min per IP); any free API key gets the paid-tier rate (3000/min). Personal routes
+  (`/me`, stars, topups, links) still need a key and reject without one; a wrong key still fails loudly.
+  The 402 gate is gone from `server.js`. `billing.js` `countRequest` counts but never spends;
+  `paid(acct)` is `!!acct`; `expired()` is always false. The NOID-plans table, the API-time tier card
+  and the `wireNoidTierCard('api')` call are removed from the account page; `/account` says "API — free".
+  Promotions are still paid (the promo card on `/promote` is untouched).
+- **MCP server (`mcp-server.mjs`)** is a zero-dependency read-only Model Context Protocol server
+  exposing the explorer API as tools (`chain_overview`, `block`, `blocks`, `transaction`, `address`,
+  `tokens`, `token`, `mempool`, `search`, `mining`). Run `node mcp-server.mjs`; `NO1D_API_BASE` and
+  `NO1D_API_KEY` envs point it elsewhere. Handles initialize/notifications/ping/tools-list/tools-call;
+  errors return as `isError` content. Tests in `test-mcp.js` (stubbed fetch), 4 tests; `npm test` runs 20.
+- **Launchpad sliders.** Supply is a range slider 100,000–10,248,191,152 whole tokens (the chain's
+  `LAUNCH_MIN_WHOLE_TOKENS` = 100,000, i.e. the 100 NOID backing rule at 1,000 µNOID/token, and
+  `LAUNCH_MAX_SUPPLY/1e6`); initial buy is a % slider 0–60% of supply (the curve's `sale_units()` =
+  supply/5*3 cap). `intent.js` `launch()` validates the same bounds server-side. `wireLaunch` reads the
+  sliders; review rows show supply, buy %, cost and reserve.
+- **Open-source ready.** Repo is MIT-licensed (`LICENSE`), `.gitignore` covers `noid.db*` etc., and a
+  secret sweep found nothing real tracked. Before making the repo public: re-sweep for any
+  `nk_…`/wallet-key bytes, and decide what to do with `HANDOFF.md` (it documents the droplet and env
+  vars — it is the operator map, not customer-facing).
+
 ## 15. Quick verification commands
 
 

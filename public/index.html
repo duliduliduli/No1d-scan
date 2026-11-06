@@ -3973,17 +3973,8 @@ const pages = {
     if (key) try { me = await api('me'); } catch (e) { if (e.status === 401) saveKey(''); else throw e; }
     const n = (x) => Number(x).toLocaleString();
     app.innerHTML = `
-      <div class="card"><h2>Pricing</h2>
-        <table class="price"><tr><th></th><th>Free</th><th>With credits</th></tr>
-          <tr><td>Explorer website, live data</td><td>Unlimited</td><td>Unlimited</td></tr>
-          <tr><td>API requests</td><td>${n(120)} per minute with a free account key</td><td>${n(3000)} per minute · 1 credit per ${n(P.requests_per_credit)} requests</td></tr>
-        </table>
-        <h2 style="margin-top:14px">NOID plans</h2>
-        <table class="price"><tr><th>Plan</th><th>Price</th><th>Credits</th><th>API requests</th></tr>
-          ${(P.plans || []).map((p) => `<tr><td><b>${esc(p.label)}</b></td><td>${esc(p.noid)} NOID${p.usd_at_market ? ` <span class="muted">(≈ $${esc(p.usd_at_market)})</span>` : ''}</td><td>${n(p.credits)}</td><td>${n(p.requests)}</td></tr>`).join('')}
-        </table>
-        <p class="muted">Credits never expire and there is no subscription. Payable in NOID only, on chain, to this explorer's own address${P.noid ? ` <span class="mono">${esc(P.noid.address)}</span>` : ''}. Card payments are not accepted.</p></div>
-      ${noidTierCard('api', { payer: (WalletDex.identity()?.address || '') })}
+      <div class="card"><h2>API — free</h2>
+        <p class="muted">Every endpoint answers any API key with the full rate limit: 3000 requests per minute, no credits, no expiry, no subscription. Keys track your usage and hold your favorites; they never cost anything.</p></div>
       <div class="card" id="wcard"></div>
       <div class="card" id="acct"></div>
       <div class="card"><h2>API reference</h2>
@@ -4003,21 +3994,16 @@ const pages = {
           <tr><td><code>GET /me</code></td><td>Your balance, usage and payment history (key required)</td></tr>
         </table>
         <p>Example: <code>curl -H "x-api-key: YOUR_KEY" ${esc(location.origin)}/api/stats</code>. Amounts are integers in μNOID (1 NOID = 1,000,000 μNOID); very large ones come as decimal strings.</p>
-        <h2 style="margin-top:14px">Billing, limits and errors</h2>
-        <p><b>What counts:</b> every request that returns data (HTTP 200), including cached answers, counts toward your usage; with credits, each ${n(P.requests_per_credit)} counted requests cost 1 credit. Errors, 404s, the <code>/live</code> stream and account/payment routes never count.</p>
-        <p><b>Response headers:</b> <code>x-tier</code>, <code>x-ratelimit-limit</code>, <code>x-ratelimit-remaining</code> (per minute), <code>x-credits-remaining</code>, <code>x-cache</code> (data is reused for up to 5 s).</p>
-        <p><b>Errors</b> are JSON <code>{"error": "…"}</code>: 400 bad input · 401 missing or unknown key · 402 out of credits · 404 not found · 429 rate limited (see <code>retry-after</code>) · 502 node or upstream unavailable, retry shortly. <code>/live</code> allows 10 open streams per IP.</p>
+        <h2 style="margin-top:14px">Limits and errors</h2>
+        <p><b>Rate limit:</b> 3000 requests per minute with a key, 120 per minute without one. Keys are free and never expire; there are no credits and nothing to buy.</p>
+        <p><b>Response headers:</b> <code>x-tier</code>, <code>x-ratelimit-limit</code>, <code>x-ratelimit-remaining</code> (per minute), <code>x-cache</code> (data is reused for up to 5 s).</p>
+        <p><b>Errors</b> are JSON <code>{"error": "…"}</code>: 400 bad input · 401 missing or unknown key · 404 not found · 429 rate limited (see <code>retry-after</code>) · 502 node or upstream unavailable, retry shortly. <code>/live</code> allows 10 open streams per IP.</p>
         <p><b>Coverage:</b> headers are complete since genesis; transaction bodies exist only for blocks this explorer captured while the node retained them (the last 42 blocks), see <code>coverage</code> in <code>/stats</code>. Holder counts and the rich list are approximate snapshots, taken every 2 hours.</p></div>`;
     const box = $('acct');
-    // API time bought with a NOID contract; the card shows its own order and polls the chain.
-    wireNoidTierCard('api');
-    if (me && Number(me.api_until) > Date.now()) {
-      const el = $('apitime');
-      if (el) el.insertAdjacentHTML('afterbegin', `<p class="msg">API time is active on this key until ${esc(when(me.api_until))}. Add more time below whenever you want; it runs on from there.</p>`);
-    } else if (me && me.api_expired) {
-      const el = $('apitime');
-      if (el) el.insertAdjacentHTML('afterbegin', `<p class="msg bad">API time ended ${esc(when(me.api_until))}, so this key is void. Reload it with NOID below and the same key answers again.</p>`);
-    }
+    // The API is free: nothing to buy, nothing to reload, no expiry banner.
+    const msg = (k) => 'API — free for every key, no credits, no expiry.';
+    const el = $('acct');
+    if (el && me) el.insertAdjacentHTML('afterbegin', `<p class="msg">${msg()}</p>`);
 
     // The wallet in this browser is the account. Its address is remembered in the clear on this device, so the page
     // can show holdings and trade without a key, and without ever seeing a seed. Credits, the watchlist and the API
@@ -5017,10 +5003,13 @@ async promote() {
     app.innerHTML = `<div class="card"><h2>Launch a token</h2>
       <p class="muted">The node mints the token for your wallet <span class="mono">${esc(wid.address)}</span>, and every token starts on its own launchpad curve. A network fee and the curve's liquidity reserve come out of the wallet; this explorer takes nothing.</p>
       <div class="lfield"><span>Total supply <small class="muted">whole tokens</small></span>
-        <input id="lmut" inputmode="numeric" placeholder="e.g. 1000000" autocomplete="off"></div>
-      <div class="lfield"><span>Initial buy <small class="muted">optional, in NOID — launches with the curve already seeded</small></span>
-        <input id="lmib" inputmode="decimal" placeholder="e.g. 10.5" autocomplete="off"></div>
-      <p class="fine">The initial buy, if any, spends that many NOID from your wallet at the openness of the curve and returns the tokens to you.</p>
+        <input type="range" id="lmsup" min="100000" max="10248191152" step="1000" value="1000000" autocomplete="off">
+        <div class="npamt"><b id="lmsupt">1,000,000</b></div>
+        <p class="fine">100,000 whole tokens minimum: every token is backed by 1,000 µNOID, so the smallest launch carries the 100 NOID curve reserve.</p></div>
+      <div class="lfield"><span>Initial buy <small class="muted">percent of supply — launches with the curve already seeded — 0 to 60<small>%</small></small></span>
+        <input type="range" id="lmpct" min="0" max="60" step="1" value="0" autocomplete="off">
+        <div class="npamt"><b id="lmpctt">0% of supply</b> <span class="muted" id="lmpcts">0 tokens</span></div>
+        <p class="fine">The initial buy spends NOID from your wallet at the opening of the curve and returns the tokens to you. 60% of supply is the most the curve can sell in one launch.</p></div>
       <div class="wrow"><button type="button" class="primary" id="lmgo">Review launch</button></div>
       <div id="lmout"></div>
       <p class="fine">A token without a published metadata manifest shows as <span class="mono">Token …</span> until its creator publishes one on the protocol's media service. It is still fully tradeable from the moment it exists.</p>`;
@@ -5030,23 +5019,33 @@ async promote() {
 
 function wireLaunch(wid) {
   const out = $('lmout');
+  const sup = $('lmsup'), supt = $('lmsupt'), pct = $('lmpct'), pctt = $('lmpctt'), pcts = $('lmpcts');
+  const paint = () => {
+    const w = Number(sup.value);
+    supt.textContent = `${n0(w)} whole tokens`;
+    const p = Number(pct.value);
+    const whole = Math.floor((w * p) / 100);
+    pctt.textContent = `${p}% of supply`;
+    pcts.textContent = p ? `${n0(whole)} tokens` : '0 tokens';
+    pcts.style.display = p ? '' : 'none';
+  };
+  sup.addEventListener('input', paint);
+  pct.addEventListener('input', paint);
+  paint();
   $('lmgo').onclick = async () => {
     out.innerHTML = '<p class="muted">Asking the node for a plan, then checking it on this device…</p>';
-    const wt = $('lmut').value.trim();
-    if (!/^\d{1,18}$/.test(wt) || wt === '0') { out.innerHTML = '<p class="msg err">Enter a whole number of tokens to mint.</p>'; return; }
-    const ibRaw = $('lmib').value.trim();
-    let ib = '';
-    if (ibRaw) {
-      if (!/^\d{1,12}(\.\d{1,6})?$/.test(ibRaw) || Number(ibRaw) <= 0) { out.innerHTML = '<p class="msg err">Enter the initial buy as NOID with up to 6 decimals.</p>'; return; }
-      const [w, f = ''] = ibRaw.split('.');
-      ib = (BigInt(w) * 1000000n + BigInt((f + '000000').slice(0, 6))).toString();
-    }
+    const wt = Math.floor(Number(sup.value));
+    if (!(wt >= 100000 && wt <= 10248191152)) { out.innerHTML = `<p class="msg err">Supply must be between 100,000 and 10,248,191,152 whole tokens (the chain's 100 NOID backing floor and its cap).</p>`; return; }
+    const p = Math.floor(Number(pct.value)); // 0..60 percent of supply
+    const ib = p > 0 ? (Math.floor((wt * p) / 100) * 1e6).toString() : ''; // micro-units
     let t;
-    try { t = await window.No1dWallet.prepareLaunch({ whole_tokens: wt, metadata_hash: '', initial_buy_units: ib }); }
+    try { t = await window.No1dWallet.prepareLaunch({ whole_tokens: String(wt), metadata_hash: '', initial_buy_units: ib }); }
     catch (err) { out.innerHTML = `<p class="msg err">${esc(err.message)}</p>`; return; }
     const r = t.review || {};
+    const ibWhole = ib ? Math.floor(Number(ib) / 1e6) : 0;
     const rows = [
-      ['Mints', `${n0(Number(wt))} whole tokens`],
+      ['Mints', `${n0(wt)} whole tokens`],
+      ['Initial buy', ib ? `${p}% of supply · ${n0(ibWhole)} whole tokens` : 'none'],
       ['Network fee', noid(r.fee_micronoid)],
       ['Network fee, at most', noid(r.fee_limit_micronoid ?? r.fee_micronoid)],
       ['Curve liquidity reserve', noid(r.reserve_deposit_micronoid)],

@@ -246,10 +246,12 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get(`topup/${q2.id}`, { headers: K }))[1].credits_added, 1200);
   assert.strictEqual((await get(`stats?key=${acct.key}`))[2].get('x-tier'), 'paid');
 
-  // API gate: scripts need a key, our own pages and keyed clients don't; stats stays open for uptime monitors.
-  assert.strictEqual((await get('txs', { bare: true }))[0], 401);
+  // API gate: the API is free and open for reads — anonymous data requests pass at the base rate,
+  // keys raise the cap; only personal routes (me, stars, payments) still need a key.
+  assert.strictEqual((await get('txs', { bare: true }))[0], 200);
   assert.strictEqual((await get('txs', { bare: true, headers: K }))[0], 200);
   assert.strictEqual((await get('stats', { bare: true }))[0], 200);
+  assert.strictEqual((await get('me', { bare: true }))[0], 401, 'personal routes still need a key');
 
   // Cards are gone for good: there is no card rail and no webhook to forge.
   const noHook = await post('stripe-webhook', {}, { 'stripe-signature': 't=1,v1=00' });
@@ -1941,9 +1943,10 @@ test('trading shows what you can spend, a max and a slider, and says pending unt
   assert.match(html, /id="npratio"/, "the slider says what the amount buys");
   assert.match(html, /Start the contract/, "one button starts the contract");
   assert.match(html, /Choose a token/, "the token is picked from a searchable list, not typed as an id");
-  assert.match(html, /noidTierCard\('api', \{ payer: \(WalletDex\.identity\(\)\?\.address \|\| ''\) \}\)/);
+  assert.doesNotMatch(html, /noidTierCard\('api'/, 'the API is free: the account page no longer sells API time');
+  assert.match(html, /API — free/, 'the account page says the API is free');
   assert.match(html, /you can take it back after it/, 'the page states the refund in plain words');
-  assert.match(html, /wireNoidTierCard\('api'\)/);
+  assert.match(html, /wireNoidTierCard\('promo'/, 'the promote page wires its contract card');
   assert.match(html, /o\.payee \|\| ''/, 'the card names the address we collect to');
   assert.doesNotMatch(html, /Paid promotion\. Not a recommendation[\s\S]{0,400}API time buys requests/, 'API time is not labelled a promotion');
   assert.match(w, /no1d_wallet_pending_v1/);
