@@ -4097,10 +4097,8 @@ const pages = {
 
     box.innerHTML = `<h2>Your account <small class="muted">${esc(me.id)}</small></h2>
       <div class="grid">
-        <div class="stat"><small>Credits</small><b>${n(me.credits)}</b><small class="muted">≈ ${n(me.credits * P.requests_per_credit)} API requests</small></div>
         <div class="stat"><small>Rate limit</small><b>${n(me.rate_limit_per_min)}</b><small class="muted">requests per minute</small></div>
-        <div class="stat"><small>API requests made</small><b>${n(me.requests)}</b></div>
-        <div class="stat"><small>Tier</small><b>${me.credits > 0 ? 'Paid' : 'Free'}</b></div>
+        <div class="stat"><small>Requests</small><b>${n(me.requests)}</b><small class="muted">made with this key · free</small></div>
       </div>
       <h2 style="margin-top:14px">API tokens</h2>
       <p class="muted">Named keys for this account. Each is shown <b>once</b>, when you create it, and can be deleted here any time. Full access: all data and full control over the account.</p>
