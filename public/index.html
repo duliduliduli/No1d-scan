@@ -880,6 +880,9 @@
   .nplist { max-height:228px; overflow-y:auto; display:grid; gap:4px; overscroll-behavior:contain }
   .npitem { display:flex; gap:8px; align-items:center; width:100%; min-height:34px; text-align:left; border-color:var(--line); background:var(--card) }
   .npitem:hover { border-color:var(--accent) }
+/* One-line, accent-filled button that sends a visitor to SafeTrade to buy NOID. */
+.buybtn { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border:1px solid var(--accent); border-radius:3px; background:var(--accent); color:var(--bg); font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap }
+.buybtn:hover { filter:brightness(1.08); color:var(--bg) }
 </style>
 </head>
 <body>
@@ -3660,7 +3663,7 @@ const pages = {
       <div class="card"><h2>NOID price <small class="muted">${esc(s.price?.source || '')}</small></h2>
         <div id="phead">${priceHead(s.price, s.chain.circulating_supply_micronoid)}</div>
         <div style="margin:12px 0 0">${priceBox('pwin')}</div>
-        <p style="margin:8px 0 0;text-align:right"><a href="/market" data-link>Full market analytics →</a></p></div>
+        <p style="margin:8px 0 0;display:flex;align-items:center;gap:12px;justify-content:flex-end;flex-wrap:wrap"><a class="buybtn" href="https://safetrade.com/" target="_blank" rel="noopener">Buy NOID on SafeTrade →</a><a href="/market" data-link>Full market analytics →</a></p></div>
       ${s ? `<div class="card"><h2>Live stats</h2><div class="tiles">
         ${stat('Block height', 'hwrap', `<a id="h" href="/block/${esc(s.chain.height)}" data-link>${Number(s.chain.height).toLocaleString()}</a>`, 'Number of blocks in the chain. Click for the latest block.')}
         ${stat('Last block', 'ago', b ? esc(ago(b.blocks[0]?.timestamp)) : '–', 'Time since the newest block was mined.')}

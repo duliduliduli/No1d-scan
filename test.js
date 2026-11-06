@@ -636,6 +636,7 @@ test('indexer + api', async (t) => {
   assert.doesNotMatch(homeHtml, /Open Explore/);
   assert.match(homeHtml, /data-star/);
   assert.match(homeHtml, /id="wcard"/, 'the account page leads with the wallet card');
+  assert.match(homeHtml, /Buy NOID on SafeTrade/, 'the NOID price card offers an easy buy button');
   assert.match(homeHtml, /no1d_wallet_identity_v1/, 'the site knows the browser identity key');
   assert.match(homeHtml, /WalletDex\.identity/, 'the account page can read the wallet identity');
   assert.doesNotMatch(homeHtml, /Create free account/, 'no sign-up wall in front of a wallet that already exists');
