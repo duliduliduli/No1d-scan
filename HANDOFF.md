@@ -440,6 +440,28 @@ NOID through a real Parano1d contract, not a fee address with dust digits.
   calculator's three fields are plain fields, not bordered tiles that ran into each other; and every
   field is 16px so iOS does not zoom the page when one is focused.
 
+## 14f. Launchpad: create tokens, non-custodial (added 2026-11-06)
+
+- Menu item **Launchpad** → `/launch`. The API link in the menu now says just **API**
+  (the wallet address shows on it when one is present).
+- `/api/launch/intent` builds an UNSIGNED `CreateToken` intent via `prepareNativeIntent`
+  (params: `sender`, `whole_tokens` (positive whole), `metadata_hash` (`''`/`'0'` for none,
+  64-hex otherwise), optional `initial_buy_units` micro-units). `intent.js` `launch()`;
+  `server.js` route + `launch` in the route table.
+- `public/wallet.js` exposes `prepareLaunch` / `confirmLaunch` (and provider methods
+  `launch_prepare` / `launch_confirm`): same engine-check → prove → relay path as trades,
+  via `noid_trade_authorize` (the engine already handles `NativeClientIntentKind::Operation`).
+- The page is `pages.launch()` + `wireLaunch()` in `public/index.html` (supply, optional
+  initial buy in NOID → micro-units, review rows, confirm). CSS `.lfield` at the END of the
+  stylesheet (cascade rule).
+- **Intents are never cached.** `swap/intent` and `launch/intent` are excluded from the
+  response cache (`cacheable` guard in `server.js`); a cached unsigned intent names one
+  owner and another wallet would refuse it. Add `whole_tokens`/`metadata_hash`/
+  `initial_buy_units` to `PARAMS` if the cache key ever needs them (already added).
+- A launch without a metadata manifest is created unnamed (`Token …`) until the creator
+  publishes a manifest on the protocol's media service; still fully tradeable.
+- Next: real test mint (needs user go — spends NOID), and any launch fee gate.
+
 ## 15. Quick verification commands
 
 
