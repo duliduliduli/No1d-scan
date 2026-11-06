@@ -1462,6 +1462,10 @@ const routes = {
     return page;
   },
   swap: async (id, params, ...rest) => (id === 'intent' ? intents.prepare(params) : assets.swap(id, params, ...rest)),
+  launch: async (id, params) => {
+    if (id !== 'intent') throw Object.assign(new Error('not found'), { status: 404 });
+    return intents.launch(params);
+  },
 
   async search(_, params) {
     const s = (params.get('q') || '').trim().toLowerCase();
@@ -1489,7 +1493,8 @@ const cache = new Map();
 const inflight = new Map();
 const PARAMS = ['min_out', 'before', 'limit', 'page', 'window', 'q', 'interval', 'demo', 'sort', 'dir', 'preset', 'side', 'amount', 'slippage', 'token', 'sender', 'kind', 'tf', 'since', 'ids', 'asset',
   'min_liq', 'max_liq', 'min_vol', 'max_vol', 'min_age', 'max_age', 'min_mcap', 'max_mcap', 'min_txns', 'max_txns', 'min_buys', 'max_buys', 'min_sells', 'max_sells',
-  'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners', 'quote', 'miner', 'min_txs', 'max_txs'];
+  'min_floor', 'max_floor', 'min_items', 'max_items', 'min_owners', 'max_owners', 'quote', 'miner', 'min_txs', 'max_txs',
+  'whole_tokens', 'metadata_hash', 'initial_buy_units'];
 const cacheKey = (url) => url.pathname + '?' + PARAMS.filter((k) => url.searchParams.has(k)).map((k) => `${k}=${url.searchParams.get(k)}`).join('&');
 setInterval(() => { const now = Date.now(); for (const [k, v] of cache) if (v.until < now) cache.delete(k); }, 10_000).unref();
 
@@ -1672,8 +1677,11 @@ async function handle(req, res) {
     // Billing: a keyed request counts only when it returns data (200, cached or not); errors, 404s and the live feed are free.
     const ok = (body, xcache) => { if (acct) bill.countRequest(acct); send(200, body, { 'cache-control': `private, max-age=${CACHE_MS / 1000 | 0}`, vary: 'sec-fetch-site, x-api-key', 'x-cache': xcache }); };
     const key = cacheKey(url);
+    // An unsigned intent is never cached: it is built for one owner, and a reused copy would
+    // reach another wallet that refuses it (or worse, looks like it should have worked).
+    const cacheable = !(name === 'swap' && id === 'intent') && name !== 'launch';
     const hit = cache.get(key);
-    if (hit && hit.until > Date.now()) return ok(hit.body, 'HIT');
+    if (hit && hit.until > Date.now() && cacheable) return ok(hit.body, 'HIT');
 
     const route = Object.hasOwn(routes, name) && routes[name];
     if (!route) return send(404, { error: 'unknown endpoint' });
@@ -1684,7 +1692,7 @@ async function handle(req, res) {
     }
     const out = await p;
     if (out == null) return send(404, { error: 'not found' });
-    if (CACHE_MS > 0) cache.set(key, { until: Date.now() + CACHE_MS, body: out });
+    if (CACHE_MS > 0 && cacheable) cache.set(key, { until: Date.now() + CACHE_MS, body: out });
     ok(out, 'MISS');
   } catch (e) {
     send(e.status || (e instanceof URIError ? 400 : 502), { error: e.message });

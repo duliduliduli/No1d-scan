@@ -88,5 +88,48 @@ module.exports = function intents(rpc, tipNow = () => null) {
     }
   }
 
-  return { info, request, prepare, submit };
+  // Builds an UNSIGNED CreateToken intent for the owner's wallet, exactly like prepare() does for a
+  // trade. whole_tokens = how many whole tokens to mint; metadata_hash = 64-hex manifest digest ('' or
+  // '0' for none, like NOIDCAT which has no published manifest); initial_buy_units = optional micro-units
+  // (1e6 per whole token) of an immediate launchpad buy. The node's plan carries the real fee, NOID debit,
+  // liquidity reserve and initial-buy cost; the wallet proves it and submits the same as a trade.
+  async function launch(params) {
+    if (!enabled()) throw bad('trading is off', 403);
+    const sender = params.get('sender') || '';
+    if (!ADDR.test(sender)) throw bad('expected your o1… wallet address');
+    const raw = String(params.get('whole_tokens') || '').trim();
+    if (!/^\d{1,18}$/.test(raw) || raw === '0') throw bad('whole_tokens must be a positive whole number');
+    const mh = String(params.get('metadata_hash') || '').trim().toLowerCase();
+    if (mh !== '' && mh !== '0' && !/^[0-9a-f]{64}$/.test(mh)) throw bad('metadata_hash must be 64 hex characters, or empty');
+    const req = { action: 'create_token', whole_tokens: raw, metadata_hash: mh === '0' ? '0'.repeat(64) : mh };
+    const ib = String(params.get('initial_buy_units') || '').trim();
+    if (ib !== '') {
+      if (!/^\d{1,30}$/.test(ib) || ib === '0') throw bad('initial_buy_units must be a positive whole number of micro-units');
+      req.initial_buy_units = ib;
+    }
+    if (params.get('demo') === '1') {
+      return {
+        mock: true, signable: false, sender, request: req,
+        unsigned: Buffer.from(JSON.stringify({ mock: true, sender, ...req })).toString('hex'),
+        note: 'Mock intent for layout testing. Nothing here can be signed or sent.', submit_rpc: submitHint,
+      };
+    }
+    let out;
+    try {
+      out = await rpc('prepareNativeIntent', { owner: sender, request: req }, 30_000);
+    } catch (e) {
+      if (notActive(e)) throw bad(`Native token creation activates at block ${activation().toLocaleString('en-US')}.`, 409);
+      throw e;
+    }
+    if (out && typeof out === 'object' && (out.signature || out.signed || out.signed_tx)) throw bad('refusing a signed payload', 502);
+    return {
+      mock: false, signable: true, sender, request: req,
+      unsigned: typeof out === 'string' ? out : out?.unsigned_intent_hex ?? out?.intent ?? out?.unsigned ?? out?.hex ?? null,
+      detail: out && typeof out === 'object' ? out : null,
+      note: 'Unsigned. Sign it in your own wallet, then submit the signed bytes. This site never holds keys.',
+      submit_rpc: submitHint,
+    };
+  }
+
+  return { info, request, prepare, submit, launch };
 };

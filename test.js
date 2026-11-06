@@ -985,6 +985,28 @@ test('indexer + api', async (t) => {
   delete node.prepareNativeIntent;
   delete process.env.SWAP_ENABLED;
 
+  // CreateToken launch intents ride the same non-custodial relay as trades.
+  const seenLaunches = [];
+  node.prepareNativeIntent = ({ owner, request }) => {
+    seenLaunches.push({ owner, request });
+    return { plan_id: 'lp1', intent_id: 'ic1', owner, unsigned_intent_hex: 'cafebabe', fee_micronoid: '20000', noid_debit_micronoid: '60000000', reserve_deposit_micronoid: '59000000' };
+  };
+  const L = 'o1acdefghjkmnpqr';
+  const [, lc] = await get(`launch/intent?sender=${L}&whole_tokens=1000000&metadata_hash=0&initial_buy_units=500000`);
+  assert.strictEqual(lc.signable, true);
+  assert.strictEqual(lc.request.action, 'create_token', 'the launch intent asks the node to create a token');
+  assert.strictEqual(lc.request.whole_tokens, '1000000');
+  assert.strictEqual(lc.request.metadata_hash, '0'.repeat(64), 'a "0" manifest hash becomes the 64-zero digest');
+  assert.strictEqual(lc.request.initial_buy_units, '500000', 'an optional initial launchpad buy is passed through');
+  assert.strictEqual(lc.unsigned, 'cafebabe');
+  assert.strictEqual(lc.detail.reserve_deposit_micronoid, '59000000', 'the plan reports the liquidity reserve cost');
+  assert.strictEqual((await get(`launch/intent?sender=${L}&whole_tokens=0`))[0], 400, 'a token needs a positive supply');
+  assert.strictEqual((await get(`launch/intent?sender=${L}&whole_tokens=1&metadata_hash=zz`))[0], 400, 'a manifest hash must be 64 hex');
+  assert.strictEqual((await get('launch/intent?sender=bogus&whole_tokens=1'))[0], 400, 'a sender must be a real o1 address');
+  assert.strictEqual((await get('launch/other'))[0], 404, 'only /api/launch/intent exists');
+  assert.strictEqual(seenLaunches[0].request.action, 'create_token');
+  delete node.prepareNativeIntent;
+
   const [, qte] = await get('swap/quote?demo=1&token=gcat&side=buy&amount=100&slippage=1');
   assert.strictEqual(qte.demo, true);
   assert.strictEqual(qte.signable, false);
