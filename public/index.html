@@ -848,7 +848,7 @@
   .hudstats .chip b { font-size:13px }
   /* Globe on the left, the country list scrolling on the right. */
   /* Globe on the left, the country list on the right: one row, two frames of the same height. */
-  .gnsplit { display:grid; grid-template-columns:minmax(0, 44%) minmax(0, 1fr); gap:8px; align-items:stretch; margin:0 0 10px; height:var(--gnh, min(56vh, 420px)) }
+  .gnsplit { display:grid; grid-template-columns:minmax(0, 65%) minmax(0, 1fr); gap:8px; align-items:stretch; margin:0 0 10px; height:var(--gnh, min(56vh, 420px)) }
   .gnsplit > .card { margin-bottom:0; height:100%; min-height:0; display:flex; flex-direction:column }
   .gnsplit .globe { height:auto; aspect-ratio:auto; min-height:0; flex:1 1 auto }
   /* max-content rows: a definite list height would otherwise shrink the rows and overlap the text. */
@@ -860,7 +860,7 @@
   .gnsplit + #gnode { position:relative; inset:auto; width:auto; margin:0 0 10px; padding:10px 12px }
   .gnsplit + #gnode .gngrid { grid-template-columns:repeat(auto-fit, minmax(min(150px, 100%), 1fr)) }
   @media (max-width:640px) {
-    .gnsplit { grid-template-columns:minmax(0, 44%) minmax(0, 1fr); gap:6px; height:var(--gnh, min(44vh, 250px)) }
+    .gnsplit { grid-template-columns:minmax(0, 65%) minmax(0, 1fr); gap:6px; height:var(--gnh, min(44vh, 250px)) }
     .gnsplit .globe .legend { display:none }
     .gnsplit .gndir { display:none }
     .gnsplit .gnsub, .gnsplit .gnsince { font-size:11px }
