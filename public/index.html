@@ -4095,7 +4095,6 @@ const pages = {
       return;
     }
 
-    const pay = () => (P.plans || []).map((p) => `<button data-plan="${esc(p.id)}">${esc(p.noid)} NOID · ${n(p.credits)} credits</button>`).join('');
     box.innerHTML = `<h2>Your account <small class="muted">${esc(me.id)}</small></h2>
       <div class="grid">
         <div class="stat"><small>Credits</small><b>${n(me.credits)}</b><small class="muted">≈ ${n(me.credits * P.requests_per_credit)} API requests</small></div>
@@ -4107,10 +4106,6 @@ const pages = {
       <p class="muted">Named keys for this account. Each is shown <b>once</b>, when you create it, and can be deleted here any time. Full access: all data and full control over the account.</p>
       <div id="toks"></div>
       <p class="row"><button id="toknew">Create API token</button></p>
-      <h2 style="margin-top:14px">Add credits with NOID</h2>
-      ${P.noid ? `<p class="row">${pay()}</p><p class="muted">Pick a plan, send the exact NOID amount shown, and credits land automatically after ${esc(P.noid.confirmations)} block confirmations. One-off: no subscription, nothing to cancel.</p>` : '<p class="muted">NOID payments are not enabled right now.</p>'}
-      ${P.noid_paused ? `<p class="muted">New promoted-listing quotes are paused: ${esc(P.noid_paused)}. API plans are fixed in NOID and keep working.</p>` : ''}
-      <div id="payout"></div>
       <h2 style="margin-top:14px">Usage (last 30 days)</h2>${rows(me.usage, ['day', 'requests'])}
       <h2 style="margin-top:14px">History</h2>${rows(me.history.map((h) => ({ when: new Date(h.at).toLocaleString(), credits: (h.delta > 0 ? '+' : '') + n(h.delta), what: h.reason })), ['when', 'credits', 'what'])}
       <p class="row"><button id="copyk">Copy my key</button><button id="logout">Log out on this device</button></p>`;
@@ -4168,67 +4163,6 @@ const pages = {
           $('tkdone').onclick = () => { close(); pages.account(); };
         } catch (e) { btn.disabled = false; const el = $('tkerr'); if (el) { el.className = 'msg err'; el.textContent = e.message; } }
       };
-    };
-    const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
-    const qrSvg = (text) => { try { const q = qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ scalable: true, margin: 0 }); } catch { return ''; } };
-    let cdTimer = null;
-    const checkout = async (id) => {
-      const t = await api('topup/' + id);
-      if (!window.qrcode) await loadScript(QR_JS).catch(() => {});
-      const left = Math.max(0, t.expires - Date.now());
-      const mmss = (ms) => `${Math.floor(ms / 3600000)}h ${String(Math.floor(ms / 60000) % 60).padStart(2, '0')}m ${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}s`;
-      const steps = (k) => `<div class="steps">${['Send NOID', 'Confirming', 'Credits added'].map((l, i) => `<span class="${i < k ? 'done' : i === k ? 'on' : ''}">${i < k ? '✓ ' : ''}${l}</span>`).join('')}</div>`;
-      const support = P.support ? ` · Help: <a href="mailto:${esc(P.support)}">${esc(P.support)}</a>` : '';
-      if (t.paid) {
-        clearInterval(cdTimer);
-        $('payout').innerHTML = `<div class="checkout"><div class="head"><b>Receipt · order ${esc(t.id)}</b>${steps(3)}</div>
-          <div class="body" style="grid-template-columns:1fr"><div class="kvl">
-            <small>Status</small><span class="ok">✓ Paid and credited</span>
-            <small>Paid</small><span>${esc(when(t.paid_at / 1000))}</span>
-            <small>Amount</small><span class="mono">${esc(t.amount_noid)} NOID${t.usd_at_market ? ` <small class="muted">(≈ $${esc(t.usd_at_market)} at market)</small>` : ''}</span>
-            <small>Credits added</small><span><b>${n0(t.credits_added ?? t.credits)}</b>${t.credits_added > t.credits ? ` <span class="muted">(${n0(t.credits)} for the pack + ${n0(t.credits_added - t.credits)} for the extra NOID sent)</span>` : ''}</span>
-            <small>Your balance</small><span><b>${n0(t.balance)}</b> credits · ${n0(t.balance * P.requests_per_credit)} API requests</span>
-            <small>Chain reference</small><span class="mono" style="word-break:break-all">${esc(t.paid_ref)}</span></div>
-          <p style="margin:14px 0 0">Your key is active on the paid tier now: 3,000 requests/min. Try it:</p>
-          <p><code>curl -H "x-api-key: YOUR_KEY" ${esc(location.origin)}/api/stats</code></p></div>
-          <div class="status"><span class="ok">●</span> Verified on the NOID blockchain by this explorer's own node.${support}</div></div>`;
-        return;
-      }
-      const conf = t.status === 'confirming' && t.confirmations;
-      const statusLine = conf
-        ? `<span class="spin"></span><span>Payment seen on chain. Confirming: ${esc(Math.min(conf.have, conf.need))} of ${esc(conf.need)} blocks (about ${esc(Math.max(1, Math.ceil(((conf.need - conf.have) * 30) / 60)))} min left). Credits are added automatically after the last confirmation.</span>`
-        : t.status === 'expired'
-          ? '<span>This quote has expired. Start a new order. If you already sent NOID for it, it is still credited to this account at the quoted rate when it arrives within 7 days.</span>'
-          : '<span class="spin"></span><span>Waiting for your payment… this page updates itself. Once it lands, it needs ' + esc(P.noid?.confirmations ?? 18) + ' block confirmations (about ' + esc(Math.ceil(((P.noid?.confirmations ?? 18) * 30) / 60)) + ' minutes) before credits are added.</span>';
-      $('payout').innerHTML = `<div class="checkout"><div class="head"><b>Checkout · order ${esc(t.id)}</b>${steps(conf ? 1 : 0)}</div>
-        <div class="body">
-          <div><div class="qr">${qrSvg(t.address) || '<small class="muted">QR unavailable</small>'}</div><p class="muted" style="font-size:12px;margin:8px 0 0">Scan the address with your NOID wallet, then enter the exact amount.</p></div>
-          <div class="kvl">
-            <small>You get</small><span><b>${n0(t.credits)} credits</b> <span class="muted">(${n0(t.requests)} API requests${t.plan ? ` · ${esc(t.plan.label)} plan` : ''} · never expire)</span></span>
-            <small>Send exactly</small><span><span class="amt" id="amt">${esc(t.amount_noid)} NOID</span>${copyBtn(t.amount_noid)}<br><small class="muted" style="text-transform:none;letter-spacing:0">The last digits identify your payment. Sending more is fine: the extra is credited at the same rate.</small></span>
-            <small>To address</small><span class="addr">${esc(t.address)}${copyBtn(t.address)}</span>
-            <small>Price</small><span>Fixed in NOID: a plan costs the same whatever the market does</span>
-            <small>Quote valid</small><span id="cd">${mmss(left)}</span>
-          </div></div>
-        <div class="status">${statusLine}</div>
-        <div class="status" style="border-top:0;padding-top:0;color:var(--muted)">Verified directly on the NOID blockchain by this explorer's node · no third party holds your funds${support}</div></div>
-        <div class="trust">
-          <div><b>Prepaid, no subscription</b>Credits never expire and there is nothing to cancel.</div>
-          <div><b>Refund policy</b>Unused credits are refunded in NOID on request.</div>
-          <div><b>Sent a different amount?</b>If the last digits match, it is credited in proportion. Otherwise contact support with the order number and your transaction; it is credited by hand.</div>
-        </div>`;
-      clearInterval(cdTimer);
-      cdTimer = setInterval(() => { const l = t.expires - Date.now(); if ($('cd')) $('cd').textContent = l > 0 ? mmss(l) : 'expired: start a new order'; else clearInterval(cdTimer); }, 1000);
-      if (location.pathname === '/account') setTimeout(() => checkout(id).catch(() => {}), 10_000);
-    };
-    const watch = checkout;
-    for (const b of document.querySelectorAll('[data-plan]')) b.onclick = async () => {
-      b.disabled = true;
-      try {
-        const r = await api('topup', { plan: b.dataset.plan });
-        await watch(r.id);
-      } catch (e) { $('payout').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
-      b.disabled = false;
     };
   },
 

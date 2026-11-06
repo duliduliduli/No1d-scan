@@ -488,6 +488,11 @@ NOID through a real Parano1d contract, not a fee address with dust digits.
 
 ## 14h. API tokens: named keys, expiry, shown once, deletable (added 2026-11-06)
 
+The API is **free**; the account page no longer sells credits. The old "Add credits with NOID"
+purchase card (plan buttons, checkout/QR/`topup` polling, `payout`/`data-plan` handling) was removed.
+The server's `topup`/`noid_topups` routes and their tests are **kept** (dead but harmless — a schema and
+route the checkout UI no longer calls); nothing on the account page summons them any more.
+
 The account page manages **API tokens** — named keys with an optional expiry and a scope, created in a
 popup, listed as actionable items under the wallet account, each shown **exactly once** (in its own copy
 popup) at creation, and deletable from the list. Full access is the only scope today: "all data and full
