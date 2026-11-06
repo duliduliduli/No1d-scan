@@ -1145,6 +1145,28 @@ const routes = {
     };
   },
 
+  // Droplet-side reachability probe for SafeTrade's API: safe.trade historically Cloudflare-blocks
+  // datacenter IPs, so whether an on-ramp can ever call it depends on the server's own IP clearing it.
+  // URL list is hardcoded (no user input, no SSRF); api.github.com is a reachability control.
+  async 'safetrade-probe'() {
+    const targets = [
+      'https://safe.trade/api/v2/trade/public/markets',
+      'https://safetrade.com/api/v2/trade/public/markets',
+      'https://safe.trade/api/v2/trade/public/markets/noidusdt/k-line?period=60&limit=2',
+      'https://api.github.com',
+    ];
+    const probe = async (u) => {
+      try {
+        const res = await fetch(u, { signal: AbortSignal.timeout(12_000), redirect: 'follow' });
+        const buf = Buffer.from(await res.arrayBuffer()).subarray(0, 80);
+        return { url: u, status: res.status, type: res.headers.get('content-type'), bytes: buf.length, head: buf.toString('utf8').replace(/[\r\n\t]+/g, ' ') };
+      } catch (e) {
+        return { url: u, error: e.cause?.code || e.name };
+      }
+    };
+    return { at: Date.now(), probes: await Promise.all(targets.map(probe)) };
+  },
+
   async gaps(_, params) {
     const limit = Math.min(Math.max(Number(params.get('limit')) || 50, 1), 200);
     const kind = params.get('kind');
@@ -1630,7 +1652,7 @@ async function handle(req, res) {
 
     // Our own pages may call the API without a key; scripts and other sites need one (free from /account).
     // shortcut: Sec-Fetch-Site/Referer can be faked by a script, so this is a soft gate; the per-IP rate limit still applies.
-    if (!acct && !ownPage && name !== 'stats' && name !== 'health') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
+    if (!acct && !ownPage && name !== 'stats' && name !== 'health' && name !== 'safetrade-probe') return send(401, { error: 'API key required. Create one free at /account and send it as the x-api-key header.' });
     // An API token bought as API time is void once its time runs out. Our own pages are exempt, so the
     // account page can still show the order and offer a reload.
     if (acct && !ownPage && bill.expired(acct)) return send(402, { error: bill.expiredMessage(acct) });
