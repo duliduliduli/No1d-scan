@@ -200,6 +200,50 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('me', { headers: K }))[1].wallet, null);
   await post('link', { address: 'o1acdefghjkmnpqr' }, K);
 
+  // API tokens: named keys with an optional expiry, each shown once, listed, deletable.
+  const [, me0] = await get('me', { headers: K });
+  assert.strictEqual(me0.keys.length, 1, 'a fresh account has its primary token');
+  assert.strictEqual(me0.keys[0].name, 'Primary key');
+  assert.strictEqual(me0.keys[0].id, `k_${me0.id}`, 'the anchor row carries the account id');
+  assert.strictEqual(me0.keys[0].expires_at, null);
+  assert.strictEqual((await post('keys', { name: ' bot ' }, { headers: { 'x-api-key': 'nk_' + '0'.repeat(40) } }))[0], 401, 'tokens need this account');
+  const [, ktok] = await post('keys', { name: 'my bot' }, K);
+  assert.match(ktok.key, /^nk_[0-9a-f]{40}$/);
+  assert.strictEqual(ktok.name, 'my bot');
+  assert.strictEqual(ktok.scope, 'full');
+  assert.strictEqual((await post('keys', { name: '   ' }, K))[0], 400, 'a name is required');
+  assert.strictEqual((await post('keys', { name: 'x', expires_at: Date.now() - 1000 }, K))[0], 400, 'expiry must be in the future');
+  assert.strictEqual((await post('keys', { name: 'x', expires_at: 'soon' }, K))[0], 400, 'expiry must be numeric ms');
+  assert.strictEqual(db.prepare('select count(*) n from api_keys where key_hash = ?').get(ktok.key).n, 0, 'token secret never stored raw');
+  const [, me1] = await get('me', { headers: K });
+  const myTok = me1.keys.find((k) => k.name === 'my bot');
+  assert.ok(myTok, 'the created token is listed on the account');
+  assert.strictEqual(JSON.stringify(me1.keys).includes(ktok.key), false, 'the list never returns a secret');
+  // The new token works as a key, then deleting it revokes it while the account key keeps working.
+  const TB = { 'x-api-key': ktok.key };
+  assert.strictEqual((await get('me', { headers: TB }))[1].id, me0.id, 'a token proves the same account');
+  assert.strictEqual((await get('keys', { headers: TB }))[1].keys.length, 2);
+  assert.strictEqual((await get('keys', { method: 'DELETE' }))[0], 401, 'deleting needs the account');
+  const [, del] = await get(`keys/${myTok.id}`, { method: 'DELETE', headers: K });
+  assert.strictEqual(del.deleted, myTok.id);
+  assert.strictEqual((await get('me', { headers: TB }))[0], 401, 'a deleted token stops working');
+  assert.strictEqual((await get('me', { headers: K }))[1].credits, 0, 'the account key is untouched');
+  assert.strictEqual((await get(`keys/${myTok.id}`, { method: 'DELETE', headers: K }))[1].error, 'not found');
+  // Keep at least one token on the account.
+  const [, primary] = await get('me', { headers: K });
+  assert.strictEqual((await get(`keys/${primary.keys[0].id}`, { method: 'DELETE', headers: K }))[0], 400, "the last token stays so the account can be reached");
+  // A token with a past expiry stops answering scripts (402) but own pages still render so it can be deleted.
+  const [, exp] = await post('keys', { name: 'temp', expires_at: Date.now() + 500 }, K);
+  const EX = { 'x-api-key': exp.key };
+  assert.strictEqual((await get('me', { headers: EX }))[1].api_expired, false);
+  db.prepare('update api_keys set expires_at = ? where key_hash = ?').run(Date.now() - 1000, H(exp.key));
+  assert.strictEqual((await get('me', { headers: EX, bare: true }))[0], 402, 'an expired key fails for scripts');
+  assert.strictEqual((await get('me', { headers: EX }))[1].api_expired, true, 'own pages still render, flagged');
+  const [, me2] = await get('me', { headers: K });
+  const expId = me2.keys.find((k) => k.name === 'temp').id;
+  await get(`keys/${expId}`, { method: 'DELETE', headers: K });
+  assert.strictEqual((await get('me', { headers: EX, bare: true }))[0], 401, 'deleted even an expired token');
+
   // NOID top-up: unique amount -> matching slot appears -> credited once the tip is 18 blocks past it.
   const credits = async () => (await get('me', { headers: K }))[1].credits;
   const mine = async (n) => { tip += n; await tick(); };

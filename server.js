@@ -1568,6 +1568,8 @@ async function handle(req, res) {
     const ownPage = req.headers['sec-fetch-site'] === 'same-origin' || /^https?:\/\/([^/]+)/.exec(req.headers.referer || '')?.[1] === req.headers.host;
     // A wrong key must fail loudly for scripts; our own pages just drop a stale saved key.
     if (givenKey && !acct && !ownPage) return send(401, { error: 'unknown API key. Check the x-api-key header; create a key free at /account.' });
+    // A token that passed its own expiry stops answering scripts; the account page still works so it can be deleted.
+    if (acct && !ownPage && bill.expired(acct)) return send(402, { error: bill.expiredMessage(acct) });
     // The API is free: every keyed request gets the paid-tier rate, unkeyed requests the base rate.
     const paid = !!acct;
     const who = paid ? acct.id : ip;

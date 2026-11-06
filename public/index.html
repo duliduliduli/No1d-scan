@@ -884,7 +884,14 @@
 .buybtn { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border:1px solid var(--accent); border-radius:3px; background:var(--accent); color:var(--bg); font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase; white-space:nowrap }
 .buybtn:hover { filter:brightness(1.08); color:var(--bg) }
   /* Launchpad form fields: label on top, field under it, one per row. */
-  .lfield { display:block; margin:10px 0 4px }
+  /* API-token create / once-only popup */
+    .tokmod { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(3,10,10,.7); backdrop-filter:blur(4px) }
+    .tokmod .tcard { width:min(460px,100%); box-sizing:border-box; max-height:86vh; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:16px }
+    .tfield { display:block; margin:10px 0 4px }
+    .tfield > span { display:block; color:var(--muted); font:600 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; margin-bottom:4px }
+    .tfield input, .tfield select { width:100%; box-sizing:border-box; padding:9px 10px; font-size:16px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px }
+    .tkey { word-break:break-all; font:700 13px var(--mono); padding:10px; background:var(--panel); border:1px solid var(--line); border-radius:4px }
+    .lfield { display:block; margin:10px 0 4px }
   .lfield > span { display:block; color:var(--muted); font:600 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; margin-bottom:4px }
   .lfield input { width:100%; box-sizing:border-box; padding:9px 10px; font-size:16px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px }
   .lfield input:focus { border-color:var(--accent); outline:none }
@@ -939,15 +946,18 @@ const saveKey = (k) => {
 };
 // Sends the account key (if any) so paid users get their tier everywhere.
 const apiCache = new Map();
-const api = async (p, body) => {
+const api = async (p, body, method) => {
   const k = myKey();
-  const hit = body === undefined && apiCache.get(p);
+  method = method || (body === undefined ? 'GET' : 'POST');
+  const hit = method === 'GET' && body === undefined && apiCache.get(p);
   if (hit && hit.until > Date.now()) return hit.body;
-  const r = await fetch('/api/' + p, body === undefined ? { headers: k ? { 'x-api-key': k } : {} }
-    : { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...(k && { 'x-api-key': k }) } });
+  const headers = { ...(k && { 'x-api-key': k }) };
+  let init = { method, headers };
+  if (body !== undefined) { init.body = JSON.stringify(body); headers['content-type'] = 'application/json'; }
+  const r = await fetch('/api/' + p, init);
   const j = await r.json().catch(() => ({ error: 'The explorer could not read that response.' }));
   if (!r.ok) throw Object.assign(new Error(j.error || 'Request failed'), { status: r.status });
-  if (body === undefined) {
+  if (method === 'GET' && body === undefined) {
     if (apiCache.size > 40) apiCache.delete(apiCache.keys().next().value);
     apiCache.set(p, { until: Date.now() + 5000, body: j });
   }
@@ -4093,6 +4103,10 @@ const pages = {
         <div class="stat"><small>API requests made</small><b>${n(me.requests)}</b></div>
         <div class="stat"><small>Tier</small><b>${me.credits > 0 ? 'Paid' : 'Free'}</b></div>
       </div>
+      <h2 style="margin-top:14px">API tokens</h2>
+      <p class="muted">Named keys for this account. Each is shown <b>once</b>, when you create it, and can be deleted here any time. Full access: all data and full control over the account.</p>
+      <div id="toks"></div>
+      <p class="row"><button id="toknew">Create API token</button></p>
       <h2 style="margin-top:14px">Add credits with NOID</h2>
       ${P.noid ? `<p class="row">${pay()}</p><p class="muted">Pick a plan, send the exact NOID amount shown, and credits land automatically after ${esc(P.noid.confirmations)} block confirmations. One-off: no subscription, nothing to cancel.</p>` : '<p class="muted">NOID payments are not enabled right now.</p>'}
       ${P.noid_paused ? `<p class="muted">New promoted-listing quotes are paused: ${esc(P.noid_paused)}. API plans are fixed in NOID and keep working.</p>` : ''}
@@ -4102,6 +4116,59 @@ const pages = {
       <p class="row"><button id="copyk">Copy my key</button><button id="logout">Log out on this device</button></p>`;
     $('copyk').onclick = () => navigator.clipboard?.writeText(key).then(() => ($('copyk').textContent = 'Copied'));
     $('logout').onclick = () => { saveKey(''); pages.account(); };
+    // ---- API tokens: list, create (name / expiry / scope), and delete. ----
+    const tokExpiry = (at) => (at ? `expires ${new Date(at).toISOString().slice(0, 10)}` : 'never expires');
+    const paintToks = () => {
+      const el = $('toks');
+      if (!el) return;
+      const rows = (me.keys || []).map((k) => `<tr>
+        <td><b>${esc(k.name)}</b><br><small class="muted">${esc(k.id)}</small></td>
+        <td>${esc(k.scope === 'full' ? 'Full access' : k.scope)}</td>
+        <td>${k.expires_at ? `<span${k.expires_at <= Date.now() ? ' class="down"' : ''}>${tokExpiry(k.expires_at)}</span>` : 'never'}</td>
+        <td>${k.created ? new Date(k.created).toISOString().slice(0, 10) : ''}</td>
+        <td>${me.keys.length > 1 ? `<button class="del" data-del="${esc(k.id)}">Delete</button>` : '<small class="muted">keep ≥1</small>'}</td></tr>`).join('');
+      el.innerHTML = `<table class="price"><tr><th>Name</th><th>Access</th><th>Expiry</th><th>Created</th><th></th></tr>${rows}</table>`;
+      for (const b of el.querySelectorAll('[data-del]')) b.onclick = async () => {
+        if (!confirm(`Delete the API token "${b.dataset.del}"? It stops working immediately and cannot be recovered.`)) return;
+        try { await api('keys/' + b.dataset.del, null, 'DELETE'); pages.account(); }
+        catch (e) { el.insertAdjacentHTML('afterend', `<p class="msg err">${esc(e.message)}</p>`); }
+      };
+    };
+    paintToks();
+    const tokModal = (html) => {
+      const m = document.createElement('div');
+      m.className = 'tokmod';
+      m.innerHTML = `<div class="tcard">${html}</div>`;
+      document.body.appendChild(m);
+      const close = () => m.remove();
+      m.addEventListener('click', (e) => { if (e.target === m) close(); });
+      return { m, close };
+    };
+    $('toknew').onclick = () => {
+      const { m, close } = tokModal(`<h3>Create an API token</h3>
+        <label class="tfield"><span>Name</span><input id="tkname" type="text" maxlength="64" placeholder="e.g. my bot"></label>
+        <label class="tfield"><span>Expires (optional)</span><input id="tkexp" type="date"></label>
+        <label class="tfield"><span>Permissions</span><select id="tkscope"><option value="full">Full access — all data and full control over the account</option></select></label>
+        <p class="row"><button id="tkgo">Create</button><button id="tkx">Cancel</button></p>
+        <p class="fine" id="tkerr"></p>`);
+      $('tkx').onclick = close;
+      $('tkgo').onclick = async () => {
+        const exp = $('tkexp').value;
+        const expires_at = exp ? new Date(exp + 'T23:59:59').getTime() : null;
+        const btn = $('tkgo'); btn.disabled = true;
+        try {
+          const r = await api('keys', { name: $('tkname').value.trim(), scope: $('tkscope').value, expires_at });
+          // The secret is shown once, in its own popup, then never again.
+          m.innerHTML = `<div class="tcard"><h3>Copy this token now</h3>
+            <p>It is shown <b>once</b>. Copy it and close; it cannot be shown again. Anyone who has it can use the account.</p>
+            <p class="tkey">${esc(r.key)}</p>
+            <p class="row"><button id="tkcopy">Copy</button><button id="tkdone">I copied it — close</button></p>
+            <p class="fine">It is now an item in the API tokens list above, where you can delete it any time.</p></div>`;
+          $('tkcopy').onclick = () => navigator.clipboard?.writeText(r.key).then(() => ($('tkcopy').textContent = 'Copied'));
+          $('tkdone').onclick = () => { close(); pages.account(); };
+        } catch (e) { btn.disabled = false; const el = $('tkerr'); if (el) { el.className = 'msg err'; el.textContent = e.message; } }
+      };
+    };
     const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
     const qrSvg = (text) => { try { const q = qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ scalable: true, margin: 0 }); } catch { return ''; } };
     let cdTimer = null;

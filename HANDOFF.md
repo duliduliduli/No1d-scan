@@ -486,6 +486,31 @@ NOID through a real Parano1d contract, not a fee address with dust digits.
   `nk_…`/wallet-key bytes, and decide what to do with `HANDOFF.md` (it documents the droplet and env
   vars — it is the operator map, not customer-facing).
 
+## 14h. API tokens: named keys, expiry, shown once, deletable (added 2026-11-06)
+
+The account page manages **API tokens** — named keys with an optional expiry and a scope, created in a
+popup, listed as actionable items under the wallet account, each shown **exactly once** (in its own copy
+popup) at creation, and deletable from the list. Full access is the only scope today: "all data and full
+control over the account".
+
+- **Schema (additive):** new `api_keys` table `(id, account, name, key_hash unique, scope default 'full',
+  expires_at, created, last_used)`. The account's anchor key (`accounts.key_hash`) is also an `api_keys`
+  row (id `k_<account>`), seeded on startup for accounts created before the table existed, so the list,
+  expiry and delete apply to every key. `account(key)` now looks up `api_keys` by hash only;
+  `accounts.key_hash` is seeding data, not consulted at lookup time.
+- **Routes:** `POST /api/keys` (name 1–64 chars; `expires_at` ms or null; scope `full` only;
+  20/hour/IP; returns the secret once), `GET /api/keys` (id, name, scope, expires_at, created,
+  last_used — never the secret), `DELETE /api/keys/<id>` (account-scoped; the last token may not be
+  deleted so the account stays reachable). `GET /api/me` now carries `keys`.
+- **Expiry:** a token past `expires_at` stops answering scripts with 402 (`bill.expired()` checks the
+  presented token, not the account); own pages still render so the token is shown red and can be deleted.
+- **UI:** `/account` has an "API tokens" card listing keys with delete buttons; "Create API token" opens
+  a modal (name, optional expiry date, permissions), then a once-only copy popup ("Copy … I copied it —
+  close") that re-renders the page so the secret is gone from the DOM. `api(p, body, method)` in the SPA
+  now supports an explicit method (DELETE).
+- Tests added in `test.js`: token lifecycle, no secret in the list, expiry 402 for scripts / flagged
+  for own pages, delete revokes while the account key keeps working, keep-≥1 rule, raw secret never stored.
+
 ## 15. Quick verification commands
 
 

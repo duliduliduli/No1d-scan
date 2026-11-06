@@ -50,7 +50,14 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     create table if not exists noid_topups (id text primary key, account text not null, amount integer not null, credits integer not null, created integer not null, paid_ref text unique);
     create table if not exists token_stars (account text not null, token_id text not null, created integer not null, primary key (account, token_id));
     create index if not exists token_stars_acct on token_stars(account, created desc, token_id);
+    create table if not exists api_keys (id text primary key, account text not null, name text not null, key_hash text unique not null, scope text not null default 'full', expires_at integer, created integer not null, last_used integer);
+    create index if not exists api_keys_acct on api_keys(account, created);
   `);
+  // The account's anchor key (accounts.key_hash) is also an api_keys row, so the token list,
+  // expiry and delete apply to every key. Seed rows for accounts created before this table existed.
+  db.exec(`insert into api_keys (id, account, name, key_hash, scope, expires_at, created)
+    select 'k_' || id, id, 'Primary key', key_hash, 'full', null, created from accounts
+    where key_hash is not null and not exists (select 1 from api_keys k where k.key_hash = accounts.key_hash)`);
   // The last 4 digits (μNOID "dust") identify an order, so a buyer may send more than quoted and still match;
   // extra is credited at the same rate. Dust is unique among open orders.
   try { db.exec('alter table noid_topups add column dust integer'); } catch {}
@@ -76,6 +83,12 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     insertAccount: db.prepare('insert into accounts (id, key_hash, created) values (?, ?, ?)'),
     byKey: db.prepare('select id, credits, requests, created, wallet, api_until from accounts where key_hash = ?'),
     byId: db.prepare('select id, credits, requests, created, wallet, api_until from accounts where id = ?'),
+    keyByHash: db.prepare('select id, account, name, scope, expires_at from api_keys where key_hash = ?'),
+    keysFor: db.prepare('select id, name, scope, expires_at, created from api_keys where account = ? order by created'),
+    addKey: db.prepare('insert into api_keys (id, account, name, key_hash, scope, expires_at, created, last_used) values (?, ?, ?, ?, ?, ?, ?, ?)'),
+    delKey: db.prepare('delete from api_keys where id = ? and account = ?'),
+    keyCount: db.prepare('select count(*) n from api_keys where account = ?'),
+    keyUsed: db.prepare('update api_keys set last_used = ? where id = ?'),
     setWallet: db.prepare('update accounts set wallet = ? where id = ?'),
     byWallet: db.prepare('select id, credits, requests, created, wallet, api_until from accounts where wallet = ? limit 1'),
     addTime: db.prepare('update accounts set api_until = ? where id = ?'),
@@ -128,7 +141,15 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     });
   }
 
-  const account = (key) => (typeof key === 'string' && /^nk_[0-9a-f]{40}$/.test(key) ? q.byKey.get(hashKey(key)) : undefined);
+  const account = (key) => {
+    if (typeof key !== 'string' || !/^nk_[0-9a-f]{40}$/.test(key)) return undefined;
+    const row = q.keyByHash.get(hashKey(key));
+    if (!row) return undefined;
+    const acct = q.byId.get(row.account);
+    if (!acct) return undefined;
+    q.keyUsed.run(Date.now(), row.id); // last_used is analytics; failures beat this to the punch, fine
+    return { ...acct, key: { id: row.id, name: row.name, scope: row.scope, expires_at: row.expires_at } };
+  };
 
   // Called for every keyed data request: the API is free, so requests are counted
   // for the usage page but never draw credits and no key ever expires.
@@ -140,13 +161,16 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
   function paid(acct) {
     return !!acct;
   }
-  // API time bought through a NOID contract used to void a key at expiry. The API is free,
-  // so nothing ever expires; time bought earlier still lands in the ledger, then does nothing.
+  // A key stops working the moment its own expires_at passes; the API itself is free and the
+  // account is untouched — the expiration is per token, chosen when the token is created.
   function expired(acct) {
-    return false;
+    const at = acct?.key?.expires_at;
+    return !!(at && Number(at) <= Date.now());
   }
   function expiredMessage(acct) {
-    return 'The API is free: no key expires.';
+    const at = Number(acct?.key?.expires_at) || 0;
+    const on = new Date(at).toISOString().slice(0, 10);
+    return `This API token expired on ${on}. It no longer answers; delete it on the account page and create another.`;
   }
 
   // API time is granted from the chain, not from a webhook: `ref` is the contract order id, so a
@@ -304,7 +328,37 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
       const key = `nk_${randomBytes(20).toString('hex')}`;
       const id = randomBytes(8).toString('hex');
       q.insertAccount.run(id, hashKey(key), Date.now());
+      q.addKey.run(`k_${id}`, id, 'Primary key', hashKey(key), 'full', null, Date.now(), null);
       return { key, id, note: 'Save this key now. It is your login and is shown only once.' };
+    },
+    // API tokens: named keys with an optional expiry and a scope, every one shown only once
+    // at creation and deletable from the account page. The list never returns a secret.
+    'POST keys': (acct, body, _, ip) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const mints = (signups.get(`k${ip}`) || 0) + 1;
+      signups.set(`k${ip}`, mints);
+      if (mints > 20) throw bad('too many new tokens from your network, try again in an hour', 429);
+      const name = String(body?.name || '').trim().slice(0, 64);
+      if (!name) throw bad('name the token so you can tell them apart');
+      const scope = body?.scope === 'full' ? 'full' : 'full'; // full access is the only level right now
+      let expires_at = body?.expires_at == null || body.expires_at === '' ? null : Number(body.expires_at);
+      if (expires_at != null && (!Number.isFinite(expires_at) || expires_at <= Date.now())) throw bad('the expiry must be a future date');
+      const key = `nk_${randomBytes(20).toString('hex')}`;
+      const id = randomBytes(8).toString('hex');
+      q.addKey.run(id, acct.id, name, hashKey(key), scope, expires_at, Date.now(), null);
+      return { key, id, name, scope, expires_at, note: 'Shown once, now. Copy it and close; it cannot be shown again, but it can be deleted here any time.' };
+    },
+    'GET keys': (acct) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      return { keys: q.keysFor.all(acct.id).map((r) => ({ id: r.id, name: r.name, scope: r.scope, expires_at: r.expires_at, created: r.created, last_used: r.last_used })) };
+    },
+    'DELETE keys': (acct, _, id) => {
+      if (!acct) throw bad('missing or unknown API key', 401);
+      const row = q.keysFor.all(acct.id).find((k) => k.id === String(id || ''));
+      if (!row) return null;
+      if (Number(q.keyCount.get(acct.id).n) <= 1) throw bad('keep at least one token on the account', 400);
+      q.delKey.run(row.id, acct.id);
+      return { deleted: row.id };
     },
     'GET stars': (acct) => {
       if (!acct) throw bad('missing or unknown API key', 401);
@@ -326,7 +380,7 @@ module.exports = function billing(db, rpc, livePrice = () => null, tipNow = () =
     'GET me': (acct) => {
       if (!acct) throw bad('missing or unknown API key', 401);
       const time = Number(q.byId.get(acct.id)?.api_until) || 0;
-      return { ...acct, tier: acct.credits > 0 || time > Date.now() ? 'paid' : 'free', api_until: time || null, api_expired: expired(acct), rate_limit_per_min: paid(acct) ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing() };
+      return { ...acct, tier: acct.credits > 0 || time > Date.now() ? 'paid' : 'free', api_until: time || null, api_expired: expired(acct), rate_limit_per_min: paid(acct) ? Number(process.env.PAID_RATE_LIMIT || 3000) : Number(process.env.RATE_LIMIT || 120), usage: q.usage.all(acct.id), history: q.history.all(acct.id), pricing: pricing(), keys: q.keysFor.all(acct.id).map((r) => ({ id: r.id, name: r.name, scope: r.scope, expires_at: r.expires_at, created: r.created, last_used: r.last_used })) };
     },
     'GET pricing': () => pricing(),
     // Wallet-as-account: the browser wallet's o1… address is the public half of the login. Linking stores the address
