@@ -895,9 +895,25 @@
   .lfield > span { display:block; color:var(--muted); font:600 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; margin-bottom:4px }
   .lfield input { width:100%; box-sizing:border-box; padding:9px 10px; font-size:16px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px }
   .lfield input:focus { border-color:var(--accent); outline:none }
+  /* Terms consent banner: fixed bar until accepted, then hidden. */
+  .tconsent { position:fixed; left:0; right:0; bottom:0; z-index:70; display:flex; flex-direction:column; gap:8px;
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom)); background:var(--bg); color:var(--fg);
+    border-top:1px solid var(--accent); box-shadow:0 -6px 24px rgba(0,0,0,.35); font:13px/1.5 var(--ui) }
+  .tconsent[hidden] { display:none }
+  .tconsent p { margin:0 }
+  .tconsent a { color:var(--accent); text-decoration:underline }
+  .tcbtns { display:flex; justify-content:flex-end }
+  .tcbtns button { padding:8px 18px; border:1px solid var(--accent); border-radius:4px; background:var(--accent);
+    color:var(--bg); font:700 13px var(--mono); letter-spacing:.06em; text-transform:uppercase; cursor:pointer }
+  @media (min-width:641px) { .tconsent { flex-direction:row; align-items:center; padding:10px 20px } .tcbtns { margin-left:auto; padding-left:16px } }
 </style>
 </head>
 <body>
+<!-- Terms consent: shown until accepted; gates money actions too -->
+<div class="tconsent" id="tconsent" hidden>
+<p>NOID Scan is a self-custodial explorer: the wallet, trading and token launching happen on your device and on the Parano1d chain — NOID Scan does not hold your keys or funds, and the site is not a wallet, exchange, broker or financial adviser. By using this site you agree to the <a href="/terms" data-link>Terms of Service</a> and the <a href="/privacy" data-link>Privacy Policy</a>.</p>
+<p class="tcbtns"><button type="button" id="tcok">I agree</button></p>
+</div>
 <header>
   <h1><a href="/" data-link>NOID Scan</a></h1>
   <a class="explore" href="/explore" data-link>Explore</a>
@@ -938,6 +954,18 @@
 const app = document.getElementById('app');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const myKey = () => { try { return localStorage.getItem('nk') || ''; } catch { return ''; } };
+// Terms consent: localStorage flag `noid_terms_v1` = version the visitor agreed to.
+const TERMS_KEY = 'noid_terms_v1', TERMS_VERSION = 1;
+const agreedTerms = () => { try { return Number(localStorage.getItem(TERMS_KEY)) === TERMS_VERSION; } catch { return false; } };
+const termsGate = () => {
+  const ok = $('tconsent'); if (!ok) return true;
+  if (agreedTerms()) { ok.hidden = true; return true; }
+  ok.hidden = false;
+  ok.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  return false;
+};
+// Money actions (trade, launch, contract, API token) run only after acceptance.
+const acceptTerms = () => { try { localStorage.setItem(TERMS_KEY, String(TERMS_VERSION)); } catch {} const ok = $('tconsent'); if (ok) ok.hidden = true; };
 let starCache = null, starsReady = null;
 const saveKey = (k) => {
   try { k ? localStorage.setItem('nk', k) : localStorage.removeItem('nk'); } catch {}
@@ -3010,6 +3038,7 @@ function mountTrade(d, id) {
         const note = $('trnote');
         $('trconfirm').disabled = true;
         try {
+          if (!termsGate()) { $('trconfirm').disabled = false; return; }
           if (!W.isUnlocked()) {
             note.textContent = 'Opening the wallet…';
             await W.unlock($('trpass')?.value || '');
@@ -3195,6 +3224,7 @@ function wireNoidTierCard(kind, opts = {}) {
   if (id) noidWatch(kind, id);
   $('npmake').onclick = async () => {
     if (new URLSearchParams(location.search).get('demo') === '1') return msg('Sample page. Payment is not taken.');
+    if (!termsGate()) return;
     const payer = identity();
     if (!payer) return msg('Open the wallet in this browser first: the contract names the address you pay from.', true);
     if (kind === 'promo' && !pick) return msg('Choose the token you want to promote.', true);
@@ -4146,6 +4176,7 @@ const pages = {
         <p class="fine" id="tkerr"></p>`);
       $('tkx').onclick = close;
       $('tkgo').onclick = async () => {
+        if (!termsGate()) return;
         const exp = $('tkexp').value;
         const expires_at = exp ? new Date(exp + 'T23:59:59').getTime() : null;
         const btn = $('tkgo'); btn.disabled = true;
@@ -4667,18 +4698,51 @@ const pages = {
   },
   terms() {
     app.innerHTML = `<div class="card"><h2>Terms of Service</h2>
-      <p class="muted">DRAFT pending legal review.</p>
-      <p>NOID Scan is a block explorer. It does not hold NOID, tokens, NFTs or wallet keys, and it cannot move funds on your behalf.</p>
-      <p>A swap quote, when the panel is shown, lists the front-end fee as a rate and an amount before you sign. That fee is a separate output to the explorer's published address when the Parano1d transaction can carry one. Until then the fee is only a line on the quote. You sign and submit from your own wallet. This site does not match orders and does not take custody of either side.</p>
-      <p>Nothing here is investment, financial or trading advice. Listings are whatever the connected node reports. A demo banner means the rows are sample data and are not on chain.</p>
-      <p id="promotion">Paid promotion. Not a recommendation or endorsement by NOID Scan. A Promoted slot and an Enhanced profile are paid placements. They sit apart from the organic list and do not change its order. A Promoted slot ends when its time is up.</p>
-      <p class="muted">The swap panel stays hidden unless it is turned on, a fee address is set, and the node exposes the v2.1 DEX and wallet interface. <code>?demo=1</code> shows a mock quote that cannot be submitted.</p>
+      <p class="fine">Last updated November 6, 2026. By using NOID Scan you agree to these terms.</p>
+      <h3>1. What NOID Scan is</h3>
+      <p>NOID Scan is a public block explorer and API for the Parano1d (NOID) blockchain, provided by Duli Media LLC. It reads chain data from a node and shows it as-is. It is not a wallet, exchange, broker, custodian or financial adviser, and it does not hold, custody or control anyone's NOID, tokens, NFTs or wallet keys.</p>
+      <h3>2. Wallet</h3>
+      <p>The wallet runs entirely in your browser and is self-custodial. Your seed phrase is generated, stored and used only on your device, encrypted with a passphrase you choose. It is never sent to NOID Scan's servers and never leaves your browser. Nothing here can recover your funds: if you lose your seed phrase or passphrase, they are gone. You are solely responsible for keeping them safe.</p>
+      <h3>3. Trading and tokens</h3>
+      <p>Trading and token launching happen on the Parano1d chain itself through your own wallet. NOID Scan does not match orders, take the other side, or touch the funds. A trade or launch is final once the chain confirms it and cannot be reversed. Tokens can lose all value, including to zero; you trade and launch at your own risk.</p>
+      <p>Nothing on this site is investment, financial, legal or trading advice. Token listings and prices are whatever the connected node reports, and a "demo" banner means the rows are sample data, not on chain.</p>
+      <h3>4. API</h3>
+      <p>The API is provided free of charge as-is. You agree to use it reasonably and not to abuse it: no attempts to exceed or bypass rate limits, no scraping that disrupts service, no unlawful use. NOID Scan may throttle or block any client that does so.</p>
+      <h3>5. Promotions and paid placements</h3>
+      <p id="promotion">Paid promotion. Not a recommendation or endorsement by NOID Scan. A Promoted slot and an Enhanced profile are paid placements; they sit apart from the organic list and do not change its order, and they end when their time is up. Payments are made on chain in NOID to a contract that names the payer; if a payment is not made, nothing is granted.</p>
+      <h3>6. No custody</h3>
+      <p>NOID Scan never receives, stores or controls funds. Payments described above go to on-chain contracts, not to NOID Scan. NOID Scan cannot send, return, refund or reverse any on-chain payment.</p>
+      <h3>7. Acceptable use</h3>
+      <p>You agree not to use NOID Scan to break the law, to misrepresent the chain, or to take part in fraud, deception, wash trading, fake volume or other market manipulation. You are responsible for the legality of your own actions.</p>
+      <h3>8. Risks</h3>
+      <p>Blockchain use carries risk: chain forks, reorgs, software bugs, network congestion, and the possibility that a transaction never confirms. NOID Scan provides no guarantee that any listing, price or API answer is accurate, complete or current.</p>
+      <h3>9. No warranty and limitation of liability</h3>
+      <p>The service is provided "as is" and "as available" without warranty of any kind. To the maximum extent permitted by law, Duli Media LLC and its owners are not liable for any loss, including loss of funds, arising from your use of this site, the API, the wallet, trading or any token created here.</p>
+      <h3>10. Changes</h3>
+      <p>These terms may change. Continued use after a change means you accept the new terms. Significant changes are noted on this page.</p>
       <p><a href="/privacy" data-link>Privacy</a></p></div>`;
   },
   privacy() {
     app.innerHTML = `<div class="card"><h2>Privacy</h2>
-      <p class="muted">DRAFT pending legal review.</p>
-      <p>An account is an API key. The server stores a hash of that key, not a name or an email. An enhanced-profile or promoted-slot order stores the account id, the amount, the chain, and, once it matches, the transaction id. Payments are made on chain in NOID; no card processor is involved. This page is not a finished privacy policy.</p>
+      <p class="fine">Last updated November 6, 2026. This page states exactly what NOID Scan does and does not collect.</p>
+      <h3>1. What stays in the server database</h3>
+      <p>An account is an API key. The server stores a one-way hash of the key, not the key itself, and no name, email, phone or identity. Each API token may have a name you give it (shown on your account page), an optional expiry, and a last-used timestamp.</p>
+      <p>If you link a wallet address to an account, that public address is stored. If you save favorites with a key present, the favorite token/address ids are stored so they follow the key across browsers.</p>
+      <p>Ledger entries record account id, amount, reason and time (for example, API time purchased in NOID). On-chain payment references may be stored to confirm payments.</p>
+      <h3>2. What remains in your browser only</h3>
+      <p>Your wallet seed phrase and passphrase never leave your browser. Your chosen theme, unlinked favorites, pending-order state and a small number of UI settings are kept in your browser's local storage. Clearing site data removes them.</p>
+      <h3>3. What we do not touch</h3>
+      <p>NOID Scan does not use advertising networks, analytics trackers, fingerprinting or third-party scripts. Personal requests (creating a key, linking a wallet, applying favorites) require the key itself as proof; the raw API key is shown at creation once and never again.</p>
+      <h3>4. Network data</h3>
+      <p>Like any web server, requests pass through with an IP address. NOID Scan keeps rate-limit counts in memory for a short time to protect the service and does not store them in the database.</p>
+      <h3>5. The chain is public</h3>
+      <p>Everything on the Parano1d chain — wallets, balances, transactions, tokens and trades — is public by design. NOID Scan only displays what the chain already makes public.</p>
+      <h3>6. Deleting</h3>
+      <p>You can delete API tokens on your account page at any time. Deletion takes effect immediately. For anything else, contact the operator (see below) and we will address it.</p>
+      <h3>7. Children</h3>
+      <p>NOID Scan is not directed at children under 13, and we do not knowingly collect their data.</p>
+      <h3>8. Contact</h3>
+      <p>Operator: Duli Media LLC, dulimediallc@gmail.com.</p>
       <p><a href="/terms" data-link>Terms of Service</a></p></div>`;
   },
 
@@ -5062,6 +5126,7 @@ function wireLaunch(wid) {
       note.className = 'fine';
       note.textContent = 'Approving on this device. This takes about 10 to 30 seconds…';
       try {
+        if (!termsGate()) { $('lmgo2').disabled = false; return; }
         const r2 = await window.No1dWallet.confirmLaunch({ id: t.id });
         note.innerHTML = `Launched. The node accepted it and it settles in the next block, about 30 seconds.${r2.txid ? ` Code <span class="mono">${esc(short(r2.txid, 10))}</span> ${copyBtn(r2.txid)}` : ''} <a href="/explore?sort=newest" data-link>See it on the screener →</a>`;
         note.className = 'msg';
@@ -5179,6 +5244,9 @@ document.getElementById('search').addEventListener('submit', async (e) => {
 });
 addEventListener('popstate', render);
 migrateAddrWatch();
+// Terms consent: remember the choice, and gate money actions.
+$('tcok').addEventListener('click', acceptTerms);
+if (!agreedTerms()) { const ok = $('tconsent'); if (ok) ok.hidden = false; }
 render();
 </script>
 </body>

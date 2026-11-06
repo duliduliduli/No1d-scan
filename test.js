@@ -700,7 +700,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /never holds your wallet/);
   assert.match(homeHtml, /open here soon/);
   assert.match(homeHtml, /aria-label="Paid promotion">⚡/);
-  assert.doesNotMatch(homeHtml, /pill enh|>Enhanced<|Duli Media/);
+  assert.doesNotMatch(homeHtml, /pill enh|>Enhanced</);
   assert.match(homeHtml, /async promote\(/);
   assert.match(homeHtml, /href="\/promote" data-link/);
   assert.match(homeHtml, /id="nprange"/, "the promotion price is a slider");
@@ -784,8 +784,13 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="sortpop"/);
   assert.match(homeHtml, /id="listbar"/);
   assert.match(homeHtml, /href="\/privacy"/);
-  assert.match(homeHtml, /DRAFT pending legal review/);
-  assert.doesNotMatch(homeHtml, /Duli Media LLC/);
+  assert.match(homeHtml, /id="tconsent"/, "a terms-consent bar exists");
+  assert.match(homeHtml, /noid_terms_v1/, "consent is remembered under a versioned key");
+  assert.match(homeHtml, /termsGate\(\)/, "money actions check terms before running");
+  assert.match(homeHtml, /Duli Media LLC/, "the operator is named in terms");
+  assert.match(homeHtml, /wash trading, fake volume or other market manipulation/, "terms forbid market manipulation");
+  assert.match(homeHtml, /seed phrase is generated, stored and used only on your device/, "terms describe the self-custodial wallet");
+  assert.doesNotMatch(homeHtml, /DRAFT pending legal review/, "legal pages are no longer drafts");
   assert.doesNotMatch(homeHtml, /hudring|hudRing/);
   assert.match(homeHtml, /color-mix\(in srgb, var\(--card\) 97%, transparent\)/);
   assert.match(homeHtml, /id="rcpthex"/);

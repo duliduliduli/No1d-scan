@@ -586,3 +586,21 @@ systemctl restart noid-scan && sleep 4 && systemctl is-active noid-scan
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/admin   # 401 = token loaded (404 = still unset)
 grep '^ADMIN_TOKEN=' /etc/noid-scan.env   # paste that into https://parano1d-scan.com/admin
 ```
+
+## 16. Legal pages and terms consent (2026-11-06)
+
+- `/terms` and `/privacy` are real now (no more "DRAFT"): they state the site is a self-custodial
+  explorer run by Duli Media LLC, the wallet seed never leaves the browser, trading/launching is
+  chain-side and final, the API is free as-is, promotions are disclosed paid placements, and the
+  operator cannot reverse on-chain payments. The privacy page lists exactly what the server stores
+  (key hash, linked public wallet address, token names/expiry/last-used, ledger entries, favorites)
+  and what stays browser-only (seed, passphrase, theme, unlinked favorites, pending orders).
+- Consent: a fixed bottom bar (`#tconsent`) appears on first visit with Terms/Privacy links and an
+  "I agree" button; choice persists in localStorage `noid_terms_v1`. Money actions — trade confirm,
+  launch confirm, promo/API contract start (`#npmake`), API-token create (`#tkgo`) — call
+  `termsGate()` first and refuse to run until accepted.
+- CSS: `.tconsent` / `.tcbtns` at the end of the stylesheet. Test guard in test.js home-html block
+  (tconsent, noid_terms_v1, termsGate, operator named, no DRAFT).
+- Gotcha: `$` in index.html is `document.getElementById` — it takes a RAW id, not a CSS selector.
+  `$('#tconsent')` looks up an element literally named `#tconsent` and returns null (found the hard
+  way during browser verification; all three call sites use `$('tconsent')` now).
