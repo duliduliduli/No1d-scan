@@ -906,6 +906,20 @@
   .tcbtns button { padding:8px 18px; border:1px solid var(--accent); border-radius:4px; background:var(--accent);
     color:var(--bg); font:700 13px var(--mono); letter-spacing:.06em; text-transform:uppercase; cursor:pointer }
   @media (min-width:641px) { .tconsent { flex-direction:row; align-items:center; padding:10px 20px } .tcbtns { margin-left:auto; padding-left:16px } }
+  /* Per-token chat: message rows and the composer line. */
+  .chatlist { display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto; margin:0 0 8px }
+  .chatmsg { padding:6px 8px; border:1px solid var(--line); border-radius:4px; background:var(--bg) }
+  .chatmsg .who { font:700 11px var(--mono); letter-spacing:.04em; color:var(--muted); text-transform:uppercase }
+  .chatmsg .who b { color:var(--accent) }
+  .chatmsg .when { float:right; font:10px var(--mono); color:var(--muted) }
+  .chatmsg .txt { margin-top:2px; font:13px/1.45 var(--ui); color:var(--fg); overflow-wrap:anywhere }
+  .chatrow { display:flex; gap:6px }
+  .chatrow input { flex:1; min-width:0; padding:8px 10px; font-size:16px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px }
+  .chatrow input:focus { border-color:var(--accent); outline:none }
+  .chatrow button { padding:8px 12px; border:1px solid var(--accent); border-radius:4px; background:var(--accent); color:var(--bg); font:700 12px var(--mono); letter-spacing:.1em; text-transform:uppercase }
+  .chatrow button:disabled { opacity:.5; cursor:default }
+  #whaletable table { width:100% }
+  #whaletable td.num, #whaletable th.num { text-align:right }
 </style>
 </head>
 <body>
@@ -937,7 +951,7 @@
       <a href="/market" data-link>Market analytics</a>
       <a href="/receipts" data-link>Receipts</a>
       <a href="/contracts" data-link>Contracts</a>
-      <a href="/account" data-link>API</a>
+      <a href="/api" data-link>API</a>
       <button id="theme"></button>
     </nav>
   </div>
@@ -3899,7 +3913,7 @@ const pages = {
       <div class="card"><h2>Details</h2>${details ? kv(details)
         : `<p class="muted">${source === 'index' ? 'The node has pruned this block&rsquo;s body. The facts above were captured by this explorer when it indexed the block.' : 'Body pruned and not captured here; the pointer above is permanent.'}</p>`}</div>`;
   },
-  'api-access': () => go('/account'),
+  'api-access': () => go('/api'),
   chat: () => go('/'), // the AI assistant is gone; old links land on the overview
 
   async market() {
@@ -4282,6 +4296,15 @@ const pages = {
           <div id="traderspane" hidden></div>
           <div id="holderspane" hidden></div>
         </div>
+      </div>
+      <div class="card" id="whalecard" hidden><h2>Whale moves <small class="muted">≥ <span id="whalemin">1</span>k NOID</small></h2>
+        <p class="muted" id="whalenone">No whale-sized trades in the indexed window.</p>
+        <div class="scroller" id="whaletable"></div>
+      </div>
+      <div class="card" id="chatcard"><h2>Chat <small class="muted">held by this explorer, not on chain</small></h2>
+        <div id="chatlist" class="chatlist"></div>
+        <form id="chatform" class="chatrow"><input id="chatbody" maxlength="500" placeholder="Message this token's room (max 500 chars)" aria-label="Chat message" autocomplete="off"><button type="submit">Send</button></form>
+        <p class="fine muted" id="chatnote"></p>
       </div><div class="sidecol">
         ${tradeOn ? '<div id="swappane"></div>' : tradeLocked(d.swap)}
         ${e && e.source !== 'promote' ? '' : noidTierCard('promo', { asset: t.id, assetName: t.ticker })}
@@ -4427,6 +4450,77 @@ const pages = {
         ${trades ? `<table><tbody>${trades}</tbody></table>` : '<p class="muted">No trades yet.</p>'}`;
     };
     paintBook().catch((e) => { if ($('bookbody')) $('bookbody').innerHTML = `<p class="msg err">${esc(e.message)}</p>`; });
+    // Whale moves: the biggest indexed trades for this token, refreshed with the tape.
+    const paintWhales = async () => {
+      const card = $('whalecard'); if (!card) return;
+      try {
+        const w = await api(`whales?token=${encodeURIComponent(id)}&limit=10`);
+        card.hidden = false;
+        if ($('whalemin')) $('whalemin').textContent = (w.min_noid / 1_000_000).toLocaleString();
+        const rows = (w.whales || []).map((r) => {
+          const noid = fmtNoid(r.noid_micronoid);
+          const side = r.side === 'buy' ? '<span class="up">BUY</span>' : '<span class="down">SELL</span>';
+          return `<tr><td class="num">${side}</td><td class="num">${esc(noid)} NOID</td><td class="num">${esc(n0(r.token_amount))}</td><td>${esc(r.trader ? short(r.trader) : '–')}</td><td class="num">${esc(ago(r.ts))}</td><td>${r.txid ? link('tx', r.txid, short(r.txid, 6)) : ''}</td></tr>`;
+        }).join('');
+        $('whaletable').innerHTML = rows ? `<table class="list"><tr><th class="num">Side</th><th class="num">Size</th><th class="num">Tokens</th><th>Maker</th><th class="num">When</th><th>Tx</th></tr>${rows}</table>` : '';
+        $('whalenone').hidden = !!rows;
+      } catch { card.hidden = true; }
+    };
+    // Per-token chat: render the room, send on submit, refresh every 6s while the page is visible.
+    const say = (who, txt, when) => `<div class="chatmsg"><span class="when">${esc(ago(when))}</span><span class="who">${who === 'anon' ? 'anon' : `<b>${esc(short(who))}</b>`}</span><div class="txt">${esc(txt)}</div></div>`;
+    const paintChat = async () => {
+      const list = $('chatlist'); if (!list) return;
+      try {
+        const r = await api(`chat?token=${encodeURIComponent(id)}&limit=60`);
+        list.innerHTML = (r.messages || []).map((m) => say(m.author, m.body, m.ts)).join('')
+          || '<p class="muted">No one has said anything yet. First word goes here.</p>';
+      } catch {}
+    };
+    const who = () => (window.No1dWallet?.identity && window.No1dWallet.identity()?.address) || '';
+    paintWhales().catch(() => {});
+    paintChat();
+    const f = $('chatform');
+    if (f) f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inp = $('chatbody'); const note = $('chatnote');
+      const text = (inp?.value || '').trim(); if (!text) return;
+      const btn = f.querySelector('button'); if (btn) btn.disabled = true;
+      try {
+        await api('chat', { token: id, body: text, author: who() });
+        note.textContent = 'Sent.';
+        setTimeout(() => { note.textContent = ''; }, 3000);
+        if (inp) inp.value = '';
+        paintChat();
+      } catch (err) {
+        note.textContent = err.message;
+        setTimeout(() => { note.textContent = ''; }, 6000);
+      } finally { if (btn) btn.disabled = false; }
+    });
+    const chatSeen = new Set();
+    const liveChat = () => {
+      if (window.__chatFeed) return;
+      try {
+        const feed = new EventSource('/api/live');
+        window.__chatFeed = feed;
+        feed.addEventListener('chat', (ev) => {
+          let m; try { m = JSON.parse(ev.data); } catch { return; }
+          if (m.token_id !== id) return;
+          const list = $('chatlist'); if (!list) return;
+          if (chatSeen.has(m.id)) return;
+          chatSeen.add(m.id);
+          const empty = !list.textContent.trim() || list.textContent.includes('No one has said anything');
+          if (empty) {
+            list.innerHTML = say(m.author, m.body, m.ts);
+          } else {
+            list.insertAdjacentHTML('beforeend', say(m.author, m.body, m.ts));
+          }
+          list.scrollTop = list.scrollHeight;
+        });
+      } catch {}
+    };
+    liveChat();
+    if (feedTab === 'traders') paintTraders().catch(() => {});
+    if (feedTab === 'holders') paintHolders().catch(() => {});
     clearInterval(tokenTimer);
     tokenTimer = setInterval(async () => {
       if (document.hidden || !$('tape')) return;
@@ -4434,6 +4528,8 @@ const pages = {
       if (feedTab === 'traders') paintTraders().catch(() => {});
       if (feedTab === 'holders') paintHolders().catch(() => {});
       paintBook().catch(() => {});
+      paintWhales().catch(() => {});
+      paintChat();
     }, 5_000);
   },
   async addressWallet(id) {
@@ -5079,6 +5175,8 @@ async promote() {
     wireLaunch(wid);
   },
 };
+// /api is the API page's own URL (menu link, shared docs links): it is the account page, which holds the free keys and the reference.
+pages.api = () => pages.account();
 
 function wireLaunch(wid) {
   const out = $('lmout');
@@ -5168,7 +5266,7 @@ async function render() {
   // A wallet in this browser is the identity, so the menu says so instead of offering a sign-up.
   try {
     const wid = WalletDex.identity();
-    const acctLink = document.querySelector('#menunav a[href="/account"]');
+    const acctLink = document.querySelector('#menunav a[href="/api"]');
     if (wid && acctLink) acctLink.innerHTML = `API · <span class="mono">${esc(wid.address.slice(0, 6))}…${esc(wid.address.slice(-4))}</span>`;
   } catch {}
   const screener = document.querySelector('[data-dock="screener"]');
@@ -5176,7 +5274,7 @@ async function render() {
   screener?.classList.toggle('on', type === 'explore');
   app.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel short"></div>';
   try {
-    const named = ['api-access', 'account', 'favorites', 'wallet', 'mempool', 'mining', 'market', 'explore', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'launch'];
+    const named = ['api', 'api-access', 'account', 'favorites', 'wallet', 'mempool', 'mining', 'market', 'explore', 'terms', 'privacy', 'economics', 'halving', 'orphans', 'receipts', 'contracts', 'admin', 'promote', 'launch'];
     document.body.classList.toggle('pair', type === 'token' || type === 'collection');
     if (type !== 'token' && type !== 'collection') delete document.body.dataset.pane;
     await (pages[type] && (id || named.includes(type)) ? pages[type](decodeURIComponent(id || '')) : pages.home());

@@ -312,7 +312,9 @@ test('indexer + api', async (t) => {
   assert.strictEqual((await get('me', { headers: K }))[1].tier, 'paid');
 
   // There is no AI assistant: the route and the module are gone, and the account page no longer sells it.
-  assert.strictEqual((await get('chat'))[0], 404, 'no chat route');
+  // Chat is now per-token: an empty room is a 200 with no messages; the old assistant shape is refused.
+  assert.strictEqual((await get('chat'))[1].messages.length, 0, 'chat route is live and returns an empty room without a token');
+  assert.strictEqual((await get('chat?token=' + 'ef'.repeat(32)))[1].messages.length, 0, 'a fresh room is empty');
   assert.notStrictEqual((await post('chat', { messages: [{ role: 'user', content: 'hi' }] }))[0], 200, 'the assistant cannot be called');
   const [, price0] = await get('pricing');
   assert.strictEqual(price0.chat_cost, undefined);
@@ -685,7 +687,7 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /Buy NOID on SafeTrade/, 'the NOID price card offers an easy buy button');
   // Launchpad in the menu, and the API link says just API.
   assert.match(homeHtml, /href="\/launch" data-link>Launchpad</, 'the menu has a Launchpad entry');
-  assert.match(homeHtml, /href="\/account" data-link>API<\/a>/, 'the account link says just API');
+  assert.match(homeHtml, /href="\/api" data-link>API<\/a>/, 'the account link says just API');
   assert.doesNotMatch(homeHtml, /API &amp; Credits/, 'no menu item is called API & Credits any more');
   assert.match(homeHtml, /'promote', 'launch'\]/, 'the launch page is a named route');
   assert.match(homeHtml, /async launch\(\)/, 'the launch page exists');
@@ -784,6 +786,9 @@ test('indexer + api', async (t) => {
   assert.match(homeHtml, /id="sortpop"/);
   assert.match(homeHtml, /id="listbar"/);
   assert.match(homeHtml, /href="\/privacy"/);
+  assert.match(homeHtml, /href="\/api" data-link>API</, "the menu API link points at /api");
+  assert.match(homeHtml, /pages\.api = \(\) => pages\.account\(\)/, "/api renders the API page");
+  assert.match(homeHtml, /'api', 'api-access', 'account',/, "/api is an accepted route name");
   assert.match(homeHtml, /id="tconsent"/, "a terms-consent bar exists");
   assert.match(homeHtml, /noid_terms_v1/, "consent is remembered under a versioned key");
   assert.match(homeHtml, /termsGate\(\)/, "money actions check terms before running");
@@ -1842,6 +1847,41 @@ test('indexer + api', async (t) => {
     assert.strictEqual(freshMe.credits, 0);
     assert.strictEqual(freshMe.tier, 'paid', 'API time alone makes an account paid');
     assert.ok(freshMe.rate_limit_per_min > 120);
+
+    // Per-token chat: a message posts and reads back, authored as anon unless a wallet address is sent.
+    const room = 'ab'.repeat(32);
+    const [c0, cj0] = await post('chat', { token: room, body: 'first word' });
+    assert.strictEqual(c0, 200);
+    assert.strictEqual(cj0.author, 'anon');
+    assert.ok(cj0.id > 0);
+    const [c1] = await post('chat', { token: room, body: '  ' });
+    assert.strictEqual(c1, 400, 'blank messages are refused');
+    const [c2] = await post('chat', { token: '', body: 'x' });
+    assert.strictEqual(c2, 400, 'a token is required');
+    const [, cj2] = await post('chat', { token: room, body: 'short of a lot of words', author: 'o1qqqqqqqqqqqqbxx' });
+    assert.strictEqual(cj2.author, 'anon', 'an invalid wallet address posts as anon');
+    const [, cj3] = await post('chat', { token: room, body: 'from the wallet', author: 'o1acdefghjkmnpqrstuvwxyz' });
+    assert.strictEqual(cj3.author, 'o1acdefghjkmnpqrstuvwxyz', 'a valid wallet address is kept');
+    const [, ch] = await get(`chat?token=${room}`);
+    assert.strictEqual(ch.messages.length, 3, 'posted messages come back in the room');
+    assert.strictEqual(ch.messages[0].body, 'from the wallet', 'newest first');
+    assert.strictEqual(ch.messages[2].body, 'first word');
+    const [, other] = await get(`chat?token=${'cd'.repeat(32)}`);
+    assert.strictEqual(other.messages.length, 0, 'rooms do not leak into each other');
+
+    // Whale moves: only trades at or above the size threshold, newest first, ticker joined when known.
+    db.prepare(`insert into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid, trader, price_micronoid)
+      values ('w1', ?, 1700000000000, 100, 'buy', '1000000', ?, 'o1whalewhale', '500000') on conflict(txid) do nothing`).run(room, String(1_500 * 1_000_000));
+    db.prepare(`insert into token_trades (txid, token_id, ts, height, side, token_amount, noid_micronoid, trader, price_micronoid)
+      values ('w2', ?, 1700000000000, 100, 'sell', '500000', ?, 'o1minerodd', '400000') on conflict(txid) do nothing`).run(room, String(1_250 * 1_000_000));
+    db.prepare(`insert into tokens (id, name, ticker, supply, reserve_micronoid) values (?, 'Room Token', 'ROOM', '1000000', '100000000') on conflict(id) do nothing`).run(room);
+    const [, wj] = await get(`whales?token=${room}&limit=10`);
+    assert.strictEqual(wj.count, 2, 'both whale trades are reported');
+    assert.strictEqual(wj.whales[0].ticker, 'ROOM', 'the token name joins to the trade');
+    assert.strictEqual(wj.whales[0].side, 'buy');
+    const [, wjAll] = await get('whales');
+    assert.ok(wjAll.count >= 2, 'the chain-wide whale feed includes the room trades');
+    assert.strictEqual(wj.min_noid, 1_000 * 1_000_000, 'the threshold is the default 1,000 NOID unless the env says otherwise');
   }
 });
 

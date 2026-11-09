@@ -27,6 +27,11 @@ db.exec(`
   pragma temp_store = memory;
   create table if not exists stats (height integer primary key, ts integer, data text not null);
   create index if not exists stats_ts on stats(ts);
+  -- Per-token chat: archived here, rate-limited, author is a public wallet address or anon. Not on chain.
+  create table if not exists token_chat (
+  id integer primary key autoincrement, token_id text not null,
+  author text not null default 'anon', body text not null, ts integer not null);
+  create index if not exists token_chat_tok on token_chat(token_id, id desc);
   -- Every header since genesis (headers are never pruned): powers all-time hashrate, block time and miner stats.
   -- Our own price samples every 3 minutes (CoinPaprika's free history is hourly for 24 h, daily beyond).
   create table if not exists price_ticks (ts integer primary key, usd real not null, volume_24h real, supply integer);
@@ -157,6 +162,8 @@ const q = {
   tickRange: db.prepare('select ts, usd from price_ticks where ts >= ? order by ts'),
   // ts is the integer primary key: a reverse index scan, no sort, no temp file (temp_store=memory).
   ticksBefore: db.prepare('select ts, usd, volume_24h, supply from price_ticks where ts < ? order by ts desc limit cast(? as integer)'),
+  chatAdd: db.prepare('insert into token_chat (token_id, author, body, ts) values (?, ?, ?, ?)'),
+  chatLet: db.prepare(`select * from token_chat where (token_id = ? or ? = '') and id < ? order by id desc limit cast(? as integer)`),
   // Index scan, no GROUP BY: a temp b-tree here is what returns "disk I/O error" when the cwd is read-only.
   // shortcut: bucketed in JS. Aggregate in SQL again if stats passes a few million rows.
   supplySeries: db.prepare(`select ts, cast(json_extract(data, '$.circulating_supply_micronoid') as real) supply
@@ -1122,6 +1129,7 @@ async function verifyPostedReceipt(body) {
   }
 }
 
+let whaleStmt = null; // lazy: token_trades is created by assets(db) after module load
 const routes = {
   async stats() {
     const [chain, state, node, peers, mining] = await Promise.all([
@@ -1466,6 +1474,34 @@ const routes = {
     if (id !== 'intent') throw Object.assign(new Error('not found'), { status: 404 });
     return intents.launch(params);
   },
+  // Per-token chat: recent messages for one token, newest first, `before` = a message id for older pages.
+  // Chat lives in this explorer's DB, not on chain. A token is required: rooms never mix.
+  async chat(_, params) {
+    const token = String(params.get('token') || '').slice(0, 80);
+    if (!token) return { token: '', messages: [] };
+    const before = Math.min(Number(params.get('before')) || 1e18, 1e18);
+    const limit = Math.min(Math.max(Number(params.get('limit')) || 50, 1), 200);
+    const rows = q.chatLet.all(token, token, before, limit);
+    return { token, messages: rows.map((r) => ({ id: Number(r.id), token_id: r.token_id, author: r.author, body: r.body, ts: r.ts })) };
+  },
+  // Whale moves: the biggest native trades the index has seen. One size threshold for every token.
+  // Prepared lazily: token_trades is created by assets(db) after module load, so a fresh DB cannot prepare this at load time.
+  async whales(_, params) {
+    const token = String(params.get('token') || '').slice(0, 80);
+    const limit = Math.min(Math.max(Number(params.get('limit')) || 25, 1), 100);
+    const minNoid = String(Number(process.env.WHALE_MIN_NOID || 1_000) * 1_000_000);
+    if (!whaleStmt) whaleStmt = db.prepare(`select t.token_id, t.txid, t.ts, t.height, t.side, t.trader, t.token_amount,
+      t.noid_micronoid, t.price_micronoid, tok.ticker, tok.name
+      from token_trades t left join tokens tok on tok.id = t.token_id
+      where cast(t.noid_micronoid as integer) >= cast(? as integer)
+      and (? = '' or t.token_id = ?) order by t.ts desc limit cast(? as integer)`);
+    const rows = whaleStmt.all(minNoid, token, token, limit);
+    return { min_noid: Number(minNoid), count: rows.length, whales: rows.map((r) => ({
+      token_id: r.token_id, ticker: r.ticker || null, name: r.name || null,
+      txid: r.txid, ts: r.ts, height: r.height, side: r.side, trader: r.trader,
+      token_amount: r.token_amount, noid_micronoid: r.noid_micronoid, price_micronoid: r.price_micronoid,
+    })) };
+  },
 
   async search(_, params) {
     const s = (params.get('q') || '').trim().toLowerCase();
@@ -1486,6 +1522,8 @@ const routes = {
 // shortcut: in-memory per-IP limiter, resets on restart and is per-process; move to the reverse proxy if you run several instances.
 const hits = new Map();
 setInterval(() => hits.clear(), 60_000).unref();
+const chatIps = new Map();
+setInterval(() => chatIps.clear(), 60_000).unref();
 
 // Short-lived response cache keyed by path + the query parameters routes actually read (so ?key= or junk parameters
 // don't defeat it). Responses are chain data, the same for everyone. Identical misses in flight share one node call.
@@ -1560,6 +1598,7 @@ async function handle(req, res) {
     // it must be revalidated rather than heuristically cached.
     if (!url.pathname.startsWith('/api/')) return req.method === 'GET' ? send(200, fs.readFileSync(INDEX), { 'cache-control': 'no-cache' }) : send(405, { error: 'GET only' });
     if (req.method === 'OPTIONS') return send(204, '', { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type, x-api-key, x-admin-token' });
+    const ADDR_RE = /^o1[02-9ac-hj-np-z]{6,120}$/;
 
     // Behind Cloudflare the real client IP is in cf-connecting-ip; lock the droplet firewall to Cloudflare IPs so it cannot be spoofed.
     const ip = process.env.TRUST_PROXY ? req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : req.socket.remoteAddress;
@@ -1626,6 +1665,22 @@ async function handle(req, res) {
       return out == null ? send(404, { error: 'unknown order' }) : send(200, out, { 'cache-control': 'no-store' });
     }
     if (name === 'swap-submit' && req.method === 'POST') return send(200, await intents.submit(parseJson(await readBody(req, 4_200_000))), { 'cache-control': 'no-store' });
+    // Post a chat message on a token page. Rate-limited per IP; author is a public wallet address or anon.
+    if (name === 'chat' && req.method === 'POST') {
+      const body = parseJson(await readBody(req, 8_000));
+      const text = String(body?.body || '').trim();
+      const token = String(body?.token || '').trim().slice(0, 80);
+      if (!text || text.length > 500) return send(400, { error: 'chat message must be 1 to 500 characters' });
+      if (!token) return send(400, { error: 'token is required' });
+      const lim = chatIps.get(ip) || 0;
+      if (lim >= 12) return send(429, { error: 'slow down: 12 chat messages per minute' }, { 'retry-after': 60 });
+      chatIps.set(ip, lim + 1);
+      const author = ADDR_RE.test(String(body?.author || '')) ? String(body.author) : 'anon';
+      const r = q.chatAdd.run(token, author, text, Date.now());
+      const msg = { id: Number(r.lastInsertRowid), token_id: token, author, body: text, ts: Date.now() };
+      push(`event: chat\ndata: ${JSON.stringify(msg)}\n\n`);
+      return send(200, msg, { 'cache-control': 'no-store' });
+    }
     if (name === 'profile' && req.method === 'POST') {
       if (!acct) return send(401, { error: 'missing or unknown API key' });
       return send(200, profiles.create(acct, parseJson(await readBody(req, 3_000_000))), { 'cache-control': 'no-store' });
