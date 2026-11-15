@@ -255,6 +255,7 @@
   #admin img.logo { width:48px; height:48px }
   .items { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(140px, 100%), 1fr)); gap:10px }
   .item { border:1px solid var(--line); border-radius:4px; padding:10px; background:var(--head) }
+  .item .nftimg { display:block; width:100%; aspect-ratio:1; object-fit:cover; border-radius:4px; margin-bottom:8px; background:var(--line) }
   .traits { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px }
   .traits span { font:10px var(--mono); border:1px solid var(--line); border-radius:99px; padding:2px 6px; color:var(--muted) }
   .menu > button { position:relative; z-index:42; padding:7px 11px; font-size:16px; line-height:1; touch-action:manipulation }
@@ -2412,14 +2413,14 @@ function nftTable(list, sort, dir) {
   const head = `<tr><th></th><th>Collection</th>${sortTh('floor', 'Floor', sort, dir)}${sortTh('volume', 'Volume', sort, dir)}${sortTh('items', 'Items', sort, dir)}${sortTh('owners', 'Owners', sort, dir)}${sortTh('age', 'Age', sort, dir)}</tr>`;
   const body = list.map((c) => `<tr>
       <td>${starBtn(c.id, c.name)}</td>
-      <td><a href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${esc(c.name)}</a> ${listBolt(c)}</td>
+      <td><a class="who" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>${logoHtml(c)}<span><b>${esc(c.name)}</b></span></a> ${listBolt(c)}</td>
       ${numCell(c.floor_micronoid)}${numCell(c.volume_micronoid)}
       <td class="num">${n0(c.items)}</td><td class="num">${n0(c.owners)}</td><td>${esc(c.created_ts ? ago(c.created_ts) : ageShort(c.age_s))}</td></tr>`).join('');
   return `<div class="wide scroller"><table class="list tok"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 function nftCards(list, page, pageSize) {
   return `<div class="narrow">${list.map((c, i) => `<a class="mcard" href="${demoHref('/collection/' + encodeURIComponent(c.id))}" data-link>
-      ${showRank ? `<span class="rank">${(page - 1) * pageSize + i + 1}</span>` : ''}<span class="logo">${esc(c.name.slice(0, 2))}</span>
+      ${showRank ? `<span class="rank">${(page - 1) * pageSize + i + 1}</span>` : ''}${logoHtml(c)}
       <span class="who"><span class="l1"><b>${esc(c.name.split(' ')[0])}</b> <span class="muted">${sprout()}${esc(ageShort(c.age_s))}</span> ${listBolt(c)} ${starBtn(c.id, c.name)}</span>
         <span class="l2">${esc(c.name)}</span></span>
       <span class="px"><b class="subpx">${esc(c.floor_usd == null ? '–' : subUsd(c.floor_usd))}</b>
@@ -4604,7 +4605,7 @@ const pages = {
     if (livePromo) promoIds.add(c.id);
     const chartOpts = () => ({ path: `collections/${encodeURIComponent(id)}/candles`, kind: nftKind, note: 'sales volume', label: nftKind === 'floor' ? 'Floor price and sales volume' : 'Sale price and sales volume', empty: 'Not enough sales for a chart yet.' });
     let nftKind = 'sale', tf = '15m';
-    const itemGrid = (d.items || []).map((n) => `<div class="item"><b>${esc(n.name || n.id)}</b>
+    const itemGrid = (d.items || []).map((n) => `<div class="item">${n.image ? `<img class="nftimg" alt="" loading="lazy" src="${esc(n.image)}">` : ''}<b>${esc(n.name || n.id)}</b>
       <div class="traits">${(n.traits || []).map((t) => `<span>${esc(t.trait)} ${esc(t.value)}</span>`).join('')}</div>
       <div class="muted mono" style="font-size:12px">${n.owner ? `<a href="${walletHref(n.owner, '', demo)}" data-link>${esc(short(n.owner))}</a>` : '–'}</div></div>`).join('');
     const paidBack = new URLSearchParams(location.search).get('enhance') === 'paid'

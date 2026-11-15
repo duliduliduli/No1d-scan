@@ -49,6 +49,33 @@
 // Until the node can do that, the quote only itemizes the fee. This process never signs.
 const ADDR = /^o1[02-9ac-hj-np-z]{6,120}$/;
 const ID = /^[A-Za-z0-9:_-]{1,80}$/;
+// Parano1d addresses are the 32 raw bytes in bech32m with HRP "o" (noid_poseidon2b/src/primitives.rs).
+const B32 = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+function bech32mPolymod(values) {
+  const G = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+  let chk = 1;
+  for (const v of values) {
+    const top = chk >>> 25;
+    chk = ((chk & 0x1ffffff) << 5) ^ v;
+    for (let i = 0; i < 5; i++) if ((top >>> i) & 1) chk ^= G[i];
+  }
+  return chk >>> 0;
+}
+function rawToAddress(hex) {
+  if (!/^[0-9a-f]{64}$/.test(hex || '')) return null;
+  const data = [];
+  let acc = 0, bits = 0;
+  for (let i = 0; i < 64; i += 2) {
+    acc = (acc << 8) | parseInt(hex.slice(i, i + 2), 16); bits += 8;
+    while (bits >= 5) { bits -= 5; data.push((acc >>> bits) & 31); }
+  }
+  if (bits) data.push((acc << (5 - bits)) & 31);
+  const mod = bech32mPolymod([3, 0, 15, ...data, 0, 0, 0, 0, 0, 0]) ^ 0x2bc830a3;
+  const chk = []; for (let i = 0; i < 6; i++) chk.push((mod >>> (5 * (5 - i))) & 31);
+  return 'o1' + [...data, ...chk].map((v) => B32[v]).join('');
+}
+// Images are either an https URL or this server's own proxied copy of a published asset image.
+const imageRef = (v) => (typeof v === 'string' && (/^https:\/\/\S{1,290}$/.test(v) || /^\/api\/asset-image\/[0-9a-f]{64}\.png$/.test(v)) ? v : null);
 const NOTICE = 'Tokens coming with v2.1';
 const WINS = { '5m': 300, '1h': 3600, '6h': 21600, '24h': 86400 };
 const TFS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800 };
@@ -123,7 +150,7 @@ module.exports = function assets(db, rpc, priceNow) {
       v integer not null, n integer not null, height integer,
       primary key (token_id, bucket));
   `);
-  for (const sql of ['alter table tokens add column launch text', 'alter table tokens add column links text', 'alter table nft_items add column traits text']) {
+  for (const sql of ['alter table tokens add column launch text', 'alter table tokens add column links text', 'alter table nft_items add column traits text', 'alter table nft_collections add column logo text']) {
     try { db.exec(sql); } catch (e) { if (!/duplicate column/i.test(e.message)) throw e; }
   }
 
@@ -169,7 +196,7 @@ module.exports = function assets(db, rpc, priceNow) {
     upTransfer: db.prepare('insert or ignore into token_transfers (txid, token_id, ts, height, from_addr, to_addr, amount) values (?, ?, ?, ?, ?, ?, ?)'),
     delHolders: db.prepare('delete from token_holders where token_id = ?'),
     upHolder: db.prepare('insert or replace into token_holders (token_id, address, balance) values (?, ?, ?)'),
-    upCol: db.prepare('insert or replace into nft_collections (id, name, creator, items, owners, floor_micronoid, volume_micronoid, created_ts, updated_height) values (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    upCol: db.prepare('insert or replace into nft_collections (id, name, creator, items, owners, floor_micronoid, volume_micronoid, created_ts, updated_height, logo) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     delItems: db.prepare('delete from nft_items where collection_id = ?'),
     upItem: db.prepare('insert or replace into nft_items (id, collection_id, name, owner, image, traits) values (?, ?, ?, ?, ?, ?)'),
     upSale: db.prepare('insert or ignore into nft_sales (txid, collection_id, item_id, ts, height, price_micronoid, seller, buyer) values (?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -1077,7 +1104,7 @@ module.exports = function assets(db, rpc, priceNow) {
       const vol = bi(c.volume_micronoid) || 0n;
       const created = c.created_ts == null ? null : Number(c.created_ts);
       return {
-        id: c.id, name: c.name, creator: c.creator || null, items: Number(c.items) || 0, owners: Number(c.owners) || 0,
+        id: c.id, name: c.name, logo: imageRef(c.logo), creator: c.creator || null, items: Number(c.items) || 0, owners: Number(c.owners) || 0,
         floor_micronoid: floor?.toString() ?? null, floor_usd: usdOf(floor, usd),
         volume_micronoid: vol.toString(), volume_usd: usdOf(vol, usd),
         created_ts: created, age_s: created ? Math.max(0, now - created) : null,
@@ -1124,14 +1151,14 @@ module.exports = function assets(db, rpc, priceNow) {
     return {
       demo, live: demo ? false : !!status.available,
       collection: {
-        id: src.id, name: src.name, creator: src.creator || null,
+        id: src.id, name: src.name, logo: imageRef(src.logo), creator: src.creator || null,
         items: Number(src.items) || items.length, owners: Number(src.owners) || 0,
         floor_micronoid: floor?.toString() ?? null, floor_usd: usdOf(floor, usd),
         volume_micronoid: vol.toString(), volume_usd: usdOf(vol, usd),
         sales_n: salesN,
         created_ts: src.created_ts ?? null, age_s: src.created_ts ? Math.max(0, now - Number(src.created_ts)) : null,
       },
-      items: items.map((n) => ({ id: n.id, name: n.name || null, owner: n.owner || null, image: typeof n.image === 'string' && /^https:\/\//.test(n.image) ? n.image : null, traits: traitsOf(n) })),
+      items: items.map((n) => ({ id: n.id, name: n.name || null, owner: n.owner || null, image: imageRef(n.image), traits: traitsOf(n) })),
     };
   }
 
@@ -1444,6 +1471,7 @@ module.exports = function assets(db, rpc, priceNow) {
       // was silently failing the whole snapshot, which is why labels and holders froze.
       const page = await rpc('getNativeCatalog', [kind, cursor || null, 64], 10_000);
       if (Array.isArray(page?.items)) items.push(...page.items);
+      if (Number.isInteger(page?.height)) items.height = page.height;
       if (!page?.next) break;
       cursor = page.next;
     }
@@ -1470,6 +1498,29 @@ module.exports = function assets(db, rpc, priceNow) {
       const out = bi(pick(pv || {}, 'quoted_output', 'out', 'token_out'));
       return out && out > 0n ? (10n ** 12n / out).toString() : null;
     } catch { return null; }
+  }
+
+  // Native openings: "NOIDAS21", u16 version, u16 kind (both LE), then 16-byte LE fields. A 32-byte id or
+  // address sits verbatim across two fields; a packed pair is two LE u64s (noid_tx/src/native_assets.rs).
+  const u64le = (hex, at) => { let v = 0n; for (let i = 7; i >= 0; i--) v = v * 256n + BigInt(parseInt(hex.slice(at + 2 * i, at + 2 * i + 2), 16)); return v; };
+  const opening = (hex, kind, fields) => {
+    const s = String(hex || '').toLowerCase();
+    if (!/^[0-9a-f]+$/.test(s) || s.length !== 24 + 32 * fields || s.slice(0, 16) !== PAGE_MAGIC) return null;
+    return parseInt(s.slice(22, 24) + s.slice(20, 22), 16) === kind ? s : null;
+  };
+  // Kind 4 NftCollection: collection id, creator, (maximum_items, issued_items), metadata digest.
+  function decodeCollection(item) {
+    const s = opening(item?.primary?.opening_hex, 4, 8);
+    if (!s) return null;
+    return { id: s.slice(24, 88), creator: rawToAddress(s.slice(88, 152)), maximum_items: u64le(s, 152), issued_items: u64le(s, 168), metadata: s.slice(184, 248) };
+  }
+  // A kind-65 listing depends on its kind-64 definition: collection, seller, item metadata,
+  // (serial, source creation id), (ask µNOID, expiry height).
+  function decodeListing(item) {
+    const s = opening(item?.primary?.dependency_hex, 64, 8);
+    if (!s || !opening(item?.primary?.opening_hex, 65, 8)) return null;
+    return { collection_id: s.slice(24, 88), seller: rawToAddress(s.slice(88, 152)), metadata: s.slice(152, 216),
+      serial: u64le(s, 216).toString(), ask: u64le(s, 248), expiry_height: Number(u64le(s, 264)) };
   }
 
   async function nativeSnapshot() {
@@ -1521,19 +1572,42 @@ module.exports = function assets(db, rpc, priceNow) {
       if (!ID.test(String(x.id || '')) || tokens.some((t) => t.id === x.id)) continue;
       tokens.push({ ...x, launch: x.launch || 'launchpad' });
     }
+    // v2.1 collections and listings are raw openings, decoded here (see decodeCollection / decodeListing).
+    // Names and images come from the same verified manifests metadata.js fetches for tokens.
+    let metaRows = new Map();
+    try { metaRows = new Map(db.prepare('select hash, name, image_hash from asset_meta where verified = 1').all().map((r) => [r.hash, r])); } catch {}
+    const imgOf = (r) => (r?.image_hash ? `/api/asset-image/${r.image_hash}.png` : null);
+    const tip = listings.height ?? cols.height ?? null;
     const byCol = new Map();
     for (const L of listings) {
-      const cid = String(pick(L, 'collection_id') ?? '');
-      if (!cid) continue;
-      if (!byCol.has(cid)) byCol.set(cid, []);
-      byCol.get(cid).push({ item_id: String(pick(L, 'serial', 'item_id') ?? ''), price_micronoid: pick(L, 'ask_micronoid', 'price_micronoid'), seller: pick(L, 'seller', 'owner') });
+      const d = decodeListing(L);
+      if (!d || (tip != null && d.expiry_height && d.expiry_height <= tip)) continue;
+      if (!byCol.has(d.collection_id)) byCol.set(d.collection_id, []);
+      byCol.get(d.collection_id).push(d);
     }
-    const collections = cols.map((c) => {
-      const id = String(pick(c, 'collection_id', 'id') ?? '');
-      const meta = c.metadata && typeof c.metadata === 'object' ? c.metadata : {};
-      return { id, name: pick(meta, 'name') ?? pick(c, 'name') ?? `Collection ${id.slice(0, 8)}`, creator: pick(c, 'creator'), items: pick(c, 'minted', 'items', 'last_serial') ?? 0,
-        listings: byCol.get(id) || [] };
-    }).filter((c) => c.id);
+    const collections = [];
+    for (const c of cols) {
+      const d = decodeCollection(c);
+      if (!d) continue;
+      const m = metaRows.get(d.metadata);
+      const listed = byCol.get(d.id) || [];
+      let floor = null;
+      for (const L of listed) if (floor == null || L.ask < floor) floor = L.ask;
+      const nfts = listed.map((L) => {
+        const im = metaRows.get(L.metadata);
+        return { id: `${d.id.slice(0, 8)}:${L.serial}`, name: im?.name || `${m?.name || 'NFT'} #${L.serial}`, owner: L.seller, image: imgOf(im) || imgOf(m) };
+      });
+      // A single-item collection is a standalone NFT: show it as its one item even when it is not listed.
+      if (!nfts.length && d.maximum_items === 1n && d.issued_items >= 1n) {
+        nfts.push({ id: `${d.id.slice(0, 8)}:1`, name: m?.name || 'NFT #1', owner: null, image: imgOf(m) });
+      }
+      collections.push({
+        id: d.id, name: m?.name || `Collection ${d.id.slice(0, 8)}`, creator: d.creator, logo: imgOf(m),
+        items: Number(d.issued_items), owners: 0, floor_micronoid: floor == null ? null : floor.toString(),
+        volume_micronoid: '0', updated_height: tip, nfts,
+        listings: listed.map((L) => ({ item_id: `${d.id.slice(0, 8)}:${L.serial}`, price_micronoid: L.ask.toString(), seller: L.seller })),
+      });
+    }
     return { tokens, pools, trades: [], collections };
   }
 
@@ -1642,10 +1716,11 @@ module.exports = function assets(db, rpc, priceNow) {
       for (const c of cols) {
         if (!ID.test(String(c.id || '')) || !c.name) continue;
         q.upCol.run(String(c.id), String(c.name).slice(0, 80), c.creator ? String(c.creator) : null, Number(c.items) || 0, Number(c.owners) || 0,
-          strInt(c.floor_micronoid), strInt(c.volume_micronoid) || '0', Number.isInteger(c.created_ts) ? c.created_ts : null, Number.isInteger(c.updated_height) ? c.updated_height : null);
+          strInt(c.floor_micronoid), strInt(c.volume_micronoid) || '0', Number.isInteger(c.created_ts) ? c.created_ts : null, Number.isInteger(c.updated_height) ? c.updated_height : null,
+          imageRef(c.logo));
         if (Array.isArray(c.nfts)) {
           q.delItems.run(String(c.id));
-          for (const n of c.nfts.slice(0, 200)) if (ID.test(String(n.id || ''))) q.upItem.run(String(n.id), String(c.id), n.name ? String(n.name).slice(0, 80) : null, ADDR.test(n.owner || '') ? n.owner : null, typeof n.image === 'string' ? n.image.slice(0, 300) : null, traitsJson(n));
+          for (const n of c.nfts.slice(0, 200)) if (ID.test(String(n.id || ''))) q.upItem.run(String(n.id), String(c.id), n.name ? String(n.name).slice(0, 80) : null, ADDR.test(n.owner || '') ? n.owner : null, imageRef(n.image), traitsJson(n));
         }
         if (Array.isArray(c.sales)) {
           for (const s of c.sales) {

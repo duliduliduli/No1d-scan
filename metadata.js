@@ -27,7 +27,7 @@ const DEFAULT_ORIGIN = 'https://tradedata.parano1d.org/';
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const MAX_MANIFEST = 16 * 1024;
-const MAX_IMAGE = 1536 * 1024;
+const MAX_IMAGE = 4 * 1024 * 1024; // the wallet's own cap; NFT art is up to 2048 px
 const FETCH_MS = 8000;
 
 module.exports = function metadata(db, rpc, opts = {}) {
@@ -156,7 +156,7 @@ module.exports = function metadata(db, rpc, opts = {}) {
       const okCanon = !okRaw && man && man.schema !== undefined
         && blake3Hex(Buffer.from(canonical(man), 'utf8'), DOMAIN) === hash;
       if (!okRaw && !okCanon) throw new Error('hash mismatch');
-      if (String(man.kind) !== 'token' || !man.name) throw new Error('not a token manifest');
+      if (!['token', 'collection', 'nft'].includes(String(man.kind)) || !man.name) throw new Error('not an asset manifest');
       const cut = (s, n) => (typeof s === 'string' && s ? s.slice(0, n) : null);
       row = {
         hash, name: cut(man.name, 80), symbol: cut(man.symbol, 16),
@@ -232,6 +232,25 @@ module.exports = function metadata(db, rpc, opts = {}) {
         mirror(id, { name: man.name, ticker, logo });
         if (man.image_hash) image(man.image_hash).catch(() => {});
         out.labelled++;
+      }
+      // Collections (kind 4: digest at bytes 92..124) and listed items (the kind-64 definition: digest at
+      // bytes 76..108). Only the manifest and image are cached; assets.js reads the names from asset_meta.
+      const digests = new Set();
+      const at = (hex, kind, from) => {
+        const h = String(hex || '').toLowerCase();
+        return h.length === 280 && h.slice(0, 16) === '4e4f494441533231' && h.slice(20, 24) === kind ? h.slice(from, from + 64) : null;
+      };
+      for (const c of await catalog('collections', 8).catch(() => [])) digests.add(at(c?.primary?.opening_hex, '0400', 184));
+      for (const L of await catalog('nft_listings', 8).catch(() => [])) digests.add(at(L?.primary?.dependency_hex, '4000', 152));
+      out.collections = 0;
+      for (const d of digests) {
+        if (!d || !HEX64.test(d) || /^0+$/.test(d)) continue;
+        const cached = q.meta.get(d);
+        if (!cached && fetches >= budget) continue;
+        if (!cached) fetches++;
+        const man = await manifest(d);
+        if (man?.image_hash) image(man.image_hash).catch(() => {});
+        if (man) out.collections++;
       }
       out.fetched = fetches;
       status.tokens = seen.size;

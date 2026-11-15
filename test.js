@@ -1135,6 +1135,39 @@ test('indexer + api', async (t) => {
   assert.strictEqual(k2row.supply, '500000', 'supply is derived from the kind-3 backing relation');
   assert.strictEqual(k2row.reserve_micronoid, '250000', 'the market primary amount is the NOID reserve');
   db.prepare('delete from tokens').run();
+  // Native NFTs: v2.1 collections and listings are raw openings with no decoded fields.
+  {
+    const le = (n, bytes = 8) => { let h = ''; let v = BigInt(n); for (let i = 0; i < bytes; i++) { h += (v & 255n).toString(16).padStart(2, '0'); v >>= 8n; } return h; };
+    const open = (kind, fields) => '4e4f494441533231' + '0100' + le(kind, 2) + fields;
+    const colId = 'c0'.repeat(32), creatorRaw = 'e1'.repeat(32), sellerRaw = '5e'.repeat(32), colMeta = 'aa'.repeat(32), itemMeta = 'bb'.repeat(32);
+    const colOpen = open(4, colId + creatorRaw + le(1000) + le(3) + colMeta + '00'.repeat(16));
+    const def = (serial, ask, expiry) => open(64, colId + sellerRaw + itemMeta + le(serial) + le(7) + le(ask) + le(expiry));
+    const listOpen = open(65, '00'.repeat(128));
+    const prevCatalog = node.getNativeCatalog;
+    node.getNativeCatalog = ([kind]) => ({ kind, height: 100, next: null, items:
+      kind === 'collections' ? [{ key: `0004${colId}`, primary: { kind: 4, opening_hex: colOpen }, related: [] }]
+      : kind === 'nft_listings' ? [
+        { key: `8001${colId}${'0'.repeat(15)}2`, primary: { kind: 65, opening_hex: listOpen, dependency_hex: def(2, 4000000, 200) }, related: [] },
+        { key: `8001${colId}${'0'.repeat(15)}3`, primary: { kind: 65, opening_hex: listOpen, dependency_hex: def(3, 9000000, 50) }, related: [] }]
+      : [] });
+    db.prepare("insert or replace into asset_meta (hash, name, image_hash, verified, checked) values (?, 'Paranoid Punks', ?, 1, 0)").run(colMeta, 'dd'.repeat(32));
+    db.prepare("insert or replace into asset_meta (hash, name, image_hash, verified, checked) values (?, 'Punk Two', ?, 1, 0)").run(itemMeta, 'ee'.repeat(32));
+    await tick();
+    const [, cl] = await get('collections');
+    const c = cl.collections.find((x) => x.id === colId);
+    assert.ok(c, 'a native collection is listed');
+    assert.strictEqual(c.name, 'Paranoid Punks', 'the collection takes its verified manifest name');
+    assert.strictEqual(c.items, 3, 'items is the issued count from the opening');
+    assert.strictEqual(c.floor_micronoid, '4000000', 'the floor ignores the expired listing');
+    assert.strictEqual(c.logo, `/api/asset-image/${'dd'.repeat(32)}.png`);
+    assert.ok(/^o1[02-9ac-hj-np-z]{58}$/.test(c.creator), 'the creator is a bech32m address');
+    const [, cd] = await get(`collections/${colId}`);
+    assert.strictEqual(cd.items.length, 1);
+    assert.strictEqual(cd.items[0].name, 'Punk Two');
+    assert.strictEqual(cd.items[0].image, `/api/asset-image/${'ee'.repeat(32)}.png`);
+    db.prepare('delete from nft_collections').run(); db.prepare('delete from nft_items').run(); db.prepare('delete from nft_listings').run(); db.prepare('delete from nft_candles').run();
+    node.getNativeCatalog = prevCatalog;
+  }
   // The curve quote is the only live price a v2.1 node offers: a 1 NOID buy preview, price = 1e12 / out.
   node.walletPreviewNative = (arg) => { const r = Array.isArray(arg) ? arg[0] : arg;
     return { asset_id: r.asset_id, buy: r.buy, gross_input: r.gross_input, plan_id: 'p1', quoted_output: '200000000' }; };
